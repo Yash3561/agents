@@ -1,24 +1,46 @@
-import { createAzure } from "@ai-sdk/azure";
+/**
+ * LLM provider — Azure AI Foundry via OpenAI-compatible endpoint.
+ *
+ * We use the /openai/v1 surface on services.ai.azure.com rather than the
+ * Foundry Agent Service thread API. Reason: Foundry Agents lock the system
+ * prompt in the portal and strip runtime overrides — incompatible with our
+ * per-merchant dynamic prompts. The /openai/v1 endpoint is fully stateless,
+ * accepts dynamic system prompts per call, and works with @ai-sdk/openai-compatible.
+ *
+ * Migration to Azure OpenAI (openai.azure.com) if needed later:
+ * swap createOpenAICompatible for createAzure — zero changes in agents/routes.
+ */
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateObject, generateText, streamText, stepCountIs } from "ai";
-import type { InferSchema } from "ai";
 import { z } from "zod";
 
-export const azure = createAzure({
-  resourceName: process.env.AZURE_OPENAI_RESOURCE_NAME ?? "",
+// ---------------------------------------------------------------------------
+// Provider — Azure AI Foundry /openai/v1 endpoint
+// ---------------------------------------------------------------------------
+
+const foundry = createOpenAICompatible({
+  name: "azure-foundry",
+  baseURL:
+    process.env.AZURE_FOUNDRY_BASE_URL ??
+    `https://${process.env.AZURE_OPENAI_RESOURCE_NAME ?? "neonping-resource"}.services.ai.azure.com/openai/v1`,
   apiKey: process.env.AZURE_OPENAI_API_KEY ?? "",
-  apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? "2025-01-01-preview",
 });
 
+// All 5 roles use gpt-4o-mini — differentiated by system prompt, not model.
+// Upgrade orchestrator to gpt-4o when routing quality issues are observed.
+const ORCHESTRATOR_MODEL = process.env.AZURE_ORCHESTRATOR_MODEL ?? "gpt-4o-mini";
+const SPECIALIST_MODEL   = process.env.AZURE_SPECIALIST_MODEL   ?? "gpt-4o-mini";
+
 export const deployments = {
-  orchestrator: () => azure(process.env.AZURE_DEPLOYMENT_ORCHESTRATOR ?? "neonping-orchestrator"),
-  shopping:     () => azure(process.env.AZURE_DEPLOYMENT_SHOPPING     ?? "neonping-shopping"),
-  support:      () => azure(process.env.AZURE_DEPLOYMENT_SUPPORT      ?? "neonping-support"),
-  personalize:  () => azure(process.env.AZURE_DEPLOYMENT_PERSONALIZE  ?? "neonping-personalize"),
-  summary:      () => azure(process.env.AZURE_DEPLOYMENT_SUMMARY      ?? "neonping-summary"),
+  orchestrator: () => foundry(ORCHESTRATOR_MODEL),
+  shopping:     () => foundry(SPECIALIST_MODEL),
+  support:      () => foundry(SPECIALIST_MODEL),
+  personalize:  () => foundry(SPECIALIST_MODEL),
+  summary:      () => foundry(SPECIALIST_MODEL),
 } as const;
 
 // ---------------------------------------------------------------------------
-// Structured output — Orchestrator uses this with a Zod schema
+// Structured output — Orchestrator routing decision
 // ---------------------------------------------------------------------------
 
 export async function generateStructured<SCHEMA extends z.ZodTypeAny>(opts: {
@@ -39,7 +61,7 @@ export async function generateStructured<SCHEMA extends z.ZodTypeAny>(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// Tool-calling stream — Shopping / Support use this
+// Tool-calling stream — Shopping / Support agents
 // ---------------------------------------------------------------------------
 
 export function runAgentStream(opts: {
