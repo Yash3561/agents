@@ -1,22 +1,17 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Merchant {
   id                  String         @id @default(cuid())
   shopDomain          String         @unique
   plan                String         @default("free")
+  onboardedAt         DateTime?
   conversationCount   Int            @default(0)
   conversationResetAt DateTime       @default(now())
   widgetColor         String         @default("#1a1a1a")
@@ -33,37 +28,47 @@ model Merchant {
 }
 
 model Conversation {
-  id             String   @id @default(cuid())
-  shopDomain     String
-  visitorSession String
-  channel        String   @default("shopify_widget")
-  messages       String   // JSON string (SQLite has no Json type)
-  cartId         String?
-  checkoutId     String?
-  cartValue      Float?
-  converted      Boolean  @default(false)
-  discountUsed   String?
-  agentTrace     String?  // JSON string
-  createdAt      DateTime @default(now())
-  merchant       Merchant @relation(fields: [shopDomain], references: [shopDomain])
+  id                String   @id @default(cuid())
+  shopDomain        String
+  sessionId         String
+  customerId        String?
+  channel           String   @default("shopify_widget")
+  messages          Json     @default("[]")
+  messageCount      Int      @default(0)
+  cartId            String?
+  checkoutId        String?
+  cartValue         Float?
+  resolved          Boolean  @default(false)
+  escalated         Boolean  @default(false)
+  discountCode      String?
+  orderId           String?           // set when checkout completed inside chat
+  orderRevenueCents Int?              // written by orders/paid webhook
+  agentTrace        Json?
+  startedAt         DateTime @default(now())
+  lastMessageAt     DateTime @updatedAt
+  merchant          Merchant @relation(fields: [shopDomain], references: [shopDomain])
+
+  @@index([shopDomain])
+  @@index([sessionId])
+  @@index([orderId])
 }
 
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
