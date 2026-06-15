@@ -13,6 +13,41 @@ datasource db {
   url      = "file:dev.sqlite"
 }
 
+model Merchant {
+  id                  String         @id @default(cuid())
+  shopDomain          String         @unique
+  plan                String         @default("free")
+  conversationCount   Int            @default(0)
+  conversationResetAt DateTime       @default(now())
+  widgetColor         String         @default("#1a1a1a")
+  widgetPosition      String         @default("bottom-right")
+  widgetGreeting      String         @default("Hi! How can I help you today?")
+  brandVoice          String         @default("friendly and helpful")
+  maxDiscountPct      Int            @default(15)
+  vipCartThreshold    Int            @default(10000)
+  supportEmail        String?
+  whatsappNumber      String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  conversations       Conversation[]
+}
+
+model Conversation {
+  id             String   @id @default(cuid())
+  shopDomain     String
+  visitorSession String
+  channel        String   @default("shopify_widget")
+  messages       String   // JSON string (SQLite has no Json type)
+  cartId         String?
+  checkoutId     String?
+  cartValue      Float?
+  converted      Boolean  @default(false)
+  discountUsed   String?
+  agentTrace     String?  // JSON string
+  createdAt      DateTime @default(now())
+  merchant       Merchant @relation(fields: [shopDomain], references: [shopDomain])
+}
+
 model Session {
   id            String    @id
   shop          String
