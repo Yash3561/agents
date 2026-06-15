@@ -22,10 +22,26 @@ export interface McpAuth {
 export interface McpClientOptions {
   endpoint: string;
   auth?: McpAuth;
+  /**
+   * URL of our hosted UCP agent profile.
+   * When set, auto-injected as meta["ucp-agent"].profile into every tool's
+   * arguments. Required for Cart MCP, Checkout MCP, and Order MCP — Shopify
+   * fetches this URL to negotiate capabilities before accepting the call.
+   */
+  agentProfileUrl?: string;
   /** Per-call timeout in ms. Default: 10 000. */
   timeoutMs?: number;
   /** Retry once on transient HTTP 5xx or network error. Default: true. */
   retry?: boolean;
+}
+
+/**
+ * Shape of a successful MCP tool result.
+ * Real data lives in structuredContent; content[] is a text fallback.
+ */
+export interface McpToolResult<T> {
+  structuredContent: T;
+  content?: Array<{ type: string; text: string }>;
 }
 
 // Internal JSON-RPC 2.0 wire types
@@ -42,7 +58,7 @@ interface JsonRpcRequest {
 interface JsonRpcSuccess<T> {
   jsonrpc: "2.0";
   id: number;
-  result: T;
+  result: McpToolResult<T>;
 }
 
 interface JsonRpcErrorPayload {
@@ -70,8 +86,12 @@ export class McpError extends Error {
 
   /** True for errors the caller should NOT retry (bad input, auth denied). */
   get isTerminal(): boolean {
-    // JSON-RPC application errors (-32600 to -32700) and 4xx HTTP are terminal.
-    return this.code >= 400 && this.code < 500;
+    // 4xx except 429 (rate-limit) are terminal — bad request or auth failure.
+    return this.code >= 400 && this.code < 500 && this.code !== 429;
+  }
+
+  get isRateLimited(): boolean {
+    return this.code === 429;
   }
 }
 
@@ -89,25 +109,49 @@ const nextId = (): number => (++_nextId & 0x7fffffff);
 /**
  * Call a named tool on a Shopify MCP server.
  *
- * @param options  Endpoint, auth, and retry/timeout settings.
+ * @param options  Endpoint, auth, agentProfileUrl, and retry/timeout settings.
  * @param toolName The MCP tool name, e.g. "search_catalog".
- * @param args     Tool arguments object (serialised into params.arguments).
- * @returns        The `result` field from the JSON-RPC 2.0 success response.
- * @throws         McpError on JSON-RPC application error, HTTP error, or timeout.
+ * @param args     Tool arguments. agentProfileUrl is auto-merged as meta["ucp-agent"].profile.
+ * @returns        McpToolResult<T> — access real data via result.structuredContent.
+ * @throws         McpError on JSON-RPC error, HTTP error, or timeout.
  */
 export async function callMcpTool<T = unknown>(
   options: McpClientOptions,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<T> {
-  const { endpoint, auth, timeoutMs = 10_000, retry = true } = options;
+): Promise<McpToolResult<T>> {
+  const {
+    endpoint,
+    auth,
+    agentProfileUrl,
+    timeoutMs = 10_000,
+    retry = true,
+  } = options;
 
-  const attempt = async (): Promise<T> => {
+  // Merge UCP agent profile into meta — required by Cart, Checkout, Order MCP
+  // for capability negotiation. Caller args take precedence if meta is already set.
+  const mergedArgs: Record<string, unknown> = agentProfileUrl
+    ? {
+        meta: { "ucp-agent": { profile: agentProfileUrl } },
+        ...args,
+        // If caller already passed a meta, deep-merge to preserve their keys
+        ...(args.meta
+          ? {
+              meta: {
+                "ucp-agent": { profile: agentProfileUrl },
+                ...(args.meta as Record<string, unknown>),
+              },
+            }
+          : {}),
+      }
+    : args;
+
+  const attempt = async (): Promise<McpToolResult<T>> => {
     const body: JsonRpcRequest = {
       jsonrpc: "2.0",
       method: "tools/call",
       id: nextId(),
-      params: { name: toolName, arguments: args },
+      params: { name: toolName, arguments: mergedArgs },
     };
 
     const headers: Record<string, string> = {
@@ -117,7 +161,7 @@ export async function callMcpTool<T = unknown>(
     if (auth?.type === "bearer" && auth.token) {
       headers["Authorization"] = `Bearer ${auth.token}`;
     } else if (auth?.type === "admin" && auth.token) {
-      // Admin GraphQL proxy: merchant's Shopify access token as bearer.
+      // Admin GraphQL proxy: merchant's Shopify access token.
       // X-Auth-Type lets our proxy distinguish this from UCP JWT calls.
       headers["Authorization"] = `Bearer ${auth.token}`;
       headers["X-Auth-Type"] = "shopify-admin";
@@ -150,6 +194,18 @@ export async function callMcpTool<T = unknown>(
       clearTimeout(timer);
     }
 
+    // Surface 429 with Retry-After so the retry logic below can respect it
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const waitMs = retryAfter ? parseFloat(retryAfter) * 1_000 : 1_000;
+      const err = new McpError(
+        `MCP rate limit hit for tool "${toolName}" — retry after ${retryAfter ?? "1"}s`,
+        429,
+        { retryAfterMs: waitMs },
+      );
+      throw err;
+    }
+
     if (!response.ok) {
       throw new McpError(
         `MCP server returned HTTP ${response.status} for tool "${toolName}"`,
@@ -174,23 +230,39 @@ export async function callMcpTool<T = unknown>(
     return json.result;
   };
 
-  // Single retry on transient failures (network blip, 5xx).
-  // Terminal errors (auth denied, bad input) propagate immediately.
   if (!retry) return attempt();
 
   try {
     return await attempt();
   } catch (err) {
-    if (err instanceof McpError && err.isTerminal) throw err;
-    await sleep(300);
+    if (!(err instanceof McpError)) throw err;
+
+    // Terminal (4xx except 429) — don't retry, surface immediately
+    if (err.isTerminal) throw err;
+
+    // Rate-limited — wait exactly what the server asked (+ ±10% jitter)
+    if (err.isRateLimited) {
+      const base = (err.data as { retryAfterMs?: number } | undefined)
+        ?.retryAfterMs ?? 1_000;
+      await sleep(withJitter(base));
+      return attempt();
+    }
+
+    // Transient 5xx / network — short exponential backoff before one retry
+    await sleep(withJitter(500));
     return attempt();
   }
 }
 
 // ---------------------------------------------------------------------------
-// Utility
+// Utilities
 // ---------------------------------------------------------------------------
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Adds ±10% random jitter to a delay to avoid thundering-herd retries. */
+function withJitter(ms: number): number {
+  return ms * (0.9 + Math.random() * 0.2);
 }
