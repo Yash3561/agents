@@ -1,0 +1,10 @@
+{
+  "ucp": "2026-04-08",
+  "name": "NeonPing Agent",
+  "capabilities": [
+    "dev.ucp.shopping.catalog",
+    "dev.ucp.shopping.cart",
+    "dev.ucp.shopping.checkout",
+    "dev.ucp.shopping.order"
+  ]
+}
