@@ -1,0 +1,10 @@
+{
+  "t": {
+    "chat_button_label": "Chat with us",
+    "close_button_label": "Close chat",
+    "input_placeholder": "Ask me anything…",
+    "send_button_label": "Send",
+    "escalate_message": "I'll connect you with a human agent shortly.",
+    "error_message": "Something went wrong. Please try again."
+  }
+}

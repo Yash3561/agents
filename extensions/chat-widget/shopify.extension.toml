@@ -1,0 +1,9 @@
+api_version = "2026-07"
+
+[[extensions]]
+type = "theme"
+name = "NeonPing Chat Widget"
+handle = "neonping-chat-widget"
+
+  [extensions.capabilities]
+  network_access = true

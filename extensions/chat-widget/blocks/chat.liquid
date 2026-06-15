@@ -1,0 +1,88 @@
+{% comment %}
+  NeonPing Chat Widget — Theme App Extension Block
+  Add this block to any section (e.g. footer) in the theme editor.
+  Settings are exposed as theme editor controls below.
+{% endcomment %}
+
+{%- liquid
+  assign np_color    = block.settings.widget_color    | default: '#1a1a1a'
+  assign np_position = block.settings.widget_position | default: 'bottom-right'
+  assign np_greeting = block.settings.widget_greeting | default: 'Hi! How can I help you today?'
+  assign np_api_url  = block.settings.api_url         | default: ''
+
+  comment
+    Shopify exposes the logged-in customer via the `customer` object.
+    customer_access_token is available when the Storefront API is in use;
+    for classic themes we pass an empty string — the API handles the absence
+    gracefully (support/personalization work, checkout stays anonymous).
+  endcomment
+
+  assign np_customer_id    = ''
+  assign np_customer_token = ''
+  if customer
+    assign np_customer_id    = customer.id    | prepend: 'gid://shopify/Customer/'
+    assign np_customer_token = customer.access_token | default: ''
+  endif
+
+  comment
+    Cart total in cents — used by the Personalization Agent to trigger
+    the high-cart-value free-shipping discount.
+  endcomment
+  assign np_cart_cents = cart.total_price
+-%}
+
+<script>
+  window.__neonping_cfg = {
+    shop:                 {{ shop.permanent_domain | json }},
+    store_name:           {{ shop.name | json }},
+    api_url:              {{ np_api_url | json }},
+    color:                {{ np_color | json }},
+    position:             {{ np_position | json }},
+    greeting:             {{ np_greeting | json }},
+    placeholder:          {{ 't.input_placeholder' | t | json }},
+    error_message:        {{ 't.error_message' | t | json }},
+    customer_id:          {{ np_customer_id | json }},
+    customer_access_token: {{ np_customer_token | json }},
+    cart_total_cents:     {{ np_cart_cents | json }}
+  };
+</script>
+
+<script src="{{ 'neonping-widget.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "NeonPing Chat",
+  "target": "body",
+  "javascript": "neonping-widget.js",
+  "settings": [
+    {
+      "type": "url",
+      "id": "api_url",
+      "label": "API URL",
+      "info": "The full URL of your NeonPing /api/chat endpoint, e.g. https://your-app.vercel.app/api/chat"
+    },
+    {
+      "type": "color",
+      "id": "widget_color",
+      "label": "Widget colour",
+      "default": "#1a1a1a"
+    },
+    {
+      "type": "select",
+      "id": "widget_position",
+      "label": "Position",
+      "default": "bottom-right",
+      "options": [
+        { "value": "bottom-right", "label": "Bottom right" },
+        { "value": "bottom-left",  "label": "Bottom left"  }
+      ]
+    },
+    {
+      "type": "text",
+      "id": "widget_greeting",
+      "label": "Opening greeting",
+      "default": "Hi! How can I help you today?"
+    }
+  ]
+}
+{% endschema %}
