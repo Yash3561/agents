@@ -1,0 +1,47 @@
+import { callMcpTool } from "~/lib/mcp/client.server";
+
+const STOREFRONT_ENDPOINT = (shop: string) => `https://${shop}/api/mcp`;
+
+const AGENT_PROFILE =
+  process.env.SHOPIFY_APP_URL
+    ? `${process.env.SHOPIFY_APP_URL}/.well-known/ucp-agent.json`
+    : "https://neonping.azurecontainerapps.io/.well-known/ucp-agent.json";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface PolicyResult {
+  text: string;
+  source_url?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Tool
+// ---------------------------------------------------------------------------
+
+/**
+ * Search the merchant's shop policies and FAQs.
+ * Returns null when no relevant policy is found — callers must handle gracefully.
+ */
+export async function searchPoliciesAndFaqs(
+  shopDomain: string,
+  query: string,
+  context?: string,
+): Promise<PolicyResult | null> {
+  const args: Record<string, unknown> = {
+    query,
+    ...(context ? { context } : {}),
+  };
+
+  const result = await callMcpTool<PolicyResult | null>(
+    { endpoint: STOREFRONT_ENDPOINT(shopDomain), agentProfileUrl: AGENT_PROFILE },
+    "search_shop_policies_and_faqs",
+    args,
+  );
+
+  // Treat empty text as "not found" so support agent uses its fallback
+  const data = result.structuredContent;
+  if (!data || !data.text?.trim()) return null;
+  return data;
+}
