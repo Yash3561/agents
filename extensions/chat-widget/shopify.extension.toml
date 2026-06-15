@@ -4,6 +4,7 @@ api_version = "2026-07"
 type = "theme"
 name = "NeonPing Chat Widget"
 handle = "neonping-chat-widget"
+uid = "199555ce-6487-d559-30bc-cfc8c3fcd0751219184a"
 
   [extensions.capabilities]
   network_access = true
