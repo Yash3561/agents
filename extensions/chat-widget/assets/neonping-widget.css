@@ -19,11 +19,16 @@
 .np-typing span:nth-child(3){animation-delay:.3s}
 @keyframes np-bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-6px)}}
 .np-products{display:flex;flex-direction:column;gap:8px;margin-top:6px}
-.np-product{display:flex;gap:10px;background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:8px;align-items:center;text-decoration:none;color:inherit}
+.np-product{display:flex;flex-direction:column;gap:6px;background:#fff;border:1px solid #e8e8e8;border-radius:10px;padding:8px}
+.np-product-link{display:flex;gap:10px;align-items:center;text-decoration:none;color:inherit}
 .np-product img{width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0}
 .np-product-info{flex:1;min-width:0}
 .np-product-title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np-product-price{font-size:12px;color:#555;margin-top:2px}
+.np-product-actions{display:flex;flex-wrap:wrap;gap:6px}
+.np-add-btn{background:var(--np-color);color:#fff;border:none;border-radius:16px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;transition:opacity .15s}
+.np-add-btn:hover{opacity:.88}
+.np-add-btn:disabled{background:#e8e8e8;color:#888;cursor:default}
 .np-quick-replies{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .np-qr{background:none;border:1.5px solid var(--np-color);color:var(--np-color);border-radius:20px;padding:5px 13px;font-size:13px;cursor:pointer;font-family:system-ui,sans-serif;transition:background .15s,color .15s}
 .np-qr:hover{background:var(--np-color);color:#fff}
