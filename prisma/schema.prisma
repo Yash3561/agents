@@ -20,6 +20,7 @@ model Merchant {
   brandVoice          String         @default("friendly and helpful")
   maxDiscountPct      Int            @default(15)
   vipCartThreshold    Int            @default(10000)
+  personalizationEnabled Boolean     @default(true)
   supportEmail        String?
   whatsappNumber      String?
   createdAt           DateTime       @default(now())

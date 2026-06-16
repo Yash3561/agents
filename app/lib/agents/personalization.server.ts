@@ -36,6 +36,9 @@ export async function runPersonalizationAgent(opts: {
 
   const toolsCalled: string[] = [];
 
+  // Merchant has personalization disabled entirely
+  if (!merchant.personalizationEnabled) return { text: null, toolsCalled };
+
   // Guard: one discount per conversation
   try {
     assertDiscountNotApplied(session);

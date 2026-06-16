@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { redirect, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -8,11 +8,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
 
-  await prisma.merchant.upsert({
+  const merchant = await prisma.merchant.upsert({
     where: { shopDomain: shop },
     update: {},
     create: { shopDomain: shop },
   });
+
+  if (!merchant.onboardedAt) {
+    throw redirect("/app/onboarding");
+  }
 
   const url = new URL(request.url);
   const filter = url.searchParams.get("filter");
