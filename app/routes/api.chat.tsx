@@ -77,6 +77,13 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
+  if (message.length > 2000) {
+    return new Response(JSON.stringify({ error: "message_too_long" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   // Rate limit before doing any real work — protects against unbounded LLM spend
   const clientIp = getClientIp(request);
   const rateLimit = await checkChatRateLimit(shop, clientIp);

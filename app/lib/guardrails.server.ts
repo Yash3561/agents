@@ -18,23 +18,6 @@ export class GuardrailError extends Error {
 // Guards — each throws GuardrailError on violation, returns void on pass
 // ---------------------------------------------------------------------------
 
-/**
- * Blocks complete_checkout unless the buyer has explicitly confirmed.
- * buyer_confirmed is only set by the Orchestrator on unambiguous words:
- * "yes", "checkout", "buy it", "place order", "proceed", "confirm".
- */
-export function assertCheckoutConfirmed(
-  session: ConversationSession,
-  toolName: string,
-): void {
-  if (toolName === "complete_checkout" && !session.buyer_confirmed) {
-    throw new GuardrailError(
-      "checkout_not_confirmed",
-      "complete_checkout requires explicit buyer confirmation",
-    );
-  }
-}
-
 /** Prevents checkout creation on an empty cart. */
 export function assertCartNotEmpty(lineItems: unknown[]): void {
   if (!lineItems || lineItems.length === 0) {

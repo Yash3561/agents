@@ -19,7 +19,6 @@ export interface ConversationSession {
   cart_id?: string;
   checkout_id?: string;
   checkout_token?: string;    // real Shopify cart/checkout token (parsed from checkout_url), used to match orders/paid webhooks
-  buyer_confirmed: boolean;   // reset to false after each checkout attempt
   discount_applied: boolean;  // one discount per conversation
   hop_count: number;          // reset each turn, max 3
   agent_calls: string[];      // current-turn trace e.g. ["shopping", "personalization"]
@@ -27,7 +26,6 @@ export interface ConversationSession {
 
 const DEFAULT_SESSION = (): ConversationSession => ({
   conversation_history: [],
-  buyer_confirmed: false,
   discount_applied: false,
   hop_count: 0,
   agent_calls: [],
@@ -51,10 +49,7 @@ export async function getSession(
   }
 }
 
-/**
- * Save session back to Redis. Trims history to MAX_HISTORY and resets TTL.
- * Also resets buyer_confirmed to false if checkout_id was just set.
- */
+/** Save session back to Redis. Trims history to MAX_HISTORY and resets TTL. */
 export async function setSession(
   shopDomain: string,
   sessionId: string,
@@ -63,8 +58,6 @@ export async function setSession(
   const toSave: ConversationSession = {
     ...session,
     conversation_history: session.conversation_history.slice(-MAX_HISTORY),
-    // One-time gate: once checkout_id is recorded, confirmation is consumed
-    buyer_confirmed: session.checkout_id ? false : session.buyer_confirmed,
   };
   await redis
     .set(KEY(shopDomain, sessionId), JSON.stringify(toSave), "EX", SESSION_TTL_S)

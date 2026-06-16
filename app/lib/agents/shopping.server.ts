@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { deployments, runAgentStream } from "~/lib/llm.server";
 import { buildShoppingPrompt, type CustomerMemory } from "~/lib/prompt.server";
-import { assertCartNotEmpty, GuardrailError } from "~/lib/guardrails.server";
+import { assertCartNotEmpty } from "~/lib/guardrails.server";
 import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.server";
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
 import { checkoutFromCart } from "~/lib/mcp/checkout.server";
@@ -76,7 +76,6 @@ export async function runShoppingAgent(opts: {
   session: ConversationSession;
   merchant: Merchant;
   memory: CustomerMemory;
-  buyerConfirmed: boolean;
 }): Promise<ShoppingAgentOutput> {
   const { shopDomain, contextForSpecialist, session, merchant, memory } = opts;
 
@@ -191,13 +190,8 @@ export async function runShoppingAgent(opts: {
   let text = "";
   try {
     text = await (await stream).text;
-  } catch (err) {
-    if (err instanceof GuardrailError && err.code === "checkout_not_confirmed") {
-      text =
-        "Please confirm you'd like to complete the purchase and I'll process it right away.";
-    } else {
-      text = "I'm having trouble with that right now. Please try again in a moment.";
-    }
+  } catch {
+    text = "I'm having trouble with that right now. Please try again in a moment.";
   }
 
   return { text, products, cart, checkoutUrl, toolsCalled, lastSearchQuery };

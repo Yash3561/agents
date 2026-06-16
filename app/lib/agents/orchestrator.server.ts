@@ -17,7 +17,6 @@ const OrchestratorSchema = z.object({
   route: z.enum(["shopping", "support", "personalization", "direct"]),
   route_reason: z.string(),
   context_for_specialist: z.string(),
-  buyer_confirmed: z.boolean(),
   confidence: z.number().min(0).max(1),
   direct_response: z.string().nullable(),
 });
@@ -147,7 +146,6 @@ export async function runOrchestrator(opts: {
         session: sessionWithHop,
         merchant,
         memory,
-        buyerConfirmed: routing.buyer_confirmed,
       });
       result = {
         text: out.text,
@@ -198,7 +196,6 @@ export async function runOrchestrator(opts: {
           session: sessionWithHop,
           merchant,
           memory,
-          buyerConfirmed: routing.buyer_confirmed,
         });
         result = {
           text: shopOut.text,

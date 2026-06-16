@@ -97,7 +97,6 @@ OUTPUT: Respond ONLY with valid JSON matching this exact shape:
   "route": "shopping" | "support" | "personalization" | "direct",
   "route_reason": "<one sentence>",
   "context_for_specialist": "<refined instruction for the specialist>",
-  "buyer_confirmed": true | false,
   "confidence": 0.0–1.0,
   "direct_response": "<only when route is direct>"
 }
@@ -113,11 +112,6 @@ EXAMPLES (for calibration — do not copy the wording, just the routing/confiden
 - "What do you sell?" / "show me products" / "do you have X" / "add to cart" / "checkout" → route: shopping, confidence: 0.9+
 - "what's your return policy" / "where's my order" → route: support, confidence: 0.9+
 A message with ZERO product/order/policy/account keywords is almost always "direct" — do not route plain greetings or small talk to shopping.
-
-buyer_confirmed RULES (CRITICAL):
-- Set true ONLY when conversation_history contains an explicit word: "yes", "checkout", "buy it", "place order", "proceed", "confirm"
-- "add to cart", "show me checkout", "what's the total" are NOT confirmations
-- When in doubt → false
 
 Customer memory: ${JSON.stringify(memory)}
 Conversation turns so far: ${historyLen}
