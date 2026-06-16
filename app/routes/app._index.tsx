@@ -31,6 +31,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     conversionsCount,
     discountsUsedCount,
     revenueAgg,
+    cartsCreatedCount,
+    cartsRecoveredCount,
     conversations,
   ] = await Promise.all([
     prisma.conversation.count({ where: { shopDomain: shop } }),
@@ -40,6 +42,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.conversation.aggregate({
       where: { shopDomain: shop, orderId: { not: null } },
       _sum: { orderRevenueCents: true },
+    }),
+    prisma.conversation.count({ where: { shopDomain: shop, cartId: { not: null } } }),
+    prisma.conversation.count({
+      where: { shopDomain: shop, cartId: { not: null }, orderId: { not: null } },
     }),
     prisma.conversation.findMany({
       where: listWhere,
@@ -56,6 +62,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       conversionsCount,
       discountsUsedCount,
       revenueCents: revenueAgg._sum.orderRevenueCents ?? 0,
+      cartsCreatedCount,
+      cartsRecoveredCount,
     },
     conversations,
   };
@@ -81,15 +89,23 @@ export default function Index() {
     ? Math.round((stats.conversionsCount / stats.totalConversations) * 100)
     : 0;
   const revenue = (stats.revenueCents / 100).toFixed(2);
+  const aov = stats.conversionsCount
+    ? (stats.revenueCents / stats.conversionsCount / 100).toFixed(2)
+    : "0.00";
+  const cartRecoveryRatePct = stats.cartsCreatedCount
+    ? Math.round((stats.cartsRecoveredCount / stats.cartsCreatedCount) * 100)
+    : 0;
 
   return (
     <s-page heading="NeonPing Dashboard">
       <s-section heading="Performance">
-        <s-grid gridTemplateColumns="1fr 1fr 1fr 1fr 1fr" gap="base">
+        <s-grid gridTemplateColumns="1fr 1fr 1fr 1fr 1fr 1fr 1fr" gap="base">
           <Metric label="Conversations" value={String(stats.totalConversations)} />
           <Metric label="Resolution rate" value={`${resolutionRatePct}%`} />
           <Metric label="Revenue attributed" value={`$${revenue}`} />
           <Metric label="Conversion rate" value={`${conversionRatePct}%`} />
+          <Metric label="Avg order value" value={`$${aov}`} />
+          <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} />
           <Metric label="Discounts used" value={String(stats.discountsUsedCount)} />
         </s-grid>
       </s-section>
