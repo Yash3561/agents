@@ -2,14 +2,10 @@ import { tool } from "ai";
 import { z } from "zod";
 import { deployments, runAgentStream } from "~/lib/llm.server";
 import { buildShoppingPrompt, type CustomerMemory } from "~/lib/prompt.server";
-import {
-  assertCheckoutConfirmed,
-  assertCartNotEmpty,
-  GuardrailError,
-} from "~/lib/guardrails.server";
+import { assertCartNotEmpty, GuardrailError } from "~/lib/guardrails.server";
 import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.server";
-import { createCart, getCart, updateCart, cancelCart } from "~/lib/mcp/cart.server";
-import { createCheckout, completeCheckout } from "~/lib/mcp/checkout.server";
+import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
+import { checkoutFromCart } from "~/lib/mcp/checkout.server";
 import type { ConversationSession } from "~/lib/session.server";
 import type { Merchant } from "@prisma/client";
 
@@ -28,13 +24,18 @@ const LookupSchema = z.object({ ids: z.array(z.string()) });
 
 const GetProductSchema = z.object({
   productId: z.string(),
-  selectedOptions: z.array(z.object({ name: z.string(), label: z.string() })).optional(),
+  selectedOptions: z
+    .array(z.object({ name: z.string(), label: z.string() }))
+    .optional(),
 });
 
-const LineItemSchema = z.object({ item: z.object({ id: z.string() }), quantity: z.number() });
-
 const CreateCartSchema = z.object({
-  lineItems: z.array(LineItemSchema),
+  lineItems: z.array(
+    z.object({
+      item: z.object({ id: z.string() }),
+      quantity: z.number(),
+    }),
+  ),
   currency: z.string().optional(),
 });
 
@@ -42,12 +43,15 @@ const GetCartSchema = z.object({ cartId: z.string() });
 
 const UpdateCartSchema = z.object({
   cartId: z.string(),
-  lineItems: z.array(LineItemSchema),
+  add: z
+    .array(z.object({ product_variant_id: z.string(), quantity: z.number() }))
+    .optional(),
+  update: z
+    .array(z.object({ id: z.string(), quantity: z.number() }))
+    .optional(),
 });
 
-const CancelCartSchema = z.object({ cartId: z.string() });
-const CreateCheckoutSchema = z.object({ cartId: z.string() });
-const CompleteCheckoutSchema = z.object({ checkoutId: z.string() });
+const CheckoutSchema = z.object({ cartId: z.string() });
 
 // ---------------------------------------------------------------------------
 // Output type
@@ -73,7 +77,7 @@ export async function runShoppingAgent(opts: {
   memory: CustomerMemory;
   buyerConfirmed: boolean;
 }): Promise<ShoppingAgentOutput> {
-  const { shopDomain, contextForSpecialist, session, merchant, memory, buyerConfirmed } = opts;
+  const { shopDomain, contextForSpecialist, session, merchant, memory } = opts;
 
   const toolsCalled: string[] = [];
   let products: unknown[] | undefined;
@@ -120,8 +124,11 @@ export async function runShoppingAgent(opts: {
       execute: async (input) => {
         assertCartNotEmpty(input.lineItems);
         toolsCalled.push("create_cart");
-        const result = await createCart(shopDomain, input.lineItems, { currency: input.currency });
+        const result = await createCart(shopDomain, input.lineItems, {
+          currency: input.currency,
+        });
         cart = result;
+        checkoutUrl = result.checkoutUrl;
         return result;
       },
     }),
@@ -133,55 +140,38 @@ export async function runShoppingAgent(opts: {
         toolsCalled.push("get_cart");
         const result = await getCart(shopDomain, input.cartId);
         cart = result;
+        checkoutUrl = result.checkoutUrl;
         return result;
       },
     }),
 
     update_cart: tool({
-      description: "Replace cart contents — always pass the COMPLETE line_items array (full PUT, not a delta)",
+      description:
+        "Add or update items in the cart. Use add[] for new variants, update[] to change quantities (quantity 0 removes the item).",
       inputSchema: UpdateCartSchema,
       execute: async (input) => {
-        assertCartNotEmpty(input.lineItems);
         toolsCalled.push("update_cart");
-        const result = await updateCart(shopDomain, input.cartId, input.lineItems);
+        const result = await updateCart(shopDomain, input.cartId, {
+          add: input.add,
+          update: input.update,
+        });
         cart = result;
+        checkoutUrl = result.checkoutUrl;
         return result;
       },
     }),
 
-    cancel_cart: tool({
-      description: "Cancel a cart",
-      inputSchema: CancelCartSchema,
+    get_checkout_url: tool({
+      description:
+        "Get the checkout URL for a cart so the buyer can complete their purchase. Call this when the buyer is ready to pay.",
+      inputSchema: CheckoutSchema,
       execute: async (input) => {
-        toolsCalled.push("cancel_cart");
-        await cancelCart(shopDomain, input.cartId);
-        return { cancelled: true };
-      },
-    }),
-
-    create_checkout: tool({
-      description: "Convert a cart into a checkout session",
-      inputSchema: CreateCheckoutSchema,
-      execute: async (input) => {
-        toolsCalled.push("create_checkout");
-        const result = await createCheckout(shopDomain, input.cartId);
-        checkoutUrl = result.continue_url;
-        return result;
-      },
-    }),
-
-    complete_checkout: tool({
-      description: "Complete the checkout — only call when the buyer has explicitly confirmed the purchase",
-      inputSchema: CompleteCheckoutSchema,
-      execute: async (input) => {
-        assertCheckoutConfirmed(
-          { ...session, buyer_confirmed: buyerConfirmed },
-          "complete_checkout",
-        );
-        toolsCalled.push("complete_checkout");
-        const result = await completeCheckout(shopDomain, input.checkoutId);
-        if (result.requires_escalation) checkoutUrl = result.continue_url;
-        return result;
+        toolsCalled.push("get_checkout_url");
+        const cartData = await getCart(shopDomain, input.cartId);
+        const checkout = checkoutFromCart(cartData);
+        checkoutUrl = checkout.continue_url;
+        cart = cartData;
+        return checkout;
       },
     }),
   };
@@ -200,7 +190,8 @@ export async function runShoppingAgent(opts: {
     text = await (await stream).text;
   } catch (err) {
     if (err instanceof GuardrailError && err.code === "checkout_not_confirmed") {
-      text = "Please confirm you'd like to complete the purchase and I'll process it right away.";
+      text =
+        "Please confirm you'd like to complete the purchase and I'll process it right away.";
     } else {
       text = "I'm having trouble with that right now. Please try again in a moment.";
     }

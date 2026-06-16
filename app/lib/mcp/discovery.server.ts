@@ -36,7 +36,7 @@ export async function bustMcpEndpointCache(shopDomain: string): Promise<void> {
 }
 
 async function fetchEndpoint(shopDomain: string): Promise<string> {
-  const fallback = `https://${shopDomain}/api/ucp/mcp`;
+  const fallback = `https://${shopDomain}/api/mcp`;
 
   try {
     const res = await fetch(`https://${shopDomain}/.well-known/ucp`, {

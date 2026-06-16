@@ -47,7 +47,7 @@
   };
 </script>
 
-<script src="{{ 'neonping-widget.js' | asset_url }}" defer></script>
+<link rel="stylesheet" href="{{ 'neonping-widget.css' | asset_url }}">
 
 {% schema %}
 {
@@ -56,10 +56,10 @@
   "javascript": "neonping-widget.js",
   "settings": [
     {
-      "type": "url",
+      "type": "text",
       "id": "api_url",
       "label": "API URL",
-      "info": "The full URL of your NeonPing /api/chat endpoint, e.g. https://your-app.vercel.app/api/chat"
+      "info": "Full URL of your NeonPing /api/chat endpoint, e.g. https://your-tunnel.trycloudflare.com/api/chat"
     },
     {
       "type": "color",

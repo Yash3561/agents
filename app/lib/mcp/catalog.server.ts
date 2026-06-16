@@ -1,21 +1,18 @@
 import { callMcpTool } from "~/lib/mcp/client.server";
 
-const STOREFRONT_ENDPOINT = (shop: string) =>
-  `https://${shop}/api/mcp`;
-
-const AGENT_PROFILE =
-  process.env.SHOPIFY_APP_URL
-    ? `${process.env.SHOPIFY_APP_URL}/.well-known/ucp-agent.json`
-    : "https://neonping.azurecontainerapps.io/.well-known/ucp-agent.json";
+// Shopify Storefront MCP — public, no auth required for catalog operations.
+// Discovery (/.well-known/ucp) is not implemented on most stores; use /api/mcp directly.
+const endpoint = (shop: string) => ({ endpoint: `https://${shop}/api/mcp` });
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — aligned with Shopify UCP catalog search response
 // ---------------------------------------------------------------------------
 
 export interface ProductVariant {
   id: string;           // "gid://shopify/ProductVariant/..."
   title: string;
-  price: number;        // cents
+  price: string;        // formatted string e.g. "29.99"
+  currency?: string;
   available: boolean;
   image_url?: string;
   checkout_url?: string;
@@ -28,11 +25,62 @@ export interface CatalogProduct {
   variants: ProductVariant[];
   image_url?: string;
   vendor?: string;
+  price_min?: string;   // lowest variant price, formatted
+  currency?: string;
+  url?: string;         // relative URL e.g. "/products/handle"
 }
 
 export interface CatalogSearchResult {
   products: CatalogProduct[];
   total: number;
+  pagination?: { has_next_page: boolean; cursor?: string };
+}
+
+// ---------------------------------------------------------------------------
+// Internal — map Shopify UCP product shape to our CatalogProduct
+// Real shape (confirmed via live search_catalog call):
+// { id, title, description: {html}, price_range: {min: {amount, currency}},
+//   variants: [{ id, title, price: {amount, currency}, availability: {available}, media: [{url}] }],
+//   media: [{type, url, alt_text}] }
+// ---------------------------------------------------------------------------
+
+function moneyToString(money: Record<string, unknown> | undefined): string | undefined {
+  if (!money) return undefined;
+  const amount = money.amount;
+  return typeof amount === "number" ? (amount / 100).toFixed(2) : (amount as string | undefined);
+}
+
+function mapProduct(p: Record<string, unknown>): CatalogProduct {
+  const variants = (p.variants as Array<Record<string, unknown>> | undefined) ?? [];
+  const media = (p.media as Array<Record<string, unknown>> | undefined) ?? [];
+  const priceRange = p.price_range as Record<string, unknown> | undefined;
+  const minPrice = priceRange?.min as Record<string, unknown> | undefined;
+  const description = p.description as Record<string, unknown> | string | undefined;
+
+  return {
+    id: p.id as string,
+    title: p.title as string,
+    description:
+      typeof description === "string" ? description : (description?.html as string | undefined),
+    image_url: media[0]?.url as string | undefined,
+    vendor: p.vendor as string | undefined,
+    price_min: moneyToString(minPrice),
+    currency: minPrice?.currency as string | undefined,
+    url: p.url as string | undefined,
+    variants: variants.map((v) => {
+      const vMedia = (v.media as Array<Record<string, unknown>> | undefined) ?? [];
+      const price = v.price as Record<string, unknown> | undefined;
+      const availability = v.availability as Record<string, unknown> | undefined;
+      return {
+        id: v.id as string,
+        title: (v.title ?? "Default") as string,
+        price: moneyToString(price) ?? "0",
+        currency: price?.currency as string | undefined,
+        available: (availability?.available ?? true) as boolean,
+        image_url: vMedia[0]?.url as string | undefined,
+      };
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -40,8 +88,8 @@ export interface CatalogSearchResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Search a merchant's catalog by natural-language query.
- * Max 3 results enforced here (not just in the prompt).
+ * Search a merchant's catalog — uses Shopify Storefront MCP search_catalog tool.
+ * No auth required (public storefront data).
  */
 export async function searchCatalog(
   shopDomain: string,
@@ -60,54 +108,67 @@ export async function searchCatalog(
     catalog: {
       query,
       context: {
-        ...(intent ? { intent } : {}),
-        address_country: addressCountry,
         currency,
+        address_country: addressCountry,
+        ...(intent ? { intent } : {}),
       },
       ...(maxPriceCents !== undefined
         ? { filters: { price: { max: maxPriceCents } } }
         : {}),
-      pagination: { limit: Math.min(limit, 3) }, // hard cap at 3
+      pagination: { limit: Math.min(limit, 3) },
     },
   };
 
-  const result = await callMcpTool<CatalogSearchResult>(
-    { endpoint: STOREFRONT_ENDPOINT(shopDomain), agentProfileUrl: AGENT_PROFILE },
+  const result = await callMcpTool<Record<string, unknown>>(
+    endpoint(shopDomain),
     "search_catalog",
     args,
   );
 
-  return result.structuredContent;
+  const raw = result.structuredContent;
+  const rawProducts = (raw.products as Array<Record<string, unknown>>) ?? [];
+
+  return {
+    products: rawProducts.map(mapProduct),
+    total: rawProducts.length,
+    pagination: raw.pagination as CatalogSearchResult["pagination"],
+  };
 }
 
-/** Lookup specific variants by GID. */
+/** Look up specific products by GID — implemented as parallel get_product_details calls. */
 export async function lookupCatalog(
   shopDomain: string,
   ids: string[],
 ): Promise<ProductVariant[]> {
-  const result = await callMcpTool<{ variants: ProductVariant[] }>(
-    { endpoint: STOREFRONT_ENDPOINT(shopDomain), agentProfileUrl: AGENT_PROFILE },
-    "lookup_catalog",
-    { ids },
-  );
-
-  return result.structuredContent.variants ?? [];
+  const results = await Promise.allSettled(ids.map((id) => getProduct(shopDomain, id)));
+  return results
+    .filter((r): r is PromiseFulfilledResult<CatalogProduct> => r.status === "fulfilled")
+    .flatMap((r) => r.value.variants);
 }
 
-/** Get full product details including all variants. */
+/** Get full product details by GID. */
 export async function getProduct(
   shopDomain: string,
   productId: string,
   selectedOptions?: Array<{ name: string; label: string }>,
 ): Promise<CatalogProduct> {
-  const result = await callMcpTool<CatalogProduct>(
-    { endpoint: STOREFRONT_ENDPOINT(shopDomain), agentProfileUrl: AGENT_PROFILE },
-    "get_product",
+  // Shopify expects options as { "Size": "L", "Color": "Red" }
+  const options = selectedOptions?.reduce<Record<string, string>>(
+    (acc, { name, label }) => ({ ...acc, [name]: label }),
+    {},
+  );
+
+  const result = await callMcpTool<Record<string, unknown>>(
+    endpoint(shopDomain),
+    "get_product_details",
     {
-      id: productId,
-      ...(selectedOptions ? { selected: selectedOptions } : {}),
+      product_id: productId,
+      ...(options && Object.keys(options).length > 0 ? { options } : {}),
     },
   );
 
-  return result.structuredContent;
+  const raw = result.structuredContent;
+  // Response may be { product: {...} } or the product directly
+  const p = (raw.product as Record<string, unknown> | undefined) ?? raw;
+  return mapProduct(p);
 }

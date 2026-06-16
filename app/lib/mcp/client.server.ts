@@ -227,7 +227,40 @@ export async function callMcpTool<T = unknown>(
       throw new McpError(json.error.message, json.error.code, json.error.data);
     }
 
-    return json.result;
+    // Shopify MCP returns data in result.content[0].text (a JSON string).
+    // Non-Shopify MCP servers may use result.structuredContent directly.
+    const raw = json.result as {
+      content?: Array<{ type: string; text: string }>;
+      isError?: boolean;
+      structuredContent?: T;
+    };
+
+    const textContent = raw.content?.[0]?.text;
+    if (textContent) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(textContent) as Record<string, unknown>;
+      } catch {
+        throw new McpError(
+          `MCP server returned non-JSON text for tool "${toolName}"`,
+          -32700,
+        );
+      }
+      if (raw.isError) {
+        const errs = parsed.errors as Array<{ message: string }> | undefined;
+        throw new McpError(
+          errs?.[0]?.message ?? `Tool "${toolName}" returned an error`,
+          -32000,
+          parsed.errors,
+        );
+      }
+      return { structuredContent: parsed as T, content: raw.content };
+    }
+
+    return {
+      structuredContent: (raw.structuredContent ?? {}) as T,
+      content: raw.content,
+    };
   };
 
   if (!retry) return attempt();

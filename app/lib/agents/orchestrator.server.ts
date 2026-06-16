@@ -19,7 +19,7 @@ const OrchestratorSchema = z.object({
   context_for_specialist: z.string(),
   buyer_confirmed: z.boolean(),
   confidence: z.number().min(0).max(1),
-  direct_response: z.string().optional(),
+  direct_response: z.string().nullable(),
 });
 
 type OrchestratorOutput = z.infer<typeof OrchestratorSchema>;
@@ -86,7 +86,8 @@ export async function runOrchestrator(opts: {
       schema: OrchestratorSchema,
       maxOutputTokens: 500,
     });
-  } catch {
+  } catch (err) {
+    console.error("[orchestrator] generateStructured failed:", err);
     return fallbackResponse(agentTrace);
   }
 

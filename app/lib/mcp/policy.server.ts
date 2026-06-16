@@ -11,6 +11,13 @@ const AGENT_PROFILE =
 // Types
 // ---------------------------------------------------------------------------
 
+// Real Shopify response (confirmed via live call) is a bare array of QA pairs,
+// not a { text } object.
+export interface PolicyQA {
+  question: string;
+  answer: string;
+}
+
 export interface PolicyResult {
   text: string;
   source_url?: string;
@@ -34,14 +41,16 @@ export async function searchPoliciesAndFaqs(
     ...(context ? { context } : {}),
   };
 
-  const result = await callMcpTool<PolicyResult | null>(
+  const result = await callMcpTool<PolicyQA[]>(
     { endpoint: STOREFRONT_ENDPOINT(shopDomain), agentProfileUrl: AGENT_PROFILE },
     "search_shop_policies_and_faqs",
     args,
   );
 
-  // Treat empty text as "not found" so support agent uses its fallback
-  const data = result.structuredContent;
-  if (!data || !data.text?.trim()) return null;
-  return data;
+  const entries = result.structuredContent;
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+
+  return {
+    text: entries.map((e) => `${e.question}\n${e.answer}`).join("\n\n"),
+  };
 }

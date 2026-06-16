@@ -24,6 +24,7 @@ const foundry = createOpenAICompatible({
     process.env.AZURE_FOUNDRY_BASE_URL ??
     `https://${process.env.AZURE_OPENAI_RESOURCE_NAME ?? "neonping-resource"}.services.ai.azure.com/openai/v1`,
   apiKey: process.env.AZURE_OPENAI_API_KEY ?? "",
+  supportsStructuredOutputs: true,
 });
 
 // All 5 roles use gpt-4o-mini — differentiated by system prompt, not model.

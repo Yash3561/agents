@@ -1,58 +1,62 @@
 import { callMcpTool } from "~/lib/mcp/client.server";
-import { getMcpEndpoint } from "~/lib/mcp/discovery.server";
-import { randomUUID } from "crypto";
 
-const AGENT_PROFILE =
-  process.env.SHOPIFY_APP_URL
-    ? `${process.env.SHOPIFY_APP_URL}/.well-known/ucp-agent.json`
-    : "https://neonping.azurecontainerapps.io/.well-known/ucp-agent.json";
+// Shopify Cart MCP — anonymous, no auth required.
+const endpoint = (shop: string) => ({ endpoint: `https://${shop}/api/mcp` });
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface CartLineItem {
-  item: { id: string };  // ProductVariant GID
+export interface CartAddItem {
+  product_variant_id: string;   // ProductVariant GID
   quantity: number;
 }
 
-export interface CartLine {
-  id: string;
-  item: { id: string; title: string; price: number };
-  quantity: number;
-}
-
-export interface CartTotal {
-  type: "subtotal" | "total" | string;
-  amount: number;        // cents
-  display_text: string;
+export interface CartUpdateItem {
+  id: string;       // line item ID (not variant ID)
+  quantity: number; // set to 0 to remove
 }
 
 export interface Cart {
-  id: string;            // "gid://shopify/Cart/..."
-  currency: string;
-  line_items: CartLine[];
-  totals: CartTotal[];
-  continue_url: string;
-  expires_at: string;
+  id: string;                   // "gid://shopify/Cart/..."
+  checkoutUrl: string;          // URL to complete purchase (normalized from checkout_url)
+  // Real Shopify UCP shape uses snake_case throughout — confirmed via live calls.
+  lines?: Array<{
+    id: string;
+    quantity: number;
+    merchandise?: {
+      id: string;
+      title?: string;
+      product?: { id?: string; title?: string; handle?: string };
+    };
+    cost?: {
+      total_amount?: { amount: string; currency: string };
+      subtotal_amount?: { amount: string; currency: string };
+    };
+  }>;
+  cost?: {
+    subtotal_amount?: { amount: string; currency: string };
+    total_amount?: { amount: string; currency: string };
+  };
+  total_quantity?: number;
+  // Keep continue_url as alias so existing code that references it still works
+  continue_url?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function opts(shopDomain: string) {
+function normalizeCart(raw: Record<string, unknown>): Cart {
+  const cart = (raw.cart as Record<string, unknown> | undefined) ?? raw;
+  // Shopify's real UCP cart response uses snake_case checkout_url —
+  // confirmed via live create_cart call. Keep the other variants as
+  // fallbacks in case of future API changes.
+  const url = (cart.checkout_url ?? cart.checkoutUrl ?? cart.webUrl ?? cart.continue_url ?? "") as string;
   return {
-    endpoint: getMcpEndpoint(shopDomain) as unknown as string,
-    agentProfileUrl: AGENT_PROFILE,
-    // Cart tools are anonymous — no auth needed
-  };
-}
-
-async function endpoint(shopDomain: string) {
-  return {
-    endpoint: await getMcpEndpoint(shopDomain),
-    agentProfileUrl: AGENT_PROFILE,
+    ...(cart as unknown as Cart),
+    checkoutUrl: url,
+    continue_url: url,
   };
 }
 
@@ -60,73 +64,64 @@ async function endpoint(shopDomain: string) {
 // Tools
 // ---------------------------------------------------------------------------
 
-/** Create a new cart. lineItems must be non-empty (checked by guardrails). */
+/**
+ * Create a new cart. Shopify uses update_cart without a cart_id to create.
+ * lineItems must be non-empty (enforced by guardrails before this is called).
+ */
 export async function createCart(
   shopDomain: string,
-  lineItems: CartLineItem[],
+  lineItems: Array<{ item: { id: string }; quantity: number }>,
   context?: { currency?: string; addressCountry?: string },
 ): Promise<Cart> {
-  const result = await callMcpTool<{ cart: Cart }>(
-    await endpoint(shopDomain),
-    "create_cart",
+  const result = await callMcpTool<Record<string, unknown>>(
+    endpoint(shopDomain),
+    "update_cart",
     {
-      line_items: lineItems,
-      context: {
-        currency: context?.currency ?? "USD",
-        address_country: context?.addressCountry ?? "US",
-      },
+      add_items: lineItems.map((li) => ({
+        product_variant_id: li.item.id,
+        quantity: li.quantity,
+      })),
+      ...(context?.addressCountry
+        ? { buyer_identity: { country_code: context.addressCountry } }
+        : {}),
     },
   );
-  return result.structuredContent.cart;
+  return normalizeCart(result.structuredContent);
 }
 
 /** Fetch current cart state. */
-export async function getCart(
-  shopDomain: string,
-  cartId: string,
-): Promise<Cart> {
-  const result = await callMcpTool<{ cart: Cart }>(
-    await endpoint(shopDomain),
+export async function getCart(shopDomain: string, cartId: string): Promise<Cart> {
+  const result = await callMcpTool<Record<string, unknown>>(
+    endpoint(shopDomain),
     "get_cart",
-    { id: cartId },
+    { cart_id: cartId },
   );
-  return result.structuredContent.cart;
+  return normalizeCart(result.structuredContent);
 }
 
 /**
- * Replace cart contents entirely (PUT semantics — not a delta).
- * Always pass the complete line_items array including existing lines.
+ * Add or update items in the cart.
+ * Pass add_items to add new variants, update_items to change quantities (0 = remove).
  */
 export async function updateCart(
   shopDomain: string,
   cartId: string,
-  lineItems: CartLineItem[],
+  changes: { add?: CartAddItem[]; update?: CartUpdateItem[] },
 ): Promise<Cart> {
-  const result = await callMcpTool<{ cart: Cart }>(
-    await endpoint(shopDomain),
+  const result = await callMcpTool<Record<string, unknown>>(
+    endpoint(shopDomain),
     "update_cart",
-    { id: cartId, line_items: lineItems },
-  );
-  return result.structuredContent.cart;
-}
-
-/** Cancel a cart. Idempotency key is generated per-call as required by UCP spec. */
-export async function cancelCart(
-  shopDomain: string,
-  cartId: string,
-): Promise<void> {
-  await callMcpTool(
-    await endpoint(shopDomain),
-    "cancel_cart",
     {
-      id: cartId,
-      // UCP spec requires a unique idempotency key on cancel_cart
-      meta: { "idempotency-key": randomUUID() },
+      cart_id: cartId,
+      ...(changes.add?.length ? { add_items: changes.add } : {}),
+      ...(changes.update?.length ? { update_items: changes.update } : {}),
     },
   );
+  return normalizeCart(result.structuredContent);
 }
 
-/** Convenience: get the total amount in cents from a Cart's totals array. */
+/** Convenience: get total amount in cents from a Cart's cost. */
 export function getCartTotal(cart: Cart): number {
-  return cart.totals.find((t) => t.type === "total")?.amount ?? 0;
+  const amount = cart.cost?.total_amount?.amount ?? "0";
+  return Math.round(parseFloat(amount) * 100);
 }
