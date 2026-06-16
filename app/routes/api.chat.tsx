@@ -20,6 +20,9 @@
  *   event: meta      — JSON with products/cart/checkout_url/discount_code/quick_replies
  *   event: error     — JSON { code, message }
  *   event: done      — signals end of stream
+ *
+ * Returns plain (non-SSE) HTTP 429 with a Retry-After header if the
+ * per-shop or per-IP rate limit is exceeded — see app/lib/rate-limit.server.ts
  */
 
 import type { ActionFunctionArgs } from "react-router";
@@ -29,6 +32,7 @@ import { fetchCustomerMemory, updateCustomerMemory } from "~/lib/agents/memory.s
 import { runOrchestrator } from "~/lib/agents/orchestrator.server";
 import { persistConversationTurn, extractCheckoutToken } from "~/lib/conversation.server";
 import { getStorefrontAccessToken } from "~/lib/auth.server";
+import { checkChatRateLimit, getClientIp } from "~/lib/rate-limit.server";
 import type { Merchant } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -70,6 +74,21 @@ export async function action({ request }: ActionFunctionArgs) {
     return new Response(JSON.stringify({ error: "missing_fields" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Rate limit before doing any real work — protects against unbounded LLM spend
+  const clientIp = getClientIp(request);
+  const rateLimit = await checkChatRateLimit(shop, clientIp);
+  if (!rateLimit.allowed) {
+    return new Response(JSON.stringify({ error: "rate_limited" }), {
+      status: 429,
+      headers: {
+        "Content-Type": "application/json",
+        ...(rateLimit.retryAfterSeconds
+          ? { "Retry-After": String(rateLimit.retryAfterSeconds) }
+          : {}),
+      },
     });
   }
 
