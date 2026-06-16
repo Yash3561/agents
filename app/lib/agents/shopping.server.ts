@@ -61,6 +61,14 @@ const UpdateCartSchema = z.object({
   update: z
     .array(z.object({ id: z.string(), quantity: z.number() }))
     .optional(),
+  discountCodes: z
+    .array(z.string())
+    .optional()
+    .describe("Discount/promo codes to apply. Only set this when the customer explicitly mentions having a code — never ask proactively."),
+  giftCardCodes: z
+    .array(z.string())
+    .optional()
+    .describe("Gift card codes to apply. Only set this when the customer explicitly mentions having one — never ask proactively."),
 });
 
 const CheckoutSchema = z.object({ cartId: z.string() });
@@ -162,13 +170,15 @@ export async function runShoppingAgent(opts: {
 
     update_cart: tool({
       description:
-        "Add or update items in the cart. Use add[] for new variants, update[] to change quantities (quantity 0 removes the item).",
+        "Add or update items in the cart, or apply a discount/gift card code the customer mentioned having. Use add[] for new variants, update[] to change quantities (quantity 0 removes the item), discountCodes/giftCardCodes when the customer offers a code.",
       inputSchema: UpdateCartSchema,
       execute: async (input) => {
         toolsCalled.push("update_cart");
         const result = await updateCart(shopDomain, input.cartId, {
           add: input.add,
           update: input.update,
+          discountCodes: input.discountCodes,
+          giftCardCodes: input.giftCardCodes,
         });
         cart = result;
         checkoutUrl = result.checkoutUrl;

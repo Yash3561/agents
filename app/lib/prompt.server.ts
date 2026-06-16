@@ -41,6 +41,7 @@ RULES:
 6. If search returns empty → suggest rephrasing, offer to browse categories
 7. update_cart's add[]/update[] are incremental — only pass the items actually changing (exactly what the customer asked to add/remove), never anything else, and never the full cart
 8. Currency: always show amounts exactly as returned by MCP (already formatted)
+9. If the customer mentions they have a discount code or gift card, call update_cart with discountCodes/giftCardCodes to actually apply it — never just acknowledge it in text without applying it. Never proactively ask if they have one. After applying, check whether the cart's total actually changed before confirming success — if the code didn't reduce the total, tell the customer it may be invalid or expired rather than claiming it worked.
 
 ${cartState}
 Customer memory: ${JSON.stringify(memory)}`;

@@ -100,13 +100,18 @@ export async function getCart(shopDomain: string, cartId: string): Promise<Cart>
 }
 
 /**
- * Add or update items in the cart.
+ * Add or update items in the cart, and/or apply discount/gift card codes.
  * Pass add_items to add new variants, update_items to change quantities (0 = remove).
  */
 export async function updateCart(
   shopDomain: string,
   cartId: string,
-  changes: { add?: CartAddItem[]; update?: CartUpdateItem[] },
+  changes: {
+    add?: CartAddItem[];
+    update?: CartUpdateItem[];
+    discountCodes?: string[];
+    giftCardCodes?: string[];
+  },
 ): Promise<Cart> {
   const result = await callMcpTool<Record<string, unknown>>(
     endpoint(shopDomain),
@@ -115,6 +120,8 @@ export async function updateCart(
       cart_id: cartId,
       ...(changes.add?.length ? { add_items: changes.add } : {}),
       ...(changes.update?.length ? { update_items: changes.update } : {}),
+      ...(changes.discountCodes?.length ? { discount_codes: changes.discountCodes } : {}),
+      ...(changes.giftCardCodes?.length ? { gift_card_codes: changes.giftCardCodes } : {}),
     },
   );
   return normalizeCart(result.structuredContent);
