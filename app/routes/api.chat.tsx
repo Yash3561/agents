@@ -28,7 +28,7 @@ import { getSession, setSession, resetTurn, appendMessage } from "~/lib/session.
 import { fetchCustomerMemory, updateCustomerMemory } from "~/lib/agents/memory.server";
 import { runOrchestrator } from "~/lib/agents/orchestrator.server";
 import { persistConversationTurn, extractCheckoutToken } from "~/lib/conversation.server";
-import { authenticate } from "~/shopify.server";
+import { getStorefrontAccessToken } from "~/lib/auth.server";
 import type { Merchant } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -74,20 +74,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   // Authenticate against Shopify — get the merchant access token
-  // For storefront widget calls we use the offline token stored in the session DB
-  let accessToken: string;
-  try {
-    const { session: shopifySession } = await authenticate.admin(request);
-    accessToken = shopifySession.accessToken ?? "";
-  } catch {
-    // Widget calls arrive outside the Shopify admin iframe — load the offline
-    // token from Prisma's session storage instead
-    const stored = await prisma.session.findFirst({
-      where: { shop, isOnline: false },
-      select: { accessToken: true },
-    });
-    accessToken = stored?.accessToken ?? "";
-  }
+  const accessToken = await getStorefrontAccessToken(request, shop);
 
   // Load or upsert the Merchant config row
   const merchant = await prisma.merchant.upsert({
@@ -253,10 +240,7 @@ function buildSseStream(opts: {
 
         // 9. Async memory update (fire-and-forget, never blocks response)
         if (customer_id) {
-          const lastSearch =
-            result.products?.length
-              ? message  // the user's search query that produced products
-              : undefined;
+          const lastSearch = result.last_search_query;
           const cartItems = result.cart
             ? ((result.cart as { line_items?: unknown[] }).line_items ?? [])
             : undefined;

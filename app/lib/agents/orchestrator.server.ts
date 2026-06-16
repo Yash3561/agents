@@ -38,6 +38,7 @@ export interface OutboundMessage {
   confidence: number;
   escalate_to_human?: boolean;
   agent_trace: string[];
+  last_search_query?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,7 @@ export async function runOrchestrator(opts: {
         checkout_url: out.checkoutUrl,
         confidence: routing.confidence,
         agent_trace: [...agentTrace, ...out.toolsCalled],
+        last_search_query: out.lastSearchQuery,
       };
       break;
     }

@@ -63,6 +63,7 @@ export interface ShoppingAgentOutput {
   cart?: unknown;
   checkoutUrl?: string;
   toolsCalled: string[];
+  lastSearchQuery?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +84,7 @@ export async function runShoppingAgent(opts: {
   let products: unknown[] | undefined;
   let cart: unknown | undefined;
   let checkoutUrl: string | undefined;
+  let lastSearchQuery: string | undefined;
 
   const tools = {
     search_catalog: tool({
@@ -90,6 +92,7 @@ export async function runShoppingAgent(opts: {
       inputSchema: SearchSchema,
       execute: async (input) => {
         toolsCalled.push("search_catalog");
+        if (input.query) lastSearchQuery = input.query;
         const result = await searchCatalog(shopDomain, input.query, {
           maxPriceCents: input.maxPriceCents,
           currency: input.currency,
@@ -197,5 +200,5 @@ export async function runShoppingAgent(opts: {
     }
   }
 
-  return { text, products, cart, checkoutUrl, toolsCalled };
+  return { text, products, cart, checkoutUrl, toolsCalled, lastSearchQuery };
 }
