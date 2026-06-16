@@ -14,10 +14,22 @@ import type { Merchant } from "@prisma/client";
 // ---------------------------------------------------------------------------
 
 const SearchSchema = z.object({
-  query: z.string(),
-  maxPriceCents: z.number().optional(),
+  query: z.string().describe(
+    "The literal search term — keywords for what the customer is looking for.",
+  ),
+  maxPriceCents: z
+    .number()
+    .optional()
+    .describe(
+      "Hard price ceiling in cents if the customer mentioned a budget (e.g. 'under $30' -> 3000). Excludes anything above this — only set when the customer gave a real number.",
+    ),
   currency: z.string().optional(),
-  intent: z.string().optional(),
+  intent: z
+    .string()
+    .optional()
+    .describe(
+      "Soft context that improves ranking without excluding anything — the customer's actual underlying need, not just their keywords. Examples: 'gift for a coworker, doesn't know their taste', 'needs to be durable for daily outdoor use', 'first-time buyer, wants something beginner-friendly'. Infer this from the conversation even if the customer didn't say it explicitly — this is what makes results actually match what they need instead of just what they typed.",
+    ),
 });
 
 const LookupSchema = z.object({ ids: z.array(z.string()) });
@@ -87,7 +99,8 @@ export async function runShoppingAgent(opts: {
 
   const tools = {
     search_catalog: tool({
-      description: "Search the merchant catalog by natural language query",
+      description:
+        "Search the merchant catalog. Always pass intent (the customer's real underlying need) alongside query, and maxPriceCents whenever a budget was mentioned — these meaningfully change which results rank highest, not just what gets filtered out.",
       inputSchema: SearchSchema,
       execute: async (input) => {
         toolsCalled.push("search_catalog");
