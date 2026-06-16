@@ -23,6 +23,9 @@
  *
  * Returns plain (non-SSE) HTTP 429 with a Retry-After header if the
  * per-shop or per-IP rate limit is exceeded — see app/lib/rate-limit.server.ts
+ *
+ * Returns plain (non-SSE) HTTP 402 if the shop is over its monthly plan
+ * conversation limit — see app/lib/billing.server.ts
  */
 
 import type { ActionFunctionArgs } from "react-router";
@@ -33,6 +36,7 @@ import { runOrchestrator } from "~/lib/agents/orchestrator.server";
 import { persistConversationTurn, extractCheckoutToken } from "~/lib/conversation.server";
 import { getStorefrontAccessToken } from "~/lib/auth.server";
 import { checkChatRateLimit, getClientIp } from "~/lib/rate-limit.server";
+import { checkAndIncrementUsage } from "~/lib/billing.server";
 import type { Merchant } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -108,6 +112,15 @@ export async function action({ request }: ActionFunctionArgs) {
     update: {},
     create: { shopDomain: shop },
   });
+
+  // Usage limit check — blocks before any LLM/MCP work if the shop is over its plan limit
+  const usage = await checkAndIncrementUsage(shop);
+  if (!usage.allowed) {
+    return new Response(
+      JSON.stringify({ error: "usage_limit_exceeded", used: usage.used, limit: usage.limit }),
+      { status: 402, headers: { "Content-Type": "application/json" } },
+    );
+  }
 
   // Build the SSE stream
   const stream = buildSseStream({
