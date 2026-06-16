@@ -27,6 +27,7 @@ import prisma from "~/db.server";
 import { getSession, setSession, resetTurn, appendMessage } from "~/lib/session.server";
 import { fetchCustomerMemory, updateCustomerMemory } from "~/lib/agents/memory.server";
 import { runOrchestrator } from "~/lib/agents/orchestrator.server";
+import { persistConversationTurn, extractCheckoutToken } from "~/lib/conversation.server";
 import { authenticate } from "~/shopify.server";
 import type { Merchant } from "@prisma/client";
 
@@ -231,13 +232,26 @@ function buildSseStream(opts: {
         }
         if (result.checkout_url && !result.escalate_to_human) {
           updatedSession.checkout_id = session_id; // mark checkout initiated
+          updatedSession.checkout_token = extractCheckoutToken(result.checkout_url);
         }
         if (result.discount_code) {
           updatedSession.discount_applied = true;
         }
         await setSession(shop, session_id, updatedSession);
 
-        // 8. Async memory update (fire-and-forget, never blocks response)
+        // 8. Async Postgres persistence (fire-and-forget, never blocks response)
+        void persistConversationTurn({
+          shopDomain: shop,
+          sessionId: session_id,
+          customerId: customer_id,
+          session: updatedSession,
+          checkoutUrl: result.checkout_url,
+          discountCode: result.discount_code,
+          escalateToHuman: result.escalate_to_human,
+          agentTrace: result.agent_trace,
+        }).catch((err) => console.error("[conversation] persist failed:", err));
+
+        // 9. Async memory update (fire-and-forget, never blocks response)
         if (customer_id) {
           const lastSearch =
             result.products?.length

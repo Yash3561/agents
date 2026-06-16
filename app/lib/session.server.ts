@@ -18,6 +18,7 @@ export interface ConversationSession {
   conversation_history: Message[];
   cart_id?: string;
   checkout_id?: string;
+  checkout_token?: string;    // real Shopify cart/checkout token (parsed from checkout_url), used to match orders/paid webhooks
   buyer_confirmed: boolean;   // reset to false after each checkout attempt
   discount_applied: boolean;  // one discount per conversation
   hop_count: number;          // reset each turn, max 3

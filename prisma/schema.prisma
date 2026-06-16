@@ -37,6 +37,7 @@ model Conversation {
   messageCount      Int      @default(0)
   cartId            String?
   checkoutId        String?
+  checkoutToken     String?           // real Shopify cart/checkout token parsed from checkout_url, used to match orders/paid webhooks
   cartValue         Float?
   resolved          Boolean  @default(false)
   escalated         Boolean  @default(false)
@@ -48,9 +49,11 @@ model Conversation {
   lastMessageAt     DateTime @updatedAt
   merchant          Merchant @relation(fields: [shopDomain], references: [shopDomain])
 
+  @@unique([shopDomain, sessionId])
   @@index([shopDomain])
   @@index([sessionId])
   @@index([orderId])
+  @@index([checkoutToken])
 }
 
 model Session {
