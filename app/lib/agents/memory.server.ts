@@ -11,7 +11,7 @@ const SUMMARIZE_AFTER_TURNS = 5;
 // ---------------------------------------------------------------------------
 
 export interface CustomerMemory {
-  preferences?: Record<string, string>;   // { size: "M", color: "black" }
+  recent_products?: string[];   // e.g. ["Fabric Resistance Bands (Pink)", "Silk Sleep Mask"] — most recent first, capped
   last_search?: string;
   summary?: string;                        // 2-sentence compressed history
   abandoned_cart?: { items: unknown[]; total: number; timestamp: string };
@@ -56,7 +56,7 @@ export async function fetchCustomerMemory(
     for (const { node } of fields) {
       try {
         const parsed = JSON.parse(node.value);
-        if (node.key === "preferences") memory.preferences = parsed;
+        if (node.key === "recent_products") memory.recent_products = parsed;
         else if (node.key === "last_search") memory.last_search = parsed;
         else if (node.key === "summary") memory.summary = parsed;
         else if (node.key === "abandoned_cart") memory.abandoned_cart = parsed;
@@ -85,7 +85,7 @@ export async function updateCustomerMemory(
   customerId: string,
   session: ConversationSession,
   lastSearchQuery?: string,
-  cartItems?: unknown[],
+  cartLines?: unknown[],
   cartAbandoned?: boolean,
 ): Promise<void> {
   if (!customerId) return;
@@ -96,13 +96,13 @@ export async function updateCustomerMemory(
 
     if (lastSearchQuery) updated.last_search = lastSearchQuery;
 
-    if (cartItems?.length) {
-      updated.preferences = extractPreferences(cartItems, current.preferences);
+    if (cartLines?.length) {
+      updated.recent_products = extractRecentProducts(cartLines, current.recent_products);
     }
 
     if (cartAbandoned && session.cart_id) {
       updated.abandoned_cart = {
-        items: cartItems ?? [],
+        items: cartLines ?? [],
         total: 0,
         timestamp: new Date().toISOString(),
       };
@@ -193,7 +193,7 @@ async function writeMemory(
     }
   };
 
-  add("preferences", memory.preferences);
+  add("recent_products", memory.recent_products);
   add("last_search", memory.last_search);
   add("summary", memory.summary);
   add("abandoned_cart", memory.abandoned_cart);
@@ -220,19 +220,34 @@ async function writeMemory(
   );
 }
 
-function extractPreferences(
-  cartItems: unknown[],
-  existing?: Record<string, string>,
-): Record<string, string> {
-  // Merge existing preferences with signals from cart items.
-  // Items are ProductVariant objects — extract option values.
-  const prefs: Record<string, string> = { ...existing };
-  for (const item of cartItems) {
-    const i = item as Record<string, unknown>;
-    if (typeof i.size === "string") prefs.size = i.size;
-    if (typeof i.color === "string") prefs.color = i.color;
+const MAX_RECENT_PRODUCTS = 5;
+
+/**
+ * Builds a "recently interested in" list from real Shopify cart lines
+ * (Cart.lines, see cart.server.ts) — each line's merchandise only exposes
+ * a product title and a combined variant title (e.g. "Pink", "Large / Blue"),
+ * not separate structured size/color fields, so that's what we track.
+ */
+function extractRecentProducts(cartLines: unknown[], existing?: string[]): string[] {
+  const newLabels: string[] = [];
+  for (const line of cartLines) {
+    const merchandise = (line as Record<string, unknown>).merchandise as
+      | Record<string, unknown>
+      | undefined;
+    const productTitle = (merchandise?.product as Record<string, unknown> | undefined)
+      ?.title as string | undefined;
+    if (!productTitle) continue;
+    const variantTitle = merchandise?.title as string | undefined;
+    const label =
+      variantTitle && variantTitle !== "Default Title"
+        ? `${productTitle} (${variantTitle})`
+        : productTitle;
+    if (!newLabels.includes(label)) newLabels.push(label);
   }
-  return prefs;
+  return Array.from(new Set([...newLabels, ...(existing ?? [])])).slice(
+    0,
+    MAX_RECENT_PRODUCTS,
+  );
 }
 
 function isSummaryFresh(summary: string | undefined, history: Message[]): boolean {

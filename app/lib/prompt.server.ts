@@ -1,16 +1,8 @@
 import type { Merchant } from "@prisma/client";
 import type { ConversationSession } from "~/lib/session.server";
+import type { CustomerMemory } from "~/lib/agents/memory.server";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface CustomerMemory {
-  preferences?: Record<string, string>;
-  last_search?: string;
-  summary?: string;
-  abandoned_cart?: { items: unknown[]; total: number; timestamp: string };
-}
+export type { CustomerMemory };
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -42,6 +34,7 @@ RULES:
 7. update_cart's add[]/update[] are incremental — only pass the items actually changing (exactly what the customer asked to add/remove), never anything else, and never the full cart
 8. Currency: always show amounts exactly as returned by MCP (already formatted)
 9. If the customer mentions they have a discount code or gift card, call update_cart with discountCodes/giftCardCodes to actually apply it — never just acknowledge it in text without applying it. Never proactively ask if they have one. After applying, check whether the cart's total actually changed before confirming success — if the code didn't reduce the total, tell the customer it may be invalid or expired rather than claiming it worked.
+10. Customer memory's recent_products (if present) lists items they previously showed real interest in (added to cart on a past visit) — use it for continuity when relevant, e.g. "still thinking about the resistance bands?" or to avoid re-suggesting the exact same item they already considered. Don't force a reference to it if the current question is unrelated.
 
 ${cartState}
 Customer memory: ${JSON.stringify(memory)}`;

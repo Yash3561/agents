@@ -267,8 +267,8 @@ function buildSseStream(opts: {
         // 9. Async memory update (fire-and-forget, never blocks response)
         if (customer_id) {
           const lastSearch = result.last_search_query;
-          const cartItems = result.cart
-            ? ((result.cart as { line_items?: unknown[] }).line_items ?? [])
+          const cartLines = result.cart
+            ? ((result.cart as { lines?: unknown[] }).lines ?? [])
             : undefined;
           void updateCustomerMemory(
             shop,
@@ -276,7 +276,7 @@ function buildSseStream(opts: {
             customer_id,
             updatedSession,
             lastSearch,
-            cartItems,
+            cartLines,
           ).catch(() => null);
         }
 
