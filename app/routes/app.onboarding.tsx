@@ -41,7 +41,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect("/app");
   }
 
-  return { shop, merchant };
+  return { shop, merchant, appUrl: process.env.SHOPIFY_APP_URL ?? "" };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -76,8 +76,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return redirect("/app");
 };
 
-async function sendTestMessage(shop: string): Promise<string> {
-  const res = await fetch("/api/chat", {
+async function sendTestMessage(shop: string, appUrl: string): Promise<string> {
+  const res = await fetch(`${appUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -104,8 +104,21 @@ async function sendTestMessage(shop: string): Promise<string> {
   return text || "(no response text)";
 }
 
+function WidgetPreview({ color, greeting }: { color: string; greeting: string }) {
+  return (
+    <div style={{ position: "relative", height: 200, background: "#f0f0f3", borderRadius: 12, border: "1px solid #e1e1e1", overflow: "hidden", marginTop: "16px" }}>
+      <div style={{ position: "absolute", top: 10, left: 12, fontSize: 11, color: "#9a9a9a", fontFamily: "system-ui, sans-serif" }}>Your storefront</div>
+      <div style={{ position: "absolute", bottom: 56, right: 16, width: 190, borderRadius: 14, background: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,.18)", overflow: "hidden", fontFamily: "system-ui, sans-serif" }}>
+        <div style={{ background: color || "#1a1a1a", color: "#fff", padding: "8px 12px", fontSize: 12, fontWeight: 600 }}>Your Bot</div>
+        <div style={{ padding: 10, background: "#fff", fontSize: 11, color: "#111" }}>{greeting || "Hi! How can I help you today?"}</div>
+      </div>
+      <div style={{ position: "absolute", bottom: 12, right: 16, width: 36, height: 36, borderRadius: "50%", background: color || "#1a1a1a" }} />
+    </div>
+  );
+}
+
 export default function Onboarding() {
-  const { shop, merchant } = useLoaderData<typeof loader>();
+  const { shop, merchant, appUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
   const [step, setStep] = useState(merchant.onboardingStep || 1);
@@ -148,7 +161,7 @@ export default function Onboarding() {
     setTestLoading(true);
     setTestResult(null);
     try {
-      const text = await sendTestMessage(shop);
+      const text = await sendTestMessage(shop, appUrl);
       setTestResult(text);
     } catch {
       setTestResult("Something went wrong reaching the assistant. Try again.");
@@ -167,12 +180,15 @@ export default function Onboarding() {
             label="Opening greeting"
             value={widgetGreeting}
             onInput={(e: Event) => setWidgetGreeting((e.target as HTMLInputElement).value)}
+            help-text="The first message customers see when they open your chat widget."
           ></s-text-field>
           <s-color-field
             label="Widget color"
             value={widgetColor}
             onInput={(e: Event) => setWidgetColor((e.target as HTMLInputElement).value)}
+            help-text="Choose a color that matches your brand."
           ></s-color-field>
+          <WidgetPreview color={widgetColor} greeting={widgetGreeting} />
           <s-stack direction="inline" gap="base">
             <s-button onClick={() => goToStep(2)} variant="primary">
               Next
@@ -276,10 +292,15 @@ export default function Onboarding() {
             <s-button onClick={() => goToStep(3)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={finish} variant="primary">
+            <s-button onClick={finish} variant="primary" disabled={!themeConfirmed}>
               Finish
             </s-button>
           </s-stack>
+          {!themeConfirmed && (
+            <p style={{ fontSize: "12px", color: "#b45309", marginTop: "8px" }}>
+              ⚠️ Please confirm you've added the widget to your theme before finishing.
+            </p>
+          )}
         </s-section>
       )}
     </s-page>

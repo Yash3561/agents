@@ -320,11 +320,9 @@ export default function Settings() {
               checked={escalationEmailEnabled}
               onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
             ></s-switch>
-            {!supportEmail && (
-              <p style={{ color: "#f59e0b", fontSize: "12px", marginTop: "8px" }}>
-                ⚠️ Add your support email below to receive escalation alerts.
-              </p>
-            )}
+            <p style={{ color: "#b45309", fontSize: "12px", marginTop: "8px" }}>
+              ⚠️ Email notifications are coming soon — no emails are currently sent. We'll notify you when this is live.
+            </p>
           </div>
         </s-section>
         <s-section heading="📧 Support">
@@ -366,6 +364,9 @@ export default function Settings() {
             </div>
           ))}
         </s-section>
+        <div style={{ padding: "16px 0" }}>
+          <s-button type="submit" variant="primary">Save settings</s-button>
+        </div>
       </form>
     </s-page>
   );

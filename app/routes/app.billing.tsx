@@ -11,6 +11,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { session, billing } = await authenticate.admin(request);
   const usage = await getUsage(session.shop);
 
+  const merchant = await db.merchant.findUnique({
+    where: { shopDomain: session.shop },
+    select: { conversationResetAt: true },
+  });
+
   let activeSubscription: { id: string; name: string } | null = null;
   try {
     const result = await billing.check({
@@ -33,7 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     console.log("[billing] check failed:", e);
   }
 
-  return { usage, activeSubscription };
+  return { usage, activeSubscription, resetAt: merchant?.conversationResetAt ?? null };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -53,6 +58,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
   return null; // unreachable — billing.request redirects
 }
+
+const FREE_PLAN = {
+  name: "Free",
+  price: "$0",
+  conversations: "500 conversations/mo",
+  features: ["AI-powered chat widget", "Live catalog search", "Basic widget customization"],
+};
 
 const PLANS: Array<{
   key: PlanKey;
@@ -97,7 +109,7 @@ const PLANS: Array<{
 ];
 
 export default function BillingPage() {
-  const { usage, activeSubscription } = useLoaderData<typeof loader>();
+  const { usage, activeSubscription, resetAt } = useLoaderData<typeof loader>();
 
   const usedPct =
     usage.limit > 0
@@ -111,6 +123,9 @@ export default function BillingPage() {
   // Inline progress bar since s-progress-bar is not in Polaris web types
   const barColor =
     usedPct >= 100 ? "#d82c0d" : usedPct >= 80 ? "#b98900" : "#008060";
+
+  const PLAN_ORDER: Record<string, number> = { free: 0, starter: 1, growth: 2, pro: 3 };
+  const currentPlanRank = PLAN_ORDER[usage.plan] ?? 0;
 
   return (
     <s-page heading="Plan &amp; Billing">
@@ -151,11 +166,40 @@ export default function BillingPage() {
           <div style={{ marginTop: "4px" }}>
             <s-text tone="neutral">{usedPct}% used</s-text>
           </div>
+          {resetAt && (
+            <div style={{ marginTop: "4px" }}>
+              <s-text tone="neutral">Resets on {new Date(resetAt).toLocaleDateString()}</s-text>
+            </div>
+          )}
         </s-box>
       </s-section>
 
       <s-section heading="Choose a Plan">
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+          {(() => {
+            const isCurrent = usage.plan === "free";
+            return (
+              <div style={{ flex: "1 1 240px", border: isCurrent ? "2px solid #008060" : "1px solid #e1e3e5", borderRadius: "8px", padding: "20px", background: isCurrent ? "#f0faf6" : "#ffffff", display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <s-heading>{FREE_PLAN.name}</s-heading>
+                  {isCurrent && <s-badge tone="success">Current</s-badge>}
+                </div>
+                <div>
+                  <span style={{ fontSize: "28px", fontWeight: 700 }}>{FREE_PLAN.price}</span>
+                  <span style={{ color: "#6d7175" }}> / month</span>
+                </div>
+                <s-text tone="neutral">{FREE_PLAN.conversations}</s-text>
+                <ul style={{ margin: "0", paddingLeft: "20px", color: "#202223" }}>
+                  {FREE_PLAN.features.map((f) => <li key={f} style={{ marginBottom: "4px" }}><s-text>{f}</s-text></li>)}
+                </ul>
+                <div style={{ marginTop: "auto" }}>
+                  <button type="button" disabled={isCurrent} style={{ width: "100%", padding: "10px 16px", background: isCurrent ? "#e1e3e5" : "#008060", color: isCurrent ? "#6d7175" : "#ffffff", border: "none", borderRadius: "6px", cursor: isCurrent ? "default" : "pointer", fontWeight: 600, fontSize: "14px" }}>
+                    {isCurrent ? "Current plan" : "Upgrade from Free"}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
           {PLANS.map((plan) => {
             const isCurrent = usage.plan === plan.key;
             return (
@@ -224,7 +268,9 @@ export default function BillingPage() {
                     >
                       {isCurrent
                         ? "Current plan"
-                        : `Upgrade to ${plan.name}`}
+                        : PLAN_ORDER[plan.key] > currentPlanRank
+                        ? `Upgrade to ${plan.name}`
+                        : `Downgrade to ${plan.name}`}
                     </button>
                   </Form>
                 </div>

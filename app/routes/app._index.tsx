@@ -16,11 +16,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     create: { shopDomain: shop },
   });
 
-  const url = new URL(request.url);
-
   if (!merchant.onboardedAt) {
+    const url = new URL(request.url);
     throw redirect(`/app/onboarding?${url.searchParams.toString()}`);
   }
+
+  const url = new URL(request.url);
 
   const days = url.searchParams.get("days") || "30";
   const since = days === "all" ? undefined : new Date(Date.now() - Number(days) * 86400000);
@@ -89,6 +90,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     days,
     filter,
+    shopDomain: shop,
     stats: {
       totalConversations,
       escalatedCount,
@@ -114,7 +116,7 @@ function Metric({
   label: string;
   value: string;
   icon?: string;
-  trend?: { pct: number; direction: "up" | "down" };
+  trend?: { pct: number; direction: "up" | "down"; warning?: boolean };
 }) {
   return (
     <s-box padding="base" background="subdued" borderRadius="base">
@@ -128,11 +130,11 @@ function Metric({
           <span
             style={{
               fontSize: "12px",
-              color: trend.direction === "up" ? "#2e7d32" : "#c0392b",
+              color: trend.warning ? "#c0392b" : "#2e7d32",
               fontWeight: 600,
             }}
           >
-            {trend.direction === "up" ? "↑" : "↓"} {trend.pct}%
+            {trend.pct}% used
           </span>
         )}
       </div>
@@ -141,7 +143,7 @@ function Metric({
 }
 
 export default function Index() {
-  const { stats, conversations, filter, days, recentEscalations, usage, routingData } =
+  const { stats, conversations, filter, days, recentEscalations, usage, routingData, shopDomain } =
     useLoaderData<typeof loader>();
 
   const escalationRatePct = stats.totalConversations
@@ -266,6 +268,7 @@ export default function Index() {
             trend={{
               pct: usagePercent,
               direction: usagePercent > 80 ? "up" : "down",
+              warning: usagePercent > 80,
             }}
           />
         </s-grid>
@@ -282,7 +285,21 @@ export default function Index() {
         </s-stack>
 
         {conversations.length === 0 ? (
-          <s-paragraph>No conversations yet.</s-paragraph>
+          <div style={{ textAlign: "center", padding: "40px 20px" }}>
+            <div style={{ fontSize: "48px", marginBottom: "16px" }}>💬</div>
+            <s-heading>Your AI assistant is ready</s-heading>
+            <p style={{ color: "#666", margin: "12px 0 20px", fontSize: "14px" }}>
+              Once customers start chatting on your store, conversations will appear here.
+            </p>
+            <a
+              href={`https://admin.shopify.com/store/${shopDomain.replace(".myshopify.com", "")}/themes/current/editor?context=apps`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ display: "inline-block", padding: "10px 20px", background: "#1a1a1a", color: "#fff", borderRadius: "6px", textDecoration: "none", fontSize: "14px", fontWeight: 600 }}
+            >
+              Open Theme Editor to activate widget →
+            </a>
+          </div>
         ) : (
           <s-table variant="auto">
             <s-table-header-row>
@@ -295,8 +312,12 @@ export default function Index() {
             <s-table-body>
               {conversations.map((c) => (
                 <s-table-row key={c.id}>
-                  <s-table-cell>{new Date(c.startedAt).toLocaleString()}</s-table-cell>
-                  <s-table-cell>{c.customerId ? "Customer" : "Anonymous"}</s-table-cell>
+                  <s-table-cell>
+                    <Link to={`/app/conversations/${c.id}`} style={{ color: "#1a1a1a" }}>
+                      {new Date(c.startedAt).toLocaleString()}
+                    </Link>
+                  </s-table-cell>
+                  <s-table-cell>{c.customerId ? "Customer" : "Guest"}</s-table-cell>
                   <s-table-cell>{c.messageCount}</s-table-cell>
                   <s-table-cell>
                     {c.orderRevenueCents
@@ -320,13 +341,19 @@ export default function Index() {
       {routingData.length > 0 && (
         <s-section heading="What customers ask about">
           {(() => {
+            const ROUTE_LABELS: Record<string, string> = {
+              shopping: "Product questions",
+              support: "Support & policies",
+              personalization: "Offers & discounts",
+              direct: "General chat",
+            };
             const total = routingData.reduce((s, r) => s + r.count, 0);
             return routingData.map((r) => (
               <div
                 key={r.route}
                 style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}
               >
-                <span style={{ width: "120px", textTransform: "capitalize" }}>{r.route}</span>
+                <span style={{ width: "160px" }}>{ROUTE_LABELS[r.route] ?? r.route}</span>
                 <div
                   style={{
                     flex: 1,

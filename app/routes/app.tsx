@@ -17,8 +17,9 @@ export default function App() {
 
   const navItems = [
     { href: "/app", label: "Home", icon: "📊" },
+    { href: "/app/conversations", label: "Conversations", icon: "💬" },
     { href: "/app/settings", label: "Settings", icon: "⚙️" },
-    { href: "/app/ai-config", label: "AI Config", icon: "🤖" },
+    { href: "/app/ai-config", label: "Knowledge Base", icon: "🤖" },
     { href: "/app/billing", label: "Billing", icon: "💳" },
   ];
 

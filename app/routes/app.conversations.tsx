@@ -8,6 +8,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const days = url.searchParams.get("days") || "30";
   const status = url.searchParams.get("status") || "all";
+  const page = Math.max(0, Number(url.searchParams.get("page") || "0"));
 
   const since =
     days === "all" ? undefined : new Date(Date.now() - Number(days) * 86400000);
@@ -22,30 +23,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (status === "escalated") where.escalated = true;
   if (status === "converted") where.orderId = { not: null };
 
-  const conversations = await db.conversation.findMany({
-    where,
-    orderBy: { lastMessageAt: "desc" },
-    take: 50,
-    select: {
-      id: true,
-      sessionId: true,
-      customerId: true,
-      messageCount: true,
-      cartValue: true,
-      orderRevenueCents: true,
-      escalated: true,
-      orderId: true,
-      discountCode: true,
-      startedAt: true,
-      lastMessageAt: true,
-    },
-  });
+  const [conversations, total] = await Promise.all([
+    db.conversation.findMany({
+      where,
+      orderBy: { lastMessageAt: "desc" },
+      take: 50,
+      skip: page * 50,
+      select: {
+        id: true,
+        sessionId: true,
+        customerId: true,
+        messageCount: true,
+        cartValue: true,
+        orderRevenueCents: true,
+        escalated: true,
+        orderId: true,
+        discountCode: true,
+        startedAt: true,
+        lastMessageAt: true,
+      },
+    }),
+    db.conversation.count({ where }),
+  ]);
 
-  return { conversations, days, status };
+  return { conversations, days, status, page, total };
 }
 
 export default function ConversationsList() {
-  const { conversations, days, status } = useLoaderData<typeof loader>();
+  const { conversations, days, status, page, total } = useLoaderData<typeof loader>();
+
+  const totalPages = Math.ceil(total / 50);
 
   const dayOptions = [
     { value: "7", label: "Last 7 days" },
@@ -121,6 +128,10 @@ export default function ConversationsList() {
           })}
         </div>
 
+        <p style={{ fontSize: "13px", color: "#666", marginBottom: "8px" }}>
+          Showing {page * 50 + 1}–{Math.min((page + 1) * 50, total)} of {total} conversations
+        </p>
+
         {conversations.length === 0 ? (
           <p>No conversations found.</p>
         ) : (
@@ -142,7 +153,7 @@ export default function ConversationsList() {
                     </s-link>
                   </s-table-cell>
                   <s-table-cell>
-                    {c.customerId ? "Customer" : "Anonymous"}
+                    {c.customerId ? "Customer" : "Guest"}
                   </s-table-cell>
                   <s-table-cell>{c.messageCount}</s-table-cell>
                   <s-table-cell>
@@ -171,6 +182,18 @@ export default function ConversationsList() {
               ))}
             </s-table-body>
           </s-table>
+        )}
+
+        {totalPages > 1 && (
+          <div style={{ display: "flex", gap: "8px", marginTop: "16px", alignItems: "center" }}>
+            {page > 0 ? (
+              <a href={`/app/conversations?${new URLSearchParams({ days, status, page: String(page - 1) })}`} style={{ padding: "6px 14px", background: "#f0f0f0", borderRadius: "4px", textDecoration: "none", color: "#333", fontSize: "13px" }}>← Previous</a>
+            ) : null}
+            <span style={{ fontSize: "13px", color: "#666" }}>Page {page + 1} of {totalPages}</span>
+            {(page + 1) * 50 < total ? (
+              <a href={`/app/conversations?${new URLSearchParams({ days, status, page: String(page + 1) })}`} style={{ padding: "6px 14px", background: "#f0f0f0", borderRadius: "4px", textDecoration: "none", color: "#333", fontSize: "13px" }}>Next →</a>
+            ) : null}
+          </div>
         )}
       </s-section>
     </s-page>
