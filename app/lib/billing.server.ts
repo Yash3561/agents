@@ -93,3 +93,24 @@ export async function checkAndIncrementUsage(shopDomain: string): Promise<UsageC
     return { allowed: true, used: updated?.conversationCount ?? durableCount + 1, limit };
   }
 }
+
+/**
+ * Returns the current usage snapshot for a shop without modifying any counters.
+ * Reads the live Redis count when available, falls back to the durable Prisma value.
+ */
+export async function getUsage(shopDomain: string): Promise<{ used: number; limit: number; plan: string }> {
+  const merchant = await prisma.merchant.findUnique({
+    where: { shopDomain },
+    select: { plan: true, conversationCount: true, conversationResetAt: true },
+  });
+  if (!merchant) return { used: 0, limit: 500, plan: "free" };
+  const limit = PLAN_LIMITS[merchant.plan as keyof typeof PLAN_LIMITS] ?? 500;
+  try {
+    const key = usageKey(shopDomain);
+    const val = await redis.get(key);
+    const used = val ? parseInt(String(val), 10) : merchant.conversationCount;
+    return { used: isNaN(used) ? 0 : used, limit, plan: merchant.plan };
+  } catch {
+    return { used: merchant.conversationCount, limit, plan: merchant.plan };
+  }
+}
