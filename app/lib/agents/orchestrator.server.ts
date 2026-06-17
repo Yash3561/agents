@@ -38,6 +38,7 @@ export interface OutboundMessage {
   escalate_to_human?: boolean;
   agent_trace: string[];
   last_search_query?: string;
+  route_reason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +108,7 @@ export async function runOrchestrator(opts: {
       confidence: routing.confidence,
       quick_replies: merchantQuickReplies,
       agent_trace: agentTrace,
+      route_reason: routing.route_reason,
     };
   }
 
@@ -117,6 +119,7 @@ export async function runOrchestrator(opts: {
       confidence: routing.confidence,
       quick_replies: merchantQuickReplies,
       agent_trace: agentTrace,
+      route_reason: routing.route_reason,
     };
   }
 
@@ -129,6 +132,7 @@ export async function runOrchestrator(opts: {
         text: `I'm having trouble completing that request. You can browse directly at https://${shopDomain}.`,
         confidence: 0,
         agent_trace: agentTrace,
+        route_reason: routing.route_reason,
       };
     }
     throw err;
@@ -162,6 +166,7 @@ export async function runOrchestrator(opts: {
         confidence: routing.confidence,
         agent_trace: [...agentTrace, ...out.toolsCalled],
         last_search_query: out.lastSearchQuery,
+        route_reason: routing.route_reason,
       };
       break;
     }
@@ -180,6 +185,7 @@ export async function runOrchestrator(opts: {
         escalate_to_human: out.escalate_to_human,
         confidence: routing.confidence,
         agent_trace: [...agentTrace, ...out.toolsCalled],
+        route_reason: routing.route_reason,
       };
       break;
     }
@@ -211,6 +217,7 @@ export async function runOrchestrator(opts: {
           checkout_url: shopOut.checkoutUrl,
           confidence: routing.confidence,
           agent_trace: [...agentTrace, ...out.toolsCalled, ...shopOut.toolsCalled],
+          route_reason: routing.route_reason,
         };
       } else {
         result = {
@@ -218,6 +225,7 @@ export async function runOrchestrator(opts: {
           discount_code: out.discountCode,
           confidence: routing.confidence,
           agent_trace: [...agentTrace, ...out.toolsCalled],
+          route_reason: routing.route_reason,
         };
       }
       break;

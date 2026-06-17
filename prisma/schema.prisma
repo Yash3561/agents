@@ -52,6 +52,7 @@ model Conversation {
   orderId           String?           // set when checkout completed inside chat
   orderRevenueCents Int?              // written by orders/paid webhook
   agentTrace        Json?
+  routeReason       String?
   startedAt         DateTime @default(now())
   lastMessageAt     DateTime @updatedAt
   merchant          Merchant @relation(fields: [shopDomain], references: [shopDomain])

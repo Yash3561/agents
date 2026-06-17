@@ -61,8 +61,9 @@ export async function persistConversationTurn(opts: {
   discountCode?: string;
   escalateToHuman?: boolean;
   agentTrace: string[];
+  routeReason?: string;
 }): Promise<void> {
-  const { shopDomain, sessionId, customerId, session, checkoutUrl, discountCode, escalateToHuman, agentTrace } = opts;
+  const { shopDomain, sessionId, customerId, session, checkoutUrl, discountCode, escalateToHuman, agentTrace, routeReason } = opts;
   const checkoutToken = extractCheckoutToken(checkoutUrl);
 
   await prisma.conversation.upsert({
@@ -78,6 +79,7 @@ export async function persistConversationTurn(opts: {
       discountCode,
       escalated: !!escalateToHuman,
       agentTrace,
+      routeReason: routeReason ?? undefined,
     },
     update: {
       messages: session.conversation_history as unknown as Prisma.InputJsonValue,
@@ -87,6 +89,7 @@ export async function persistConversationTurn(opts: {
       ...(discountCode ? { discountCode } : {}),
       ...(escalateToHuman ? { escalated: true } : {}),
       agentTrace,
+      routeReason: routeReason ?? undefined,
     },
   });
 

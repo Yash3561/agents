@@ -280,6 +280,7 @@ function buildSseStream(opts: {
           discountCode: result.discount_code,
           escalateToHuman: result.escalate_to_human,
           agentTrace: result.agent_trace,
+          routeReason: result.route_reason,
         }).catch((err) => console.error("[conversation] persist failed:", err));
 
         // 9. Async memory update (fire-and-forget, never blocks response)

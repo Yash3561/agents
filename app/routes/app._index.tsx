@@ -71,15 +71,53 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   const rawRouting = await prisma.$queryRaw<Array<{ route: string; count: bigint }>>`
-    SELECT "agentTrace"::json->0->>'route' as route, COUNT(*) as count
-    FROM "Conversation" WHERE "shopDomain" = ${shop}
-    AND "startedAt" >= ${since}
-    AND "agentTrace" IS NOT NULL GROUP BY 1
+    SELECT
+      SPLIT_PART("agentTrace"::json->>0, ':', 2) as route,
+      COUNT(*) as count
+    FROM "Conversation"
+    WHERE "shopDomain" = ${shop}
+      AND "startedAt" >= ${since}
+      AND "agentTrace" IS NOT NULL
+      AND "agentTrace"::json->>0 LIKE 'orchestrator:%'
+    GROUP BY 1
+    ORDER BY count DESC
   `;
   const routingData = rawRouting.map((r) => ({
     route: String(r.route || "unknown"),
     count: Number(r.count),
   }));
+
+  const rawConversionByRoute = await prisma.$queryRaw<Array<{ route: string; converted: bigint; total: bigint }>>`
+    SELECT
+      SPLIT_PART("agentTrace"::json->>0, ':', 2) as route,
+      COUNT(CASE WHEN "orderId" IS NOT NULL THEN 1 END) as converted,
+      COUNT(*) as total
+    FROM "Conversation"
+    WHERE "shopDomain" = ${shop}
+      AND "startedAt" >= ${since}
+      AND "agentTrace" IS NOT NULL
+      AND "agentTrace"::json->>0 LIKE 'orchestrator:%'
+    GROUP BY 1
+  `;
+  const conversionByRoute = new Map(
+    rawConversionByRoute.map((r) => [
+      String(r.route),
+      { converted: Number(r.converted), total: Number(r.total) },
+    ])
+  );
+
+  const rawIntents = await prisma.$queryRaw<Array<{ reason: string; count: bigint }>>`
+    SELECT "routeReason" as reason, COUNT(*) as count
+    FROM "Conversation"
+    WHERE "shopDomain" = ${shop}
+      AND "startedAt" >= ${since}
+      AND "routeReason" IS NOT NULL
+      AND "routeReason" != ''
+    GROUP BY "routeReason"
+    ORDER BY count DESC
+    LIMIT 10
+  `;
+  const topIntents = rawIntents.map((r) => ({ reason: String(r.reason), count: Number(r.count) }));
 
   const dailyCounts = await prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
     SELECT DATE("startedAt")::text as date, COUNT(*) as count
@@ -112,6 +150,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     usage,
     routingData,
     dailyData,
+    conversionByRoute: Object.fromEntries(conversionByRoute),
+    topIntents,
   };
 };
 
@@ -254,7 +294,7 @@ const DAY_OPTIONS = [
 ];
 
 export default function Index() {
-  const { stats, days, recentEscalations, usage, routingData, dailyData, shopDomain } =
+  const { stats, days, recentEscalations, usage, routingData, dailyData, shopDomain, conversionByRoute, topIntents } =
     useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -276,13 +316,6 @@ export default function Index() {
   const usagePercent = Math.round((usage.used / usage.limit) * 100);
   const isAtCapacity = usage.used >= usage.limit;
   const isNearCapacity = usage.used >= usage.limit * 0.8 && !isAtCapacity;
-
-  const ROUTE_LABELS: Record<string, string> = {
-    shopping: "Product questions",
-    support: "Support & policies",
-    personalization: "Offers & discounts",
-    direct: "General chat",
-  };
 
   return (
     <s-page heading="Dashboard">
@@ -471,34 +504,63 @@ export default function Index() {
         </div>
       </s-section>
 
-      {routingData.length > 0 && (
+      {(routingData.length > 0 || topIntents.length > 0) && (
         <s-section heading="What customers ask about">
-          {(() => {
-            const total = routingData.reduce((s, r) => s + r.count, 0);
-            return routingData.map((r) => (
-              <div
-                key={r.route}
-                style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}
-              >
-                <span style={{ width: "160px", fontSize: "13px", color: "#444" }}>
-                  {ROUTE_LABELS[r.route] ?? r.route}
-                </span>
-                <div style={{ flex: 1, background: "#f0f0f0", borderRadius: "4px", height: "6px" }}>
-                  <div
-                    style={{
-                      width: `${Math.round((r.count / total) * 100)}%`,
-                      background: "#1a1a1a",
-                      height: "6px",
-                      borderRadius: "4px",
-                    }}
-                  />
-                </div>
-                <span style={{ width: "36px", textAlign: "right", fontSize: "12px", color: "#888" }}>
-                  {Math.round((r.count / total) * 100)}%
-                </span>
+          {routingData.length > 0 && (
+            <div style={{ marginBottom: topIntents.length > 0 ? "20px" : "0" }}>
+              <div style={{ fontSize: "12px", color: "#888", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "10px" }}>
+                Conversation types
               </div>
-            ));
-          })()}
+              {(() => {
+                const ROUTE_LABELS: Record<string, string> = {
+                  shopping: "Product questions",
+                  support: "Support & policies",
+                  personalization: "Offers & discounts",
+                  direct: "General chat",
+                };
+                const total = routingData.reduce((s, r) => s + r.count, 0);
+                return routingData.map((r) => {
+                  const conv = conversionByRoute[r.route];
+                  const convPct = conv && conv.total > 0 ? Math.round((conv.converted / conv.total) * 100) : null;
+                  return (
+                    <div key={r.route} style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
+                      <span style={{ width: "160px", fontSize: "13px", color: "#444" }}>
+                        {ROUTE_LABELS[r.route] ?? r.route}
+                      </span>
+                      <div style={{ flex: 1, background: "#f0f0f0", borderRadius: "4px", height: "6px" }}>
+                        <div style={{ width: `${Math.round((r.count / total) * 100)}%`, background: "#1a1a1a", height: "6px", borderRadius: "4px" }} />
+                      </div>
+                      <span style={{ width: "32px", textAlign: "right", fontSize: "12px", color: "#888" }}>
+                        {Math.round((r.count / total) * 100)}%
+                      </span>
+                      {convPct !== null && (
+                        <span style={{ width: "80px", fontSize: "11px", color: convPct > 0 ? "#2e7d32" : "#aaa" }}>
+                          {convPct > 0 ? `${convPct}% converted` : "0% converted"}
+                        </span>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          )}
+
+          {topIntents.length > 0 && (
+            <div>
+              <div style={{ fontSize: "12px", color: "#888", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "10px" }}>
+                Top customer intents
+              </div>
+              {topIntents.map((intent, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
+                  <span style={{ width: "20px", fontSize: "12px", color: "#aaa", textAlign: "right" }}>{i + 1}</span>
+                  <span style={{ flex: 1, fontSize: "13px", color: "#333" }}>{intent.reason}</span>
+                  <span style={{ fontSize: "12px", color: "#888", background: "#f5f5f5", borderRadius: "4px", padding: "2px 8px" }}>
+                    {intent.count}×
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </s-section>
       )}
 
