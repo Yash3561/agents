@@ -93,12 +93,19 @@ export async function runOrchestrator(opts: {
 
   agentTrace.push(`orchestrator:${routing.route}`);
 
+  // Merchant-configured quick replies (falls back to defaults if not set)
+  const DEFAULT_QUICK_REPLIES = ["Browse products", "Check order status", "Return policy"];
+  const merchantQuickReplies =
+    merchant.quickReplies && merchant.quickReplies.length > 0
+      ? merchant.quickReplies
+      : DEFAULT_QUICK_REPLIES;
+
   // Low confidence → ask to rephrase (no specialist call)
   if (routing.confidence < 0.6) {
     return {
       text: routing.direct_response ?? "I'm not sure I understood that — could you rephrase?",
       confidence: routing.confidence,
-      quick_replies: ["Search products", "Check order", "Return policy"],
+      quick_replies: merchantQuickReplies,
       agent_trace: agentTrace,
     };
   }
@@ -108,7 +115,7 @@ export async function runOrchestrator(opts: {
     return {
       text: routing.direct_response ?? "How can I help you today?",
       confidence: routing.confidence,
-      quick_replies: ["Browse products", "Track order", "Return policy"],
+      quick_replies: merchantQuickReplies,
       agent_trace: agentTrace,
     };
   }

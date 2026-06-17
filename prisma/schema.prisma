@@ -8,24 +8,29 @@ datasource db {
 }
 
 model Merchant {
-  id                  String         @id @default(cuid())
-  shopDomain          String         @unique
-  plan                String         @default("free")
-  onboardedAt         DateTime?
-  conversationCount   Int            @default(0)
-  conversationResetAt DateTime       @default(now())
-  widgetColor         String         @default("#1a1a1a")
-  widgetPosition      String         @default("bottom-right")
-  widgetGreeting      String         @default("Hi! How can I help you today?")
-  brandVoice          String         @default("friendly and helpful")
-  maxDiscountPct      Int            @default(15)
-  vipCartThreshold    Int            @default(10000)
-  personalizationEnabled Boolean     @default(true)
-  supportEmail        String?
-  whatsappNumber      String?
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  conversations       Conversation[]
+  id                     String         @id @default(cuid())
+  shopDomain             String         @unique
+  plan                   String         @default("free")
+  onboardedAt            DateTime?
+  conversationCount      Int            @default(0)
+  conversationResetAt    DateTime       @default(now())
+  widgetColor            String         @default("#1a1a1a")
+  widgetPosition         String         @default("bottom-right")
+  widgetGreeting         String         @default("Hi! How can I help you today?")
+  brandVoice             String         @default("friendly and helpful")
+  maxDiscountPct         Int            @default(15)
+  vipCartThreshold       Int            @default(10000)
+  supportEmail           String?
+  whatsappNumber         String?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  personalizationEnabled Boolean        @default(true)
+  escalationEmailEnabled Boolean        @default(true)
+  excludedPages          String[]       @default([])
+  onboardingStep         Int            @default(1)
+  customFaqs             Json           @default("[]")
+  quickReplies           String[]       @default([])
+  conversations          Conversation[]
 }
 
 model Conversation {
@@ -38,16 +43,16 @@ model Conversation {
   messageCount      Int      @default(0)
   cartId            String?
   checkoutId        String?
-  checkoutToken     String?           // real Shopify cart/checkout token parsed from checkout_url, used to match orders/paid webhooks
   cartValue         Float?
   resolved          Boolean  @default(false)
   escalated         Boolean  @default(false)
   discountCode      String?
-  orderId           String?           // set when checkout completed inside chat
-  orderRevenueCents Int?              // written by orders/paid webhook
+  orderId           String?
+  orderRevenueCents Int?
   agentTrace        Json?
   startedAt         DateTime @default(now())
   lastMessageAt     DateTime @updatedAt
+  checkoutToken     String?
   merchant          Merchant @relation(fields: [shopDomain], references: [shopDomain])
 
   @@unique([shopDomain, sessionId])

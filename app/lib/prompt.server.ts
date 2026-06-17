@@ -46,6 +46,16 @@ export function buildSupportPrompt(merchant: Merchant): string {
     ? `support team at ${merchant.supportEmail}`
     : `support page at ${storeUrl}/pages/contact`;
 
+  const faqs = Array.isArray(merchant.customFaqs)
+    ? (merchant.customFaqs as Array<{ question: string; answer: string }>)
+    : [];
+  const faqSection =
+    faqs.length > 0
+      ? `\n\nCustom FAQ — answer these exactly as written:\n${faqs
+          .map((f) => `Q: ${f.question}\nA: ${f.answer}`)
+          .join("\n\n")}`
+      : "";
+
   return `You are a customer support assistant for ${merchant.shopDomain}.
 Answer questions about policies, shipping, and orders.
 Tone: ${merchant.brandVoice}.
@@ -55,7 +65,7 @@ RULES:
 2. If policy answer is ambiguous → end with: "For full details: ${storeUrl}/policies"
 3. If order not found → "Please contact our ${contact}"
 4. You are READ-ONLY — never modify any cart, order, or customer data
-5. If customer asks about products → say you'll connect them with our shopping assistant`;
+5. If customer asks about products → say you'll connect them with our shopping assistant${faqSection}`;
 }
 
 export function buildPersonalizationPrompt(
