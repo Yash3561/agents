@@ -13,6 +13,41 @@ export function extractCheckoutToken(checkoutUrl?: string): string | undefined {
 }
 
 /**
+ * Send an escalation alert email via Resend when the AI can't resolve a
+ * customer issue and escalates to human support. Fire-and-forget — graceful
+ * no-op if RESEND_API_KEY is not configured.
+ */
+async function sendEscalationEmail(
+  toEmail: string,
+  sessionId: string,
+  messages: unknown[],
+  shop: string,
+): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.log('[NeonPing] Escalation email skipped — RESEND_API_KEY not set');
+    return;
+  }
+  const transcript = (Array.isArray(messages) ? messages : [])
+    .map((m: unknown) => {
+      const msg = m as { role?: string; content?: string };
+      return `${msg.role === 'user' ? 'Customer' : 'AI'}: ${msg.content ?? ''}`;
+    })
+    .join('\n');
+
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'NeonPing Alerts <alerts@neonping.com>',
+      to: toEmail,
+      subject: `Customer needs help — ${shop}`,
+      text: `A conversation was escalated to human support.\n\nSession: ${sessionId}\nShop: ${shop}\n\nTranscript:\n${transcript}`,
+    }),
+  }).catch(e => console.error('[NeonPing] Escalation email error:', e));
+}
+
+/**
  * Write-through persistence of conversation state to Postgres, called once per
  * turn from the chat route. Fire-and-forget — never blocks or fails the SSE
  * response if Postgres is briefly unavailable.
@@ -54,4 +89,17 @@ export async function persistConversationTurn(opts: {
       agentTrace,
     },
   });
+
+  // Fire escalation email if needed — fetch merchant settings to check toggles
+  if (escalateToHuman) {
+    const merchant = await prisma.merchant.findUnique({ where: { shopDomain } }).catch(() => null);
+    if (merchant?.escalationEmailEnabled && merchant?.supportEmail) {
+      sendEscalationEmail(
+        merchant.supportEmail,
+        sessionId,
+        session.conversation_history,
+        shopDomain,
+      ).catch(console.error);
+    }
+  }
 }

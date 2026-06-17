@@ -22,6 +22,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const maxDiscountPct = Math.min(20, Math.max(0, Number(formData.get("maxDiscountPct")) || 0));
   const vipCartThresholdDollars = Number(formData.get("vipCartThreshold")) || 0;
+  const personalizationEnabled = formData.get("personalizationEnabled") === "true";
+  const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
+  const excludedPages = formData.getAll("excludedPages") as string[];
 
   const merchant = await prisma.merchant.update({
     where: { shopDomain: session.shop },
@@ -33,6 +36,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       maxDiscountPct,
       vipCartThreshold: Math.round(vipCartThresholdDollars * 100),
       supportEmail: String(formData.get("supportEmail") ?? "") || null,
+      personalizationEnabled,
+      escalationEmailEnabled,
+      excludedPages,
     },
   });
 
@@ -210,6 +216,21 @@ export default function Settings() {
             value={String(merchant.vipCartThreshold / 100)}
             min={0}
           ></s-money-field>
+          <s-switch
+            label="Enable personalized discounts"
+            name="personalizationEnabled"
+            help-text="When enabled, the AI can offer discounts to VIP customers and loyal shoppers."
+            checked={merchant.personalizationEnabled}
+          ></s-switch>
+          <s-switch
+            label="Email me when AI escalates to human support"
+            name="escalationEmailEnabled"
+            help-text="Sends an email to your support address when the bot can't resolve a customer issue."
+            checked={merchant.escalationEmailEnabled}
+          ></s-switch>
+          {!merchant.supportEmail && (
+            <p style={{color:'#666',fontSize:'13px'}}>Set your support email below to receive escalation alerts.</p>
+          )}
         </s-section>
         <s-section heading="Support">
           <s-email-field
@@ -217,6 +238,20 @@ export default function Settings() {
             name="supportEmail"
             value={merchant.supportEmail ?? ""}
           ></s-email-field>
+        </s-section>
+        <s-section heading="Widget Visibility">
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <p>Hide the chat widget on these pages:</p>
+            {['checkout', 'cart', 'account', 'blog'].map(page => (
+              <s-checkbox
+                key={page}
+                name="excludedPages"
+                value={page}
+                label={page.charAt(0).toUpperCase() + page.slice(1) + (page === 'checkout' ? ' (recommended)' : '')}
+                checked={merchant.excludedPages?.includes(page) || false}
+              ></s-checkbox>
+            ))}
+          </s-box>
         </s-section>
         <s-button type="submit" variant="primary">
           Save

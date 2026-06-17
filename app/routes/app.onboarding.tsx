@@ -8,7 +8,7 @@ const VOICE_PRESETS = [
   {
     value: "friendly and helpful",
     label: "Friendly & helpful",
-    preview: "Hey there! 😊 Let me know if you need help finding anything!",
+    preview: "Hey there! Let me know if you need help finding anything!",
   },
   {
     value: "professional and concise",
@@ -18,7 +18,7 @@ const VOICE_PRESETS = [
   {
     value: "playful and fun",
     label: "Playful & fun",
-    preview: "Heyyy! 🎉 What are we shopping for today?",
+    preview: "Heyyy! What are we shopping for today?",
   },
   {
     value: "premium and polished",
@@ -41,21 +41,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect("/app");
   }
 
-  const apiUrl = `${process.env.SHOPIFY_APP_URL ?? ""}/api/chat`;
-
-  return { shop, merchant, apiUrl };
+  return { shop, merchant };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
 
-  if (formData.get("intent") === "skip") {
+  if (formData.get("intent") === "save-step") {
     await prisma.merchant.update({
       where: { shopDomain: session.shop },
-      data: { onboardedAt: new Date() },
+      data: { onboardingStep: Number(formData.get("step")) || 1 },
     });
-    return redirect("/app");
+    return { ok: true };
   }
 
   const maxDiscountPct = Math.min(20, Math.max(0, Number(formData.get("maxDiscountPct")) || 0));
@@ -71,6 +69,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       vipCartThreshold: Math.round(vipCartThresholdDollars * 100),
       personalizationEnabled: formData.get("personalizationEnabled") === "true",
       onboardedAt: new Date(),
+      onboardingStep: 4,
     },
   });
 
@@ -106,10 +105,10 @@ async function sendTestMessage(shop: string): Promise<string> {
 }
 
 export default function Onboarding() {
-  const { shop, merchant, apiUrl } = useLoaderData<typeof loader>();
+  const { shop, merchant } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(merchant.onboardingStep || 1);
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
   const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
@@ -126,7 +125,10 @@ export default function Onboarding() {
 
   const selectedPreset = VOICE_PRESETS.find((p) => p.value === brandVoice);
 
-  const skip = () => fetcher.submit({ intent: "skip" }, { method: "POST" });
+  const goToStep = (nextStep: number) => {
+    setStep(nextStep);
+    fetcher.submit({ intent: "save-step", step: String(nextStep) }, { method: "POST" });
+  };
 
   const finish = () => {
     fetcher.submit(
@@ -155,6 +157,8 @@ export default function Onboarding() {
     }
   };
 
+  const themeEditorUrl = `https://admin.shopify.com/store/${shop.replace(".myshopify.com", "")}/themes/current/editor?context=apps`;
+
   return (
     <s-page heading="Welcome to NeonPing">
       {step === 1 && (
@@ -170,10 +174,7 @@ export default function Onboarding() {
             onInput={(e: Event) => setWidgetColor((e.target as HTMLInputElement).value)}
           ></s-color-field>
           <s-stack direction="inline" gap="base">
-            <s-button onClick={skip} variant="tertiary">
-              Skip setup
-            </s-button>
-            <s-button onClick={() => setStep(2)} variant="primary">
+            <s-button onClick={() => goToStep(2)} variant="primary">
               Next
             </s-button>
           </s-stack>
@@ -200,10 +201,10 @@ export default function Onboarding() {
             </s-paragraph>
           ) : null}
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => setStep(1)} variant="tertiary">
+            <s-button onClick={() => goToStep(1)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={() => setStep(3)} variant="primary">
+            <s-button onClick={() => goToStep(3)} variant="primary">
               Next
             </s-button>
           </s-stack>
@@ -237,10 +238,10 @@ export default function Onboarding() {
             </>
           ) : null}
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => setStep(2)} variant="tertiary">
+            <s-button onClick={() => goToStep(2)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={() => setStep(4)} variant="primary">
+            <s-button onClick={() => goToStep(4)} variant="primary">
               Next
             </s-button>
           </s-stack>
@@ -250,17 +251,11 @@ export default function Onboarding() {
       {step === 4 && (
         <s-section heading="Step 4 of 4 — Go live">
           <s-paragraph>
-            Add NeonPing to your storefront: open your theme editor's App Embeds panel
-            and paste this API URL into the NeonPing Chat block's settings.
+            Enable the NeonPing chat widget on your storefront by opening your theme editor
+            and turning on the App Embed.
           </s-paragraph>
-          <s-box padding="base" background="subdued" borderRadius="base">
-            <s-text>{apiUrl}</s-text>
-          </s-box>
-          <s-link
-            href={`https://${shop}/admin/themes/current/editor?context=apps`}
-            target="_blank"
-          >
-            Open theme editor
+          <s-link href={themeEditorUrl} target="_blank">
+            Open Theme Editor - App Embeds
           </s-link>
           <s-checkbox
             label="I've added the widget to my theme"
@@ -278,7 +273,7 @@ export default function Onboarding() {
           ) : null}
 
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => setStep(3)} variant="tertiary">
+            <s-button onClick={() => goToStep(3)} variant="tertiary">
               Back
             </s-button>
             <s-button onClick={finish} variant="primary">

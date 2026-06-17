@@ -29,6 +29,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       color: merchant.widgetColor,
       position: merchant.widgetPosition,
       greeting: merchant.widgetGreeting,
+      excludedPages: merchant.excludedPages,
     }),
     { headers },
   );
