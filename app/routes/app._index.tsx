@@ -1,6 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { redirect, useLoaderData, useSearchParams } from "react-router";
-import { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -66,7 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
       orderBy: { lastMessageAt: "desc" },
       take: 5,
-      select: { id: true, sessionId: true, lastMessageAt: true },
+      select: { id: true, sessionId: true, lastMessageAt: true, messageCount: true },
     }),
     getUsage(shop),
   ]);
@@ -321,17 +320,109 @@ export default function Index() {
                 borderBottom: "1px solid #e1e1e1",
               }}
             >
-              <span style={{ fontFamily: "monospace", fontSize: "13px", color: "#444" }}>
-                {e.sessionId.slice(0, 8)}...
+              <span style={{ fontSize: "13px", color: "#444" }}>
+                Session {e.sessionId.slice(0, 8)}
               </span>
               <span style={{ fontSize: "12px", color: "#888" }}>
-                {new Date(e.lastMessageAt).toLocaleDateString()}
+                {e.messageCount} msg{e.messageCount !== 1 ? "s" : ""} · {new Date(e.lastMessageAt).toLocaleDateString()}
               </span>
-              <a href={`/app/conversations/${e.id}`} style={{ fontSize: "13px", color: "#1a1a1a" }}>
-                View
+              <a
+                href={`/app/conversations/${e.id}`}
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#1a1a1a",
+                  textDecoration: "none",
+                  padding: "4px 10px",
+                  border: "1px solid #d1d1d1",
+                  borderRadius: "5px",
+                }}
+              >
+                Review
               </a>
             </div>
           ))}
+        </s-section>
+      )}
+
+      {stats.totalConversations === 0 && (
+        <s-section heading="Get started">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", padding: "8px 0" }}>
+            {[
+              {
+                step: "1",
+                title: "Widget installed",
+                desc: "Add the NeonPing app embed in your theme editor.",
+                href: `https://admin.shopify.com/store/${shopDomain.replace(".myshopify.com", "")}/themes/current/editor?context=apps`,
+                cta: "Open Theme Editor",
+              },
+              {
+                step: "2",
+                title: "Customize your bot",
+                desc: "Set greeting, color, and AI personality to match your brand.",
+                href: "/app/settings",
+                cta: "Edit Settings",
+              },
+              {
+                step: "3",
+                title: "Go live",
+                desc: "Share your store link — your first conversation will appear here.",
+                href: null,
+                cta: null,
+              },
+            ].map((item) => (
+              <div
+                key={item.step}
+                style={{
+                  background: "#fafafa",
+                  border: "1px solid #e1e1e1",
+                  borderRadius: "8px",
+                  padding: "20px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "50%",
+                    background: "#1a1a1a",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    marginBottom: "12px",
+                  }}
+                >
+                  {item.step}
+                </div>
+                <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "6px" }}>{item.title}</div>
+                <div style={{ fontSize: "13px", color: "#666", marginBottom: item.cta ? "14px" : "0" }}>
+                  {item.desc}
+                </div>
+                {item.cta && item.href && (
+                  <a
+                    href={item.href}
+                    target={item.href.startsWith("http") ? "_blank" : undefined}
+                    rel={item.href.startsWith("http") ? "noreferrer" : undefined}
+                    style={{
+                      display: "inline-block",
+                      padding: "6px 14px",
+                      background: "#1a1a1a",
+                      color: "#fff",
+                      borderRadius: "6px",
+                      textDecoration: "none",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {item.cta}
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
         </s-section>
       )}
 

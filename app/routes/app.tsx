@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, useLoaderData, useRouteError } from "react-router";
+import { Outlet, useLoaderData, useRouteError, useLocation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
@@ -14,6 +14,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
+  const location = useLocation();
 
   const navItems = [
     { href: "/app", label: "Home" },
@@ -26,11 +27,20 @@ export default function App() {
   return (
     <AppProvider embedded apiKey={apiKey}>
       <s-app-nav>
-        {navItems.map((item) => (
-          <s-link key={item.href} href={item.href}>
-            {item.label}
-          </s-link>
-        ))}
+        {navItems.map((item) => {
+          const isActive =
+            item.href === "/app"
+              ? location.pathname === "/app"
+              : location.pathname.startsWith(item.href);
+          return (
+            <span
+              key={item.href}
+              style={isActive ? { fontWeight: 700, color: "#1a1a1a" } : {}}
+            >
+              <s-link href={item.href}>{item.label}</s-link>
+            </span>
+          );
+        })}
       </s-app-nav>
       <Outlet />
     </AppProvider>

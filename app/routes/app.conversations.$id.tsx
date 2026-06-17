@@ -23,6 +23,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 interface ChatMessage {
   role: string;
   content: string;
+  timestamp?: string;
 }
 
 export default function ConversationDetail() {
@@ -35,6 +36,8 @@ export default function ConversationDetail() {
   const msgs = Array.isArray(conversation.messages)
     ? (conversation.messages as unknown as ChatMessage[])
     : [];
+
+  const storeHandle = conversation.shopDomain.replace(".myshopify.com", "");
 
   return (
     <s-page heading="Conversation">
@@ -50,10 +53,27 @@ export default function ConversationDetail() {
             <span style={{ fontFamily: "monospace" }}>
               {conversation.sessionId.slice(0, 8)}
             </span>
+            <button
+              onClick={() => navigator.clipboard.writeText(conversation.sessionId)}
+              style={{ fontSize: "11px", padding: "2px 8px", border: "1px solid #d1d1d1", borderRadius: "4px", background: "#fff", cursor: "pointer", marginLeft: "8px" }}
+            >
+              Copy
+            </button>
           </div>
           <div>
             <strong>Customer:</strong>{" "}
-            {conversation.customerId ?? "Anonymous"}
+            {conversation.customerId ? (
+              <a
+                href={`https://admin.shopify.com/store/${storeHandle}/customers/${conversation.customerId.replace("gid://shopify/Customer/", "")}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: "#1a1a1a", fontSize: "13px" }}
+              >
+                View customer
+              </a>
+            ) : (
+              "Anonymous"
+            )}
           </div>
           <div>
             <strong>Cart value:</strong>{" "}
@@ -71,9 +91,22 @@ export default function ConversationDetail() {
             <strong>Discount code:</strong>{" "}
             {conversation.discountCode ?? "—"}
           </div>
+          {conversation.orderId && (
+            <div style={{ marginTop: "6px" }}>
+              <s-text tone="subdued">Order: </s-text>
+              <a
+                href={`https://admin.shopify.com/store/${storeHandle}/orders/${conversation.orderId}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: "13px", color: "#1a1a1a" }}
+              >
+                {conversation.orderId}
+              </a>
+            </div>
+          )}
           <div>
             <strong>Started:</strong>{" "}
-            {new Date(conversation.startedAt).toLocaleDateString()}
+            {new Date(conversation.startedAt).toLocaleString()}
           </div>
           {conversation.escalated ? (
             <div>
@@ -141,6 +174,11 @@ export default function ConversationDetail() {
                   >
                     {msg.content}
                   </div>
+                  {msg.timestamp && (
+                    <div style={{ fontSize: "10px", color: "#aaa", marginTop: "3px", textAlign: isUser ? "right" : "left" }}>
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  )}
                 </div>
               );
             })}

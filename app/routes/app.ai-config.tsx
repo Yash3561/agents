@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -66,7 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { shopDomain: session.shop },
       data: { quickReplies: replies },
     });
-    return { saved: "quick-replies" };
+    return { saved: "quick_replies" };
   }
 
   if (intent === "test-chat") {
@@ -92,7 +92,7 @@ const QUICK_REPLY_PLACEHOLDERS = [
 ];
 
 export default function AiConfig() {
-  const { merchant, shop: _shop } = useLoaderData<typeof loader>();
+  const { merchant } = useLoaderData<typeof loader>();
   const faqFetcher = useFetcher<typeof action>();
   const testFetcher = useFetcher<typeof action>();
   const quickFetcher = useFetcher<typeof action>();
@@ -100,6 +100,19 @@ export default function AiConfig() {
 
   // --- FAQ state ---
   const [faqs, setFaqs] = useState<Faq[]>(merchant.customFaqs);
+
+  // Fix A — toast fires only after server responds
+  useEffect(() => {
+    if (faqFetcher.state === "idle" && (faqFetcher.data as { saved?: string } | undefined)?.saved === "faqs") {
+      shopify.toast.show("FAQ knowledge base saved");
+    }
+  }, [faqFetcher.state, faqFetcher.data, shopify]);
+
+  useEffect(() => {
+    if (quickFetcher.state === "idle" && (quickFetcher.data as { saved?: string } | undefined)?.saved === "quick_replies") {
+      shopify.toast.show("Quick replies saved");
+    }
+  }, [quickFetcher.state, quickFetcher.data, shopify]);
 
   const addFaq = () => {
     if (faqs.length >= 20) return;
@@ -115,11 +128,16 @@ export default function AiConfig() {
   };
 
   const submitFaqs = () => {
+    // Fix C — validate before saving
+    const hasEmpty = faqs.some((f) => !f.question.trim() || !f.answer.trim());
+    if (hasEmpty) {
+      shopify.toast.show("Please fill in all FAQ questions and answers", { isError: true });
+      return;
+    }
     const fd = new FormData();
     fd.set("intent", "save-faqs");
     fd.set("customFaqs", JSON.stringify(faqs));
     faqFetcher.submit(fd, { method: "POST" });
-    shopify.toast.show("FAQ knowledge base saved");
   };
 
   // --- Test chat state ---
@@ -146,7 +164,6 @@ export default function AiConfig() {
     fd.set("intent", "save-quick-replies");
     quickReplies.forEach((r, i) => fd.set(`quickReply${i}`, r));
     quickFetcher.submit(fd, { method: "POST" });
-    shopify.toast.show("Quick replies saved");
   };
 
   return (
@@ -160,47 +177,62 @@ export default function AiConfig() {
           written.
         </s-text>
 
-        {faqs.map((faq, idx) => (
-          <s-box key={idx} padding="base" background="subdued" borderRadius="base">
-            <s-stack direction="block" gap="base">
-              <s-text-field
-                label={`Question ${idx + 1}`}
-                value={faq.question}
-                onInput={(e: Event) =>
-                  updateFaq(idx, "question", (e.target as HTMLInputElement).value)
-                }
-              ></s-text-field>
-              <s-text-field
-                label="Answer"
-                value={faq.answer}
-                onInput={(e: Event) =>
-                  updateFaq(idx, "answer", (e.target as HTMLInputElement).value)
-                }
-              ></s-text-field>
+        {/* Fix D — empty state */}
+        {faqs.length === 0 ? (
+          <div style={{ padding: "24px 0", textAlign: "center" }}>
+            <s-text tone="subdued">
+              FAQs let you teach your bot to answer common questions exactly the way you want — returns, shipping, sizing, and anything else customers ask repeatedly.
+            </s-text>
+            <div style={{ marginTop: "16px" }}>
+              <s-button onClick={addFaq} variant="primary">Add your first FAQ</s-button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Fix B — stable key using question text */}
+            {faqs.map((faq, idx) => (
+              <s-box key={faq.question || `faq-${idx}`} padding="base" background="subdued" borderRadius="base">
+                <s-stack direction="block" gap="base">
+                  <s-text-field
+                    label={`Question ${idx + 1}`}
+                    value={faq.question}
+                    onInput={(e: Event) =>
+                      updateFaq(idx, "question", (e.target as HTMLInputElement).value)
+                    }
+                  ></s-text-field>
+                  <s-text-field
+                    label="Answer"
+                    value={faq.answer}
+                    onInput={(e: Event) =>
+                      updateFaq(idx, "answer", (e.target as HTMLInputElement).value)
+                    }
+                  ></s-text-field>
+                  <s-button
+                    variant="tertiary"
+                    tone="critical"
+                    onClick={() => deleteFaq(idx)}
+                  >
+                    Remove
+                  </s-button>
+                </s-stack>
+              </s-box>
+            ))}
+
+            <s-stack direction="inline" gap="base">
               <s-button
-                variant="tertiary"
-                tone="critical"
-                onClick={() => deleteFaq(idx)}
+                variant="secondary"
+                onClick={addFaq}
+                {...(faqs.length >= 20 ? { disabled: true } : {})}
               >
-                Remove
+                Add FAQ
+              </s-button>
+              <s-button variant="primary" onClick={submitFaqs}>
+                Save knowledge base
               </s-button>
             </s-stack>
-          </s-box>
-        ))}
-
-        <s-stack direction="inline" gap="base">
-          <s-button
-            variant="secondary"
-            onClick={addFaq}
-            {...(faqs.length >= 20 ? { disabled: true } : {})}
-          >
-            Add FAQ
-          </s-button>
-          <s-button variant="primary" onClick={submitFaqs}>
-            Save knowledge base
-          </s-button>
-        </s-stack>
-        <s-text tone="neutral">{faqs.length}/20 entries</s-text>
+            <s-text tone="neutral">{faqs.length}/20 entries</s-text>
+          </>
+        )}
       </s-section>
 
       {/* ------------------------------------------------------------------ */}

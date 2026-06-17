@@ -365,7 +365,9 @@ export default function Settings() {
           ))}
         </s-section>
         <div style={{ padding: "16px 0" }}>
-          <s-button type="submit" variant="primary">Save settings</s-button>
+          <s-button type="submit" variant="primary" disabled={fetcher.state === "submitting"}>
+            {fetcher.state === "submitting" ? "Saving..." : "Save settings"}
+          </s-button>
         </div>
       </form>
     </s-page>

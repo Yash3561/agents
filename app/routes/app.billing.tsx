@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, Form } from "react-router";
+import { useLoaderData, Form, useNavigation } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getUsage } from "../lib/billing.server";
 import db from "../db.server";
@@ -20,7 +20,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const result = await billing.check({
       plans: [...VALID_PLANS],
-      isTest: true,
+      isTest: process.env.NODE_ENV !== "production",
     });
     if (result.hasActivePayment && result.appSubscriptions?.length > 0) {
       const sub = result.appSubscriptions[0];
@@ -110,8 +110,9 @@ const PLANS: Array<{
 
 export default function BillingPage() {
   const { usage, activeSubscription, resetAt } = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
 
-  const usedPct =
+  const usagePct =
     usage.limit > 0
       ? Math.min(100, Math.round((usage.used / usage.limit) * 100))
       : 0;
@@ -122,7 +123,7 @@ export default function BillingPage() {
 
   // Inline progress bar since s-progress-bar is not in Polaris web types
   const barColor =
-    usedPct >= 100 ? "#d82c0d" : usedPct >= 80 ? "#b98900" : "#008060";
+    usagePct >= 100 ? "#d82c0d" : usagePct >= 80 ? "#b98900" : "#008060";
 
   const PLAN_ORDER: Record<string, number> = { free: 0, starter: 1, growth: 2, pro: 3 };
   const currentPlanRank = PLAN_ORDER[usage.plan] ?? 0;
@@ -156,7 +157,7 @@ export default function BillingPage() {
             <div
               style={{
                 height: "100%",
-                width: `${usedPct}%`,
+                width: `${usagePct}%`,
                 background: barColor,
                 borderRadius: "4px",
                 transition: "width 0.3s ease",
@@ -164,7 +165,7 @@ export default function BillingPage() {
             />
           </div>
           <div style={{ marginTop: "4px" }}>
-            <s-text tone="neutral">{usedPct}% used</s-text>
+            <s-text tone="neutral">{usagePct}% used</s-text>
           </div>
           {resetAt && (
             <div style={{ marginTop: "4px" }}>
@@ -172,9 +173,24 @@ export default function BillingPage() {
             </div>
           )}
         </s-box>
+
+        {usagePct >= 80 && usagePct < 100 && (
+          <s-banner tone="warning">
+            {"You've used "}
+            {usagePct}
+            {"% of your monthly conversations. Upgrade now to avoid hitting your limit mid-month."}
+            {" "}
+            <a href="#plans" style={{ color: "inherit", fontWeight: 600 }}>View plans below</a>
+          </s-banner>
+        )}
+        {usagePct >= 100 && (
+          <s-banner tone="critical">
+            {"You've reached your conversation limit. New chats are paused until your plan resets or you upgrade."}
+          </s-banner>
+        )}
       </s-section>
 
-      <s-section heading="Choose a Plan">
+      <s-section heading="Choose a Plan" id="plans">
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
           {(() => {
             const isCurrent = usage.plan === "free";
@@ -192,11 +208,11 @@ export default function BillingPage() {
                 <ul style={{ margin: "0", paddingLeft: "20px", color: "#202223" }}>
                   {FREE_PLAN.features.map((f) => <li key={f} style={{ marginBottom: "4px" }}><s-text>{f}</s-text></li>)}
                 </ul>
-                <div style={{ marginTop: "auto" }}>
-                  <button type="button" disabled={isCurrent} style={{ width: "100%", padding: "10px 16px", background: isCurrent ? "#e1e3e5" : "#008060", color: isCurrent ? "#6d7175" : "#ffffff", border: "none", borderRadius: "6px", cursor: isCurrent ? "default" : "pointer", fontWeight: 600, fontSize: "14px" }}>
-                    {isCurrent ? "Current plan" : "Upgrade from Free"}
-                  </button>
-                </div>
+                {!isCurrent && (
+                  <div style={{ marginTop: "auto" }}>
+                    <s-text tone="subdued">Your current plan includes all free tier features.</s-text>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -253,7 +269,7 @@ export default function BillingPage() {
                     <input type="hidden" name="plan" value={plan.key} />
                     <button
                       type="submit"
-                      disabled={isCurrent}
+                      disabled={isCurrent || navigation.state === "submitting"}
                       style={{
                         width: "100%",
                         padding: "10px 16px",
@@ -261,13 +277,16 @@ export default function BillingPage() {
                         color: isCurrent ? "#6d7175" : "#ffffff",
                         border: "none",
                         borderRadius: "6px",
-                        cursor: isCurrent ? "default" : "pointer",
+                        cursor: isCurrent || navigation.state === "submitting" ? "default" : "pointer",
                         fontWeight: 600,
                         fontSize: "14px",
+                        opacity: navigation.state === "submitting" ? 0.7 : 1,
                       }}
                     >
                       {isCurrent
                         ? "Current plan"
+                        : navigation.state === "submitting"
+                        ? "Loading..."
                         : PLAN_ORDER[plan.key] > currentPlanRank
                         ? `Upgrade to ${plan.name}`
                         : `Downgrade to ${plan.name}`}
@@ -283,6 +302,22 @@ export default function BillingPage() {
             All plans include a 7-day free trial. You will not be charged until
             the trial ends.
           </s-text>
+        </div>
+      </s-section>
+
+      <s-section heading="Manage subscription">
+        <s-text tone="subdued">
+          To cancel or change your billing, visit your Shopify subscription settings.
+        </s-text>
+        <div style={{ marginTop: "12px" }}>
+          <a
+            href="https://admin.shopify.com/settings/billing/subscriptions"
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: "13px", color: "#1a1a1a", fontWeight: 500 }}
+          >
+            Manage in Shopify Admin →
+          </a>
         </div>
       </s-section>
     </s-page>

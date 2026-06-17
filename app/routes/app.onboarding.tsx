@@ -64,6 +64,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     data: {
       widgetColor: String(formData.get("widgetColor") ?? "#1a1a1a"),
       widgetGreeting: String(formData.get("widgetGreeting") ?? ""),
+      botName: String(formData.get("botName") ?? "").trim() || "NeonPing",
       brandVoice: String(formData.get("brandVoice") ?? "friendly and helpful"),
       maxDiscountPct,
       vipCartThreshold: Math.round(vipCartThresholdDollars * 100),
@@ -104,12 +105,15 @@ async function sendTestMessage(shop: string, appUrl: string): Promise<string> {
   return text || "(no response text)";
 }
 
-function WidgetPreview({ color, greeting }: { color: string; greeting: string }) {
+// Fix G — WidgetPreview now accepts botName prop
+function WidgetPreview({ color, greeting, botName }: { color: string; greeting: string; botName?: string }) {
   return (
     <div style={{ position: "relative", height: 200, background: "#f0f0f3", borderRadius: 12, border: "1px solid #e1e1e1", overflow: "hidden", marginTop: "16px" }}>
       <div style={{ position: "absolute", top: 10, left: 12, fontSize: 11, color: "#9a9a9a", fontFamily: "system-ui, sans-serif" }}>Your storefront</div>
       <div style={{ position: "absolute", bottom: 56, right: 16, width: 190, borderRadius: 14, background: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,.18)", overflow: "hidden", fontFamily: "system-ui, sans-serif" }}>
-        <div style={{ background: color || "#1a1a1a", color: "#fff", padding: "8px 12px", fontSize: 12, fontWeight: 600 }}>Your Bot</div>
+        <div style={{ background: color || "#1a1a1a", color: "#fff", padding: "8px 12px", fontSize: 12, fontWeight: 600 }}>
+          {botName || "Your store assistant"}
+        </div>
         <div style={{ padding: 10, background: "#fff", fontSize: 11, color: "#111" }}>{greeting || "Hi! How can I help you today?"}</div>
       </div>
       <div style={{ position: "absolute", bottom: 12, right: 16, width: 36, height: 36, borderRadius: "50%", background: color || "#1a1a1a" }} />
@@ -122,6 +126,7 @@ export default function Onboarding() {
   const fetcher = useFetcher<typeof action>();
 
   const [step, setStep] = useState(merchant.onboardingStep || 1);
+  const [botName, setBotName] = useState(merchant.botName || "");
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
   const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
@@ -146,6 +151,7 @@ export default function Onboarding() {
   const finish = () => {
     fetcher.submit(
       {
+        botName,
         widgetColor,
         widgetGreeting,
         brandVoice,
@@ -174,8 +180,41 @@ export default function Onboarding() {
 
   return (
     <s-page heading="Welcome to NeonPing">
+      {/* Fix H — Visual step progress bar */}
+      <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "24px", padding: "0 4px" }}>
+        {[1, 2, 3, 4].map((s) => (
+          <div key={s} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div
+              style={{
+                width: "28px",
+                height: "28px",
+                borderRadius: "50%",
+                background: s < step ? "#1a1a1a" : s === step ? "#1a1a1a" : "#e1e1e1",
+                color: s <= step ? "#fff" : "#999",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "12px",
+                fontWeight: 700,
+              }}
+            >
+              {s < step ? "✓" : s}
+            </div>
+            {s < 4 && <div style={{ width: "40px", height: "2px", background: s < step ? "#1a1a1a" : "#e1e1e1" }} />}
+          </div>
+        ))}
+      </div>
+
       {step === 1 && (
         <s-section heading="Step 1 of 4 — Brand setup">
+          {/* Fix G — Bot name field */}
+          <s-text-field
+            label="Bot name"
+            value={botName}
+            onInput={(e: Event) => setBotName((e.target as HTMLInputElement).value)}
+            help-text="The name shown in your chat widget header."
+            placeholder="Store Assistant"
+          ></s-text-field>
           <s-text-field
             label="Opening greeting"
             value={widgetGreeting}
@@ -188,7 +227,7 @@ export default function Onboarding() {
             onInput={(e: Event) => setWidgetColor((e.target as HTMLInputElement).value)}
             help-text="Choose a color that matches your brand."
           ></s-color-field>
-          <WidgetPreview color={widgetColor} greeting={widgetGreeting} />
+          <WidgetPreview color={widgetColor} greeting={widgetGreeting} botName={botName} />
           <s-stack direction="inline" gap="base">
             <s-button onClick={() => goToStep(2)} variant="primary">
               Next

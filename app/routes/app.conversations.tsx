@@ -1,9 +1,18 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useSearchParams } from "react-router";
+import { Link, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { useState } from "react";
+
+const PAGE_SIZE = 50;
+
+const DATE_RANGE_OPTIONS = [
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+  { value: "90", label: "Last 90 days" },
+  { value: "all", label: "All time" },
+] as const;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -11,6 +20,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const url = new URL(request.url);
   const status = url.searchParams.get("status") ?? "all";
+  const days = url.searchParams.get("days") ?? "all";
+  const page = Math.max(0, Number(url.searchParams.get("page") || "0"));
 
   const statusFilter =
     status === "escalated"
@@ -19,13 +30,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ? { discountCode: { not: null } }
       : {};
 
-  const conversations = await prisma.conversation.findMany({
-    where: { shopDomain: shop, ...statusFilter },
-    orderBy: { lastMessageAt: "desc" },
-    take: 50,
-  });
+  const dateFilter =
+    days !== "all"
+      ? {
+          startedAt: {
+            gte: new Date(Date.now() - Number(days) * 24 * 60 * 60 * 1000),
+          },
+        }
+      : {};
 
-  return { conversations, status };
+  const where = { shopDomain: shop, ...statusFilter, ...dateFilter };
+
+  const [conversations, total] = await Promise.all([
+    prisma.conversation.findMany({
+      where,
+      orderBy: { lastMessageAt: "desc" },
+      take: PAGE_SIZE,
+      skip: page * PAGE_SIZE,
+    }),
+    prisma.conversation.count({ where }),
+  ]);
+
+  return { conversations, total, page, status, days };
 };
 
 const FILTER_OPTIONS = [
@@ -35,19 +61,49 @@ const FILTER_OPTIONS = [
 ] as const;
 
 export default function Conversations() {
-  const { conversations, status } = useLoaderData<typeof loader>();
+  const { conversations, total, page, status, days } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
 
-  const filtered = conversations.filter(
-    (c) =>
-      search.trim() === "" ||
-      c.sessionId.toLowerCase().startsWith(search.toLowerCase()) ||
-      c.sessionId.toLowerCase().includes(search.toLowerCase())
-  );
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const filtered = search.trim()
+    ? conversations.filter((c) =>
+        c.sessionId.toLowerCase().includes(search.toLowerCase())
+      )
+    : conversations;
 
   return (
     <s-page heading="Conversations">
+      {/* Date range filter */}
+      <s-section>
+        <s-stack direction="inline" gap="base">
+          {DATE_RANGE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                next.set("days", opt.value);
+                next.set("page", "0");
+                setSearchParams(next);
+              }}
+              style={{
+                padding: "5px 14px",
+                borderRadius: "6px",
+                border: "1px solid #d1d1d1",
+                background: days === opt.value ? "#1a1a1a" : "transparent",
+                color: days === opt.value ? "#fff" : "#1a1a1a",
+                cursor: "pointer",
+                fontWeight: days === opt.value ? 600 : 400,
+                fontSize: "13px",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </s-stack>
+      </s-section>
+
       {/* Filter tabs */}
       <s-section>
         <s-stack direction="inline" gap="base">
@@ -57,6 +113,7 @@ export default function Conversations() {
               onClick={() => {
                 const next = new URLSearchParams(searchParams);
                 next.set("status", opt.value);
+                next.set("page", "0");
                 setSearchParams(next);
               }}
               style={{
@@ -85,7 +142,7 @@ export default function Conversations() {
             const target = e.target as HTMLInputElement;
             setSearch(target.value);
           }}
-          placeholder="Type a session ID prefix..."
+          placeholder="Type a session ID..."
           clearButton
           onClearButtonClick={() => setSearch("")}
         />
@@ -108,7 +165,14 @@ export default function Conversations() {
             <s-table-body>
               {filtered.map((c) => (
                 <s-table-row key={c.id}>
-                  <s-table-cell>{new Date(c.startedAt).toLocaleString()}</s-table-cell>
+                  <s-table-cell>
+                    <Link
+                      to={`/app/conversations/${c.id}`}
+                      style={{ color: "#1a1a1a", textDecoration: "none", fontWeight: 500 }}
+                    >
+                      {new Date(c.startedAt).toLocaleString()}
+                    </Link>
+                  </s-table-cell>
                   <s-table-cell>
                     <s-text tone="neutral" variant="body-sm">
                       {c.sessionId.slice(0, 12)}…
@@ -132,6 +196,41 @@ export default function Conversations() {
               ))}
             </s-table-body>
           </s-table>
+        )}
+
+        {/* Pagination */}
+        {total > 0 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "16px" }}>
+            <span style={{ fontSize: "13px", color: "#888" }}>
+              Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}
+            </span>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {page > 0 && (
+                <button
+                  onClick={() => {
+                    const n = new URLSearchParams(searchParams);
+                    n.set("page", String(page - 1));
+                    setSearchParams(n);
+                  }}
+                  style={{ padding: "5px 14px", border: "1px solid #d1d1d1", borderRadius: "6px", background: "#fff", cursor: "pointer", fontSize: "13px" }}
+                >
+                  Previous
+                </button>
+              )}
+              {page < totalPages - 1 && (
+                <button
+                  onClick={() => {
+                    const n = new URLSearchParams(searchParams);
+                    n.set("page", String(page + 1));
+                    setSearchParams(n);
+                  }}
+                  style={{ padding: "5px 14px", border: "1px solid #d1d1d1", borderRadius: "6px", background: "#1a1a1a", color: "#fff", cursor: "pointer", fontSize: "13px" }}
+                >
+                  Next
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </s-section>
     </s-page>
