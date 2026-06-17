@@ -263,6 +263,11 @@ function buildSseStream(opts: {
         if (result.discount_code) {
           updatedSession.discount_applied = true;
         }
+        // Also flag if the customer applied their own code via update_cart
+        const cartDiscounts = (result.cart as { discountCodes?: unknown[] } | undefined)?.discountCodes;
+        if (cartDiscounts && (cartDiscounts as unknown[]).length > 0) {
+          updatedSession.discount_applied = true;
+        }
         await setSession(shop, session_id, updatedSession);
 
         // 8. Async Postgres persistence (fire-and-forget, never blocks response)

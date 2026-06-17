@@ -30,6 +30,14 @@ const SearchSchema = z.object({
     .describe(
       "Soft context that improves ranking without excluding anything — the customer's actual underlying need, not just their keywords. Examples: 'gift for a coworker, doesn't know their taste', 'needs to be durable for daily outdoor use', 'first-time buyer, wants something beginner-friendly'. Infer this from the conversation even if the customer didn't say it explicitly — this is what makes results actually match what they need instead of just what they typed.",
     ),
+  maxResults: z
+    .number()
+    .min(1)
+    .max(3)
+    .optional()
+    .describe(
+      "How many product cards to show the customer. Use 1 when the customer named a specific product or described something very precise ('do you have X', 'show me the blue one'). Use 2-3 for open browsing ('what do you have for yoga', 'show me options under $50'). Default: 3.",
+    ),
 });
 
 const LookupSchema = z.object({ ids: z.array(z.string()) });
@@ -118,8 +126,10 @@ export async function runShoppingAgent(opts: {
           currency: input.currency,
           intent: input.intent,
         });
-        products = result.products;
-        return result;
+        // Respect LLM's decision on how many cards to surface
+        const sliced = input.maxResults ? result.products.slice(0, input.maxResults) : result.products;
+        products = sliced;
+        return { ...result, products: sliced, total: sliced.length };
       },
     }),
 
