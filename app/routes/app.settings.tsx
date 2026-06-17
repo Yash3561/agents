@@ -337,9 +337,6 @@ export default function Settings() {
             </div>
           ))}
         </s-section>
-        <s-button type="submit" variant="primary">
-          Save
-        </s-button>
       </form>
     </s-page>
   );
