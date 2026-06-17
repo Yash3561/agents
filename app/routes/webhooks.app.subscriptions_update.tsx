@@ -27,7 +27,7 @@ interface AppSubscription {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, rawBody } = await authenticate.webhook(request);
+  const { shop, topic, payload } = await authenticate.webhook(request);
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
@@ -40,8 +40,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    const webhookBody = JSON.parse(rawBody) as { app_subscription: AppSubscription };
-    const subscription = webhookBody.app_subscription;
+    const subscription = payload as AppSubscription;
 
     console.log(`[billing] App subscription update: shop=${shop}, status=${subscription.status}, name=${subscription.name}`);
 
