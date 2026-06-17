@@ -50,7 +50,7 @@ api_version = "2026-07"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/subscriptions_update"
-  topics = [ "app/subscriptions/update" ]
+  topics = [ "app_subscriptions/update" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/customers/data_request"
