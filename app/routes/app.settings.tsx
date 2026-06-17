@@ -113,7 +113,7 @@ function WidgetPreview({
             fontWeight: 600,
           }}
         >
-          Chat with us
+          {botName || "NeonPing"}
         </div>
         <div style={{ padding: 10, background: "#fff" }}>
           <div
