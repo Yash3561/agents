@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { redirect, useLoaderData } from "react-router";
+import { redirect, useLoaderData, Link } from "react-router";
 import { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -158,9 +158,9 @@ export default function Index() {
 
       <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
         {(["7", "30", "90", "all"] as const).map((d) => (
-          <a
+          <Link
             key={d}
-            href={`?days=${d}`}
+            to={`?days=${d}`}
             style={{
               padding: "6px 12px",
               background: days === d ? "#1a1a1a" : "#f0f0f0",
@@ -171,7 +171,7 @@ export default function Index() {
             }}
           >
             {d === "all" ? "All time" : `${d} days`}
-          </a>
+          </Link>
         ))}
       </div>
 
