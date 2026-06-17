@@ -1,181 +1,131 @@
-import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useSearchParams } from "react-router";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import db from "../db.server";
+import prisma from "../db.server";
+import { useState } from "react";
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const shop = session.shop;
+
   const url = new URL(request.url);
-  const days = url.searchParams.get("days") || "30";
-  const status = url.searchParams.get("status") || "all";
-  const page = Math.max(0, Number(url.searchParams.get("page") || "0"));
+  const status = url.searchParams.get("status") ?? "all";
 
-  const since =
-    days === "all" ? undefined : new Date(Date.now() - Number(days) * 86400000);
+  const statusFilter =
+    status === "escalated"
+      ? { escalated: true }
+      : status === "discount"
+      ? { discountCode: { not: null } }
+      : {};
 
-  const where: {
-    shopDomain: string;
-    startedAt?: { gte: Date };
-    escalated?: boolean;
-    orderId?: { not: null };
-  } = { shopDomain: session.shop };
-  if (since) where.startedAt = { gte: since };
-  if (status === "escalated") where.escalated = true;
-  if (status === "converted") where.orderId = { not: null };
+  const conversations = await prisma.conversation.findMany({
+    where: { shopDomain: shop, ...statusFilter },
+    orderBy: { lastMessageAt: "desc" },
+    take: 50,
+  });
 
-  const [conversations, total] = await Promise.all([
-    db.conversation.findMany({
-      where,
-      orderBy: { lastMessageAt: "desc" },
-      take: 50,
-      skip: page * 50,
-      select: {
-        id: true,
-        sessionId: true,
-        customerId: true,
-        messageCount: true,
-        cartValue: true,
-        orderRevenueCents: true,
-        escalated: true,
-        orderId: true,
-        discountCode: true,
-        startedAt: true,
-        lastMessageAt: true,
-      },
-    }),
-    db.conversation.count({ where }),
-  ]);
+  return { conversations, status };
+};
 
-  return { conversations, days, status, page, total };
-}
+const FILTER_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "escalated", label: "Escalated" },
+  { value: "discount", label: "Has discount" },
+] as const;
 
-export default function ConversationsList() {
-  const { conversations, days, status, page, total } = useLoaderData<typeof loader>();
+export default function Conversations() {
+  const { conversations, status } = useLoaderData<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState("");
 
-  const totalPages = Math.ceil(total / 50);
-
-  const dayOptions = [
-    { value: "7", label: "Last 7 days" },
-    { value: "30", label: "Last 30 days" },
-    { value: "90", label: "Last 90 days" },
-    { value: "all", label: "All time" },
-  ];
-
-  const statusOptions = [
-    { value: "all", label: "All" },
-    { value: "escalated", label: "Escalated" },
-    { value: "converted", label: "Converted" },
-  ];
-
-  const activeLinkStyle: React.CSSProperties = {
-    display: "inline-block",
-    padding: "4px 12px",
-    background: "#1a1a1a",
-    color: "#fff",
-    borderRadius: "4px",
-    textDecoration: "none",
-    fontSize: "13px",
-    marginRight: "6px",
-  };
-
-  const inactiveLinkStyle: React.CSSProperties = {
-    display: "inline-block",
-    padding: "4px 12px",
-    background: "#f0f0f0",
-    color: "#333",
-    borderRadius: "4px",
-    textDecoration: "none",
-    fontSize: "13px",
-    marginRight: "6px",
-  };
+  const filtered = conversations.filter(
+    (c) =>
+      search.trim() === "" ||
+      c.sessionId.toLowerCase().startsWith(search.toLowerCase()) ||
+      c.sessionId.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <s-page heading="Conversations">
+      {/* Filter tabs */}
       <s-section>
-        <div style={{ marginBottom: "12px" }}>
-          <span style={{ fontSize: "13px", marginRight: "8px", fontWeight: 600 }}>
-            Date range:
-          </span>
-          {dayOptions.map((opt) => {
-            const params = new URLSearchParams({ days: opt.value, status });
-            return (
-              <a
-                key={opt.value}
-                href={`/app/conversations?${params.toString()}`}
-                style={days === opt.value ? activeLinkStyle : inactiveLinkStyle}
-              >
-                {opt.label}
-              </a>
-            );
-          })}
-        </div>
+        <s-stack direction="inline" gap="base">
+          {FILTER_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                next.set("status", opt.value);
+                setSearchParams(next);
+              }}
+              style={{
+                padding: "6px 16px",
+                borderRadius: "6px",
+                border: "1px solid #1a1a1a",
+                background: status === opt.value ? "#1a1a1a" : "transparent",
+                color: status === opt.value ? "#fff" : "#1a1a1a",
+                cursor: "pointer",
+                fontWeight: status === opt.value ? 600 : 400,
+                fontSize: "14px",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </s-stack>
+      </s-section>
 
-        <div style={{ marginBottom: "16px" }}>
-          <span style={{ fontSize: "13px", marginRight: "8px", fontWeight: 600 }}>
-            Status:
-          </span>
-          {statusOptions.map((opt) => {
-            const params = new URLSearchParams({ days, status: opt.value });
-            return (
-              <a
-                key={opt.value}
-                href={`/app/conversations?${params.toString()}`}
-                style={status === opt.value ? activeLinkStyle : inactiveLinkStyle}
-              >
-                {opt.label}
-              </a>
-            );
-          })}
-        </div>
+      {/* Search */}
+      <s-section>
+        <s-text-field
+          label="Search by session ID"
+          value={search}
+          onInput={(e: Event) => {
+            const target = e.target as HTMLInputElement;
+            setSearch(target.value);
+          }}
+          placeholder="Type a session ID prefix..."
+          clearButton
+          onClearButtonClick={() => setSearch("")}
+        />
+      </s-section>
 
-        <p style={{ fontSize: "13px", color: "#666", marginBottom: "8px" }}>
-          Showing {page * 50 + 1}–{Math.min((page + 1) * 50, total)} of {total} conversations
-        </p>
-
-        {conversations.length === 0 ? (
-          <p>No conversations found.</p>
+      {/* Table */}
+      <s-section>
+        {filtered.length === 0 ? (
+          <s-paragraph>No conversations found.</s-paragraph>
         ) : (
           <s-table variant="auto">
             <s-table-header-row>
-              <s-table-header>Started</s-table-header>
+              <s-table-header listSlot="primary">Started</s-table-header>
+              <s-table-header>Session ID</s-table-header>
               <s-table-header>Customer</s-table-header>
               <s-table-header>Messages</s-table-header>
-              <s-table-header>Cart</s-table-header>
               <s-table-header>Revenue</s-table-header>
               <s-table-header>Status</s-table-header>
             </s-table-header-row>
             <s-table-body>
-              {conversations.map((c) => (
+              {filtered.map((c) => (
                 <s-table-row key={c.id}>
+                  <s-table-cell>{new Date(c.startedAt).toLocaleString()}</s-table-cell>
                   <s-table-cell>
-                    <s-link href={`/app/conversations/${c.id}`}>
-                      {new Date(c.startedAt).toLocaleDateString()}
-                    </s-link>
+                    <s-text tone="neutral" variant="body-sm">
+                      {c.sessionId.slice(0, 12)}…
+                    </s-text>
                   </s-table-cell>
-                  <s-table-cell>
-                    {c.customerId ? "Customer" : "Guest"}
-                  </s-table-cell>
+                  <s-table-cell>{c.customerId ? "Customer" : "Anonymous"}</s-table-cell>
                   <s-table-cell>{c.messageCount}</s-table-cell>
                   <s-table-cell>
-                    {c.cartValue != null ? `$${c.cartValue.toFixed(2)}` : "—"}
-                  </s-table-cell>
-                  <s-table-cell>
-                    {c.orderRevenueCents != null
+                    {c.orderRevenueCents
                       ? `$${(c.orderRevenueCents / 100).toFixed(2)}`
                       : "—"}
                   </s-table-cell>
                   <s-table-cell>
-                    {c.escalated ? (
-                      <s-badge tone="critical">Escalated</s-badge>
-                    ) : null}
-                    {c.orderId ? (
-                      <s-badge tone="success">Converted</s-badge>
-                    ) : null}
-                    {c.discountCode ? (
-                      <s-badge tone="info">Discount</s-badge>
-                    ) : null}
-                    {!c.escalated && !c.orderId && !c.discountCode ? (
-                      <span style={{ color: "#888" }}>—</span>
+                    {c.escalated ? <s-badge tone="critical">Escalated</s-badge> : null}
+                    {c.discountCode ? <s-badge tone="success">Discount</s-badge> : null}
+                    {!c.escalated && !c.discountCode ? (
+                      <s-text tone="neutral">—</s-text>
                     ) : null}
                   </s-table-cell>
                 </s-table-row>
@@ -183,19 +133,11 @@ export default function ConversationsList() {
             </s-table-body>
           </s-table>
         )}
-
-        {totalPages > 1 && (
-          <div style={{ display: "flex", gap: "8px", marginTop: "16px", alignItems: "center" }}>
-            {page > 0 ? (
-              <a href={`/app/conversations?${new URLSearchParams({ days, status, page: String(page - 1) })}`} style={{ padding: "6px 14px", background: "#f0f0f0", borderRadius: "4px", textDecoration: "none", color: "#333", fontSize: "13px" }}>← Previous</a>
-            ) : null}
-            <span style={{ fontSize: "13px", color: "#666" }}>Page {page + 1} of {totalPages}</span>
-            {(page + 1) * 50 < total ? (
-              <a href={`/app/conversations?${new URLSearchParams({ days, status, page: String(page + 1) })}`} style={{ padding: "6px 14px", background: "#f0f0f0", borderRadius: "4px", textDecoration: "none", color: "#333", fontSize: "13px" }}>Next →</a>
-            ) : null}
-          </div>
-        )}
       </s-section>
     </s-page>
   );
 }
+
+export const headers: HeadersFunction = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};
