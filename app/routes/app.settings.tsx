@@ -25,11 +25,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const personalizationEnabled = formData.get("personalizationEnabled") === "true";
   const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
   const excludedPages = formData.getAll("excludedPages") as string[];
+  const botName = String(formData.get("botName") ?? "").trim() || "NeonPing";
 
   const merchant = await prisma.merchant.update({
     where: { shopDomain: session.shop },
     data: {
       widgetGreeting: String(formData.get("widgetGreeting") ?? ""),
+      botName,
       widgetColor: String(formData.get("widgetColor") ?? "#1a1a1a"),
       widgetPosition: String(formData.get("widgetPosition") ?? "bottom-right"),
       brandVoice: String(formData.get("brandVoice") ?? "friendly and helpful"),
@@ -55,10 +57,12 @@ function WidgetPreview({
   color,
   position,
   greeting,
+  botName,
 }: {
   color: string;
   position: string;
   greeting: string;
+  botName: string;
 }) {
   const isLeft = position === "bottom-left";
   const side: "left" | "right" = isLeft ? "left" : "right";
@@ -153,6 +157,7 @@ export default function Settings() {
   const formRef = useRef<HTMLFormElement>(null);
 
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
+  const [botName, setBotName] = useState(merchant.botName);
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetPosition, setWidgetPosition] = useState(merchant.widgetPosition);
 
@@ -171,6 +176,14 @@ export default function Settings() {
     <s-page heading="Widget Settings">
       <form ref={formRef} data-save-bar onSubmit={handleSubmit}>
         <s-section heading="Chat appearance">
+          <s-text-field
+            label="Bot name"
+            name="botName"
+            value={botName}
+            maxLength={30}
+            onInput={(e: Event) => setBotName((e.target as HTMLInputElement).value)}
+            help-text="Appears in the widget header (max 30 characters)"
+          ></s-text-field>
           <s-text-field
             label="Opening greeting"
             name="widgetGreeting"
@@ -194,7 +207,7 @@ export default function Settings() {
           </s-select>
 
           <s-text tone="neutral">Live preview</s-text>
-          <WidgetPreview color={widgetColor} position={widgetPosition} greeting={widgetGreeting} />
+          <WidgetPreview color={widgetColor} position={widgetPosition} greeting={widgetGreeting} botName={botName} />
         </s-section>
         <s-section heading="AI behavior">
           <s-text-field
