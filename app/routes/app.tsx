@@ -16,11 +16,11 @@ export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
 
   const navItems = [
-    { href: "/app", label: "Home", icon: "📊" },
-    { href: "/app/conversations", label: "Conversations", icon: "💬" },
-    { href: "/app/settings", label: "Settings", icon: "⚙️" },
-    { href: "/app/ai-config", label: "Knowledge Base", icon: "🤖" },
-    { href: "/app/billing", label: "Billing", icon: "💳" },
+    { href: "/app", label: "Home" },
+    { href: "/app/conversations", label: "Conversations" },
+    { href: "/app/settings", label: "Settings" },
+    { href: "/app/ai-config", label: "Knowledge Base" },
+    { href: "/app/billing", label: "Billing" },
   ];
 
   return (
@@ -28,7 +28,6 @@ export default function App() {
       <s-app-nav>
         {navItems.map((item) => (
           <s-link key={item.href} href={item.href}>
-            <span style={{ marginRight: "6px" }}>{item.icon}</span>
             {item.label}
           </s-link>
         ))}
