@@ -5,6 +5,15 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getUsage } from "../lib/billing.server";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -146,58 +155,94 @@ function ConversationsChart({
 }) {
   const daysNum = parseInt(days, 10) || 30;
   const filled = fillDates(data, daysNum);
-  const max = Math.max(...filled.map((d) => d.count), 1);
-  const allZero = filled.every((d) => d.count === 0);
-  const labelEvery = Math.ceil(filled.length / 6);
 
-  const fmt = (iso: string) => {
-    const [, m, d] = iso.split("-");
-    return `${parseInt(m)}/${parseInt(d)}`;
+  // Format x-axis tick: show "Jun 15" style
+  const fmtTick = (iso: string) => {
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  // How many ticks to show on x-axis (avoid crowding)
+  const tickCount = daysNum <= 7 ? daysNum : daysNum <= 14 ? 7 : daysNum <= 30 ? 6 : 7;
+  const tickIndices = Array.from({ length: tickCount }, (_, i) =>
+    Math.round((i / (tickCount - 1)) * (filled.length - 1))
+  );
+  const ticks = tickIndices.map((i) => filled[i]?.date).filter(Boolean) as string[];
+
+  // Custom tooltip
+  const CustomTooltip = ({
+    active,
+    payload,
+    label,
+  }: {
+    active?: boolean;
+    payload?: Array<{ value: number }>;
+    label?: string;
+  }) => {
+    if (!active || !payload?.length || !label) return null;
+    return (
+      <div
+        style={{
+          background: "#fff",
+          border: "1px solid #e1e1e1",
+          borderRadius: "6px",
+          padding: "8px 12px",
+          fontSize: "13px",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+        }}
+      >
+        <div style={{ color: "#888", marginBottom: "2px" }}>{fmtTick(label)}</div>
+        <div style={{ color: "#1a1a1a", fontWeight: 600 }}>
+          {payload[0].value} conversation{payload[0].value !== 1 ? "s" : ""}
+        </div>
+      </div>
+    );
   };
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          gap: "2px",
-          height: "100px",
-          borderBottom: "1px solid #e1e1e1",
-        }}
-      >
-        {filled.map((d) => (
-          <div
-            key={d.date}
-            title={`${fmt(d.date)}: ${d.count}`}
-            style={{
-              flex: 1,
-              height: allZero
-                ? "1px"
-                : `${Math.max((d.count / max) * 100, d.count > 0 ? 6 : 0)}%`,
-              background: "#1a1a1a",
-              borderRadius: "2px 2px 0 0",
-              alignSelf: "flex-end",
-            }}
+    <div style={{ width: "100%", height: 200 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart
+          data={filled}
+          margin={{ top: 8, right: 8, left: -24, bottom: 0 }}
+        >
+          <defs>
+            <linearGradient id="convGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#1a1a1a" stopOpacity={0.12} />
+              <stop offset="95%" stopColor="#1a1a1a" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+          <XAxis
+            dataKey="date"
+            ticks={ticks}
+            tickFormatter={fmtTick}
+            tick={{ fontSize: 11, fill: "#999" }}
+            axisLine={false}
+            tickLine={false}
           />
-        ))}
-      </div>
-      <div style={{ display: "flex", gap: "2px", marginTop: "6px" }}>
-        {filled.map((d, i) => (
-          <div key={d.date} style={{ flex: 1 }}>
-            {i % labelEvery === 0 ? (
-              <span style={{ fontSize: "10px", color: "#888", whiteSpace: "nowrap" }}>
-                {fmt(d.date)}
-              </span>
-            ) : null}
-          </div>
-        ))}
-      </div>
-      {allZero && (
-        <div style={{ textAlign: "center", padding: "16px 0 0", fontSize: "13px", color: "#999" }}>
-          No conversations in this period
-        </div>
-      )}
+          <YAxis
+            allowDecimals={false}
+            tick={{ fontSize: 11, fill: "#999" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          <Tooltip content={<CustomTooltip />} cursor={{ stroke: "#1a1a1a", strokeWidth: 1, strokeDasharray: "4 4" }} />
+          <Area
+            type="monotone"
+            dataKey="count"
+            stroke="#1a1a1a"
+            strokeWidth={2}
+            fill="url(#convGradient)"
+            dot={false}
+            activeDot={{ r: 4, fill: "#1a1a1a", strokeWidth: 0 }}
+            isAnimationActive={true}
+            animationDuration={400}
+            animationEasing="ease-out"
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }
