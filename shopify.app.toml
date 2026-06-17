@@ -49,6 +49,10 @@ api_version = "2026-07"
   topics = [ "orders/paid" ]
 
   [[webhooks.subscriptions]]
+  uri = "/webhooks/app/subscriptions_update"
+  topics = [ "app/subscriptions/update" ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/customers/data_request"
   compliance_topics = [ "customers/data_request" ]
 
