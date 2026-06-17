@@ -3,8 +3,8 @@
 #np-launcher:hover{transform:scale(1.08);box-shadow:0 6px 20px rgba(0,0,0,.3)}
 #np-launcher:active{transform:scale(.98)}
 #np-launcher svg{width:26px;height:26px;fill:#fff}
-#np-panel{position:fixed;left:var(--np-left);right:var(--np-right);bottom:86px;width:360px;max-width:calc(100vw - 32px);height:520px;max-height:calc(100vh - 110px);background:rgba(255,255,255,.75);border:1px solid rgba(255,255,255,.2);border-radius:16px;box-shadow:0 8px 32px rgba(31,38,135,.2);backdrop-filter:blur(10px);display:flex;flex-direction:column;z-index:9999;overflow:hidden;animation:np-slide-up .3s ease-out;pointer-events:none}
-#np-panel.np-open{animation:np-slide-up .3s ease-out forwards;pointer-events:all}
+#np-panel{position:fixed;left:var(--np-left);right:var(--np-right);bottom:86px;width:360px;max-width:calc(100vw - 32px);height:520px;max-height:calc(100vh - 110px);background:rgba(255,255,255,.75);border:1px solid rgba(255,255,255,.2);border-radius:16px;box-shadow:0 8px 32px rgba(31,38,135,.2);backdrop-filter:blur(10px);flex-direction:column;z-index:9999;overflow:hidden;display:none;pointer-events:none}
+#np-panel.np-open{display:flex;animation:np-slide-up .3s ease-out forwards;pointer-events:all}
 @keyframes np-slide-up{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
 #np-header{background:var(--np-color);color:#fff;padding:14px 16px;font-family:system-ui,sans-serif;font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px;flex-shrink:0}
 #np-header-title{flex:1}
