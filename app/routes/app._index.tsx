@@ -105,11 +105,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+  label,
+  value,
+  icon,
+  trend,
+}: {
+  label: string;
+  value: string;
+  icon?: string;
+  trend?: { pct: number; direction: "up" | "down" };
+}) {
   return (
     <s-box padding="base" background="subdued" borderRadius="base">
-      <s-text tone="neutral">{label}</s-text>
-      <s-heading>{value}</s-heading>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+        {icon && <span style={{ fontSize: "18px" }}>{icon}</span>}
+        <s-text tone="neutral">{label}</s-text>
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: "8px" }}>
+        <s-heading>{value}</s-heading>
+        {trend && (
+          <span
+            style={{
+              fontSize: "12px",
+              color: trend.direction === "up" ? "#2e7d32" : "#c0392b",
+              fontWeight: 600,
+            }}
+          >
+            {trend.direction === "up" ? "↑" : "↓"} {trend.pct}%
+          </span>
+        )}
+      </div>
     </s-box>
   );
 }
@@ -133,9 +159,14 @@ export default function Index() {
     ? Math.round((stats.cartsRecoveredCount / stats.cartsCreatedCount) * 100)
     : 0;
 
+  // Quick action buttons
+  const usagePercent = Math.round((usage.used / usage.limit) * 100);
+  const isAtCapacity = usage.used >= usage.limit;
+  const isNearCapacity = usage.used >= usage.limit * 0.8 && !isAtCapacity;
+
   return (
     <s-page heading="NeonPing Dashboard">
-      {usage.used >= usage.limit && (
+      {isAtCapacity && (
         <s-banner tone="critical">
           {"You've reached your "}
           {usage.limit}
@@ -144,10 +175,10 @@ export default function Index() {
           {" to continue."}
         </s-banner>
       )}
-      {usage.used >= usage.limit * 0.8 && usage.used < usage.limit && (
+      {isNearCapacity && (
         <s-banner tone="warning">
           {"You've used "}
-          {Math.round((usage.used / usage.limit) * 100)}
+          {usagePercent}
           {"% of your "}
           {usage.limit}
           {" monthly conversations. "}
@@ -155,6 +186,21 @@ export default function Index() {
           {"."}
         </s-banner>
       )}
+
+      <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
+        <a href="#conversations" style={{ textDecoration: "none" }}>
+          <s-button variant="secondary">View Conversations</s-button>
+        </a>
+        <a href="/app/settings" style={{ textDecoration: "none" }}>
+          <s-button variant="secondary">Edit Settings</s-button>
+        </a>
+        <a href="/app/ai-config" style={{ textDecoration: "none" }}>
+          <s-button variant="secondary">Configure AI</s-button>
+        </a>
+        <a href="/app/billing" style={{ textDecoration: "none" }}>
+          <s-button variant="secondary">Check Billing</s-button>
+        </a>
+      </div>
 
       <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
         {(["7", "30", "90", "all"] as const).map((d) => (
@@ -204,23 +250,28 @@ export default function Index() {
         </s-section>
       )}
 
-      <s-section heading="Performance">
-        <s-grid gridTemplateColumns="1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr" gap="base">
-          <Metric label="Conversations" value={String(stats.totalConversations)} />
-          <Metric label="Resolution rate" value={`${resolutionRatePct}%`} />
-          <Metric label="Revenue attributed" value={`$${revenue}`} />
-          <Metric label="Conversion rate" value={`${conversionRatePct}%`} />
-          <Metric label="Avg order value" value={`$${aov}`} />
-          <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} />
-          <Metric label="Discounts used" value={String(stats.discountsUsedCount)} />
+      <s-section heading="Performance metrics">
+        <s-grid gridTemplateColumns="1fr 1fr 1fr 1fr" gap="base">
+          <Metric label="Total conversations" value={String(stats.totalConversations)} icon="💬" />
+          <Metric label="Resolution rate" value={`${resolutionRatePct}%`} icon="✓" />
+          <Metric label="Revenue attributed" value={`$${revenue}`} icon="💰" />
+          <Metric label="Conversion rate" value={`${conversionRatePct}%`} icon="🎯" />
+          <Metric label="Avg order value" value={`$${aov}`} icon="🛒" />
+          <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} icon="🔄" />
+          <Metric label="Discounts used" value={String(stats.discountsUsedCount)} icon="🏷️" />
           <Metric
-            label="Conversations this month"
+            label="Monthly usage"
             value={`${usage.used} / ${usage.limit}`}
+            icon="📊"
+            trend={{
+              pct: usagePercent,
+              direction: usagePercent > 80 ? "up" : "down",
+            }}
           />
         </s-grid>
       </s-section>
 
-      <s-section heading="Conversations">
+      <s-section heading="Conversations" id="conversations">
         <s-stack direction="inline" gap="base">
           <s-link href={`/app?days=${days}`}>
             {filter === "escalated" ? "All" : "All (showing)"}
