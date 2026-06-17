@@ -157,9 +157,16 @@ export default function Settings() {
   const formRef = useRef<HTMLFormElement>(null);
 
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
-  const [botName, setBotName] = useState(merchant.botName);
+  const [botName, setBotName] = useState(merchant.botName || "NeonPing");
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetPosition, setWidgetPosition] = useState(merchant.widgetPosition);
+  const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
+  const [maxDiscountPct, setMaxDiscountPct] = useState(String(merchant.maxDiscountPct));
+  const [vipCartThreshold, setVipCartThreshold] = useState(String(merchant.vipCartThreshold / 100));
+  const [supportEmail, setSupportEmail] = useState(merchant.supportEmail ?? "");
+  const [personalizationEnabled, setPersonalizationEnabled] = useState(merchant.personalizationEnabled);
+  const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
+  const [excludedPages, setExcludedPages] = useState(merchant.excludedPages ?? []);
 
   useEffect(() => {
     if (fetcher.data?.saved) {
@@ -169,7 +176,19 @@ export default function Settings() {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    fetcher.submit(new FormData(event.currentTarget), { method: "POST" });
+    const formData = new FormData();
+    formData.append("botName", botName);
+    formData.append("widgetGreeting", widgetGreeting);
+    formData.append("widgetColor", widgetColor);
+    formData.append("widgetPosition", widgetPosition);
+    formData.append("brandVoice", brandVoice);
+    formData.append("maxDiscountPct", maxDiscountPct);
+    formData.append("vipCartThreshold", vipCartThreshold);
+    formData.append("supportEmail", supportEmail);
+    formData.append("personalizationEnabled", String(personalizationEnabled));
+    formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
+    excludedPages.forEach((page) => formData.append("excludedPages", page));
+    fetcher.submit(formData, { method: "POST" });
   };
 
   return (
@@ -257,7 +276,8 @@ export default function Settings() {
             <s-text-field
               label="Brand voice"
               name="brandVoice"
-              value={merchant.brandVoice}
+              value={brandVoice}
+              onInput={(e: Event) => setBrandVoice((e.target as HTMLInputElement).value)}
               placeholder="e.g. friendly and helpful"
               help-text="Describe the tone and personality your AI should use. Examples: 'professional and concise', 'enthusiastic and supportive', 'playful and fun'"
             ></s-text-field>
@@ -266,7 +286,8 @@ export default function Settings() {
             <s-number-field
               label="Max discount %"
               name="maxDiscountPct"
-              value={String(merchant.maxDiscountPct)}
+              value={maxDiscountPct}
+              onInput={(e: Event) => setMaxDiscountPct((e.target as HTMLInputElement).value)}
               min={0}
               max={20}
               help-text="The highest discount percentage the AI can offer (0-20%). Protects your margins."
@@ -276,7 +297,8 @@ export default function Settings() {
             <s-money-field
               label="VIP free-shipping cart threshold"
               name="vipCartThreshold"
-              value={String(merchant.vipCartThreshold / 100)}
+              value={vipCartThreshold}
+              onInput={(e: Event) => setVipCartThreshold((e.target as HTMLInputElement).value)}
               min={0}
               help-text="Carts above this value unlock VIP offers. Example: $50 cart gets free shipping."
             ></s-money-field>
@@ -286,7 +308,8 @@ export default function Settings() {
               label="Enable personalized discounts"
               name="personalizationEnabled"
               help-text="When enabled, the AI can offer discounts to VIP customers and loyal shoppers."
-              checked={merchant.personalizationEnabled}
+              checked={personalizationEnabled}
+              onChange={(e: Event) => setPersonalizationEnabled((e.target as HTMLInputElement).checked)}
             ></s-switch>
           </div>
           <div style={{ marginBottom: "16px" }}>
@@ -294,9 +317,10 @@ export default function Settings() {
               label="Email me when AI escalates to human support"
               name="escalationEmailEnabled"
               help-text="Sends an email to your support address when the bot can't resolve a customer issue."
-              checked={merchant.escalationEmailEnabled}
+              checked={escalationEmailEnabled}
+              onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
             ></s-switch>
-            {!merchant.supportEmail && (
+            {!supportEmail && (
               <p style={{ color: "#f59e0b", fontSize: "12px", marginTop: "8px" }}>
                 ⚠️ Add your support email below to receive escalation alerts.
               </p>
@@ -308,7 +332,8 @@ export default function Settings() {
             <s-email-field
               label="Support email"
               name="supportEmail"
-              value={merchant.supportEmail ?? ""}
+              value={supportEmail}
+              onInput={(e: Event) => setSupportEmail((e.target as HTMLInputElement).value)}
               help-text="Where escalated conversations and support alerts are sent."
             ></s-email-field>
           </div>
@@ -332,7 +357,11 @@ export default function Settings() {
                 name="excludedPages"
                 value={page}
                 label={page.charAt(0).toUpperCase() + page.slice(1) + (page === "checkout" ? " (recommended)" : "")}
-                checked={merchant.excludedPages?.includes(page) || false}
+                checked={excludedPages.includes(page)}
+                onChange={(e: Event) => {
+                  const isChecked = (e.target as HTMLInputElement).checked;
+                  setExcludedPages(isChecked ? [...excludedPages, page] : excludedPages.filter((p) => p !== page));
+                }}
               ></s-checkbox>
             </div>
           ))}
