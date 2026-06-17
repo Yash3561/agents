@@ -22,17 +22,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const maxDiscountPct = Math.min(20, Math.max(0, Number(formData.get("maxDiscountPct")) || 0));
   const vipCartThresholdDollars = Number(formData.get("vipCartThreshold")) || 0;
+  const personalizationEnabled = formData.get("personalizationEnabled") === "true";
+  const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
+  const excludedPages = formData.getAll("excludedPages") as string[];
+  const botName = String(formData.get("botName") ?? "").trim() || "NeonPing";
 
   const merchant = await prisma.merchant.update({
     where: { shopDomain: session.shop },
     data: {
       widgetGreeting: String(formData.get("widgetGreeting") ?? ""),
+      botName,
       widgetColor: String(formData.get("widgetColor") ?? "#1a1a1a"),
       widgetPosition: String(formData.get("widgetPosition") ?? "bottom-right"),
       brandVoice: String(formData.get("brandVoice") ?? "friendly and helpful"),
       maxDiscountPct,
       vipCartThreshold: Math.round(vipCartThresholdDollars * 100),
       supportEmail: String(formData.get("supportEmail") ?? "") || null,
+      personalizationEnabled,
+      escalationEmailEnabled,
+      excludedPages,
     },
   });
 
@@ -49,10 +57,12 @@ function WidgetPreview({
   color,
   position,
   greeting,
+  botName,
 }: {
   color: string;
   position: string;
   greeting: string;
+  botName: string;
 }) {
   const isLeft = position === "bottom-left";
   const side: "left" | "right" = isLeft ? "left" : "right";
@@ -103,7 +113,7 @@ function WidgetPreview({
             fontWeight: 600,
           }}
         >
-          Chat with us
+          {botName || "NeonPing"}
         </div>
         <div style={{ padding: 10, background: "#fff" }}>
           <div
@@ -147,8 +157,16 @@ export default function Settings() {
   const formRef = useRef<HTMLFormElement>(null);
 
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
+  const [botName, setBotName] = useState(merchant.botName || "NeonPing");
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetPosition, setWidgetPosition] = useState(merchant.widgetPosition);
+  const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
+  const [maxDiscountPct, setMaxDiscountPct] = useState(String(merchant.maxDiscountPct));
+  const [vipCartThreshold, setVipCartThreshold] = useState(String(merchant.vipCartThreshold / 100));
+  const [supportEmail, setSupportEmail] = useState(merchant.supportEmail ?? "");
+  const [personalizationEnabled, setPersonalizationEnabled] = useState(merchant.personalizationEnabled);
+  const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
+  const [excludedPages, setExcludedPages] = useState(merchant.excludedPages ?? []);
 
   useEffect(() => {
     if (fetcher.data?.saved) {
@@ -158,69 +176,197 @@ export default function Settings() {
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    fetcher.submit(new FormData(event.currentTarget), { method: "POST" });
+    const formData = new FormData();
+    formData.append("botName", botName);
+    formData.append("widgetGreeting", widgetGreeting);
+    formData.append("widgetColor", widgetColor);
+    formData.append("widgetPosition", widgetPosition);
+    formData.append("brandVoice", brandVoice);
+    formData.append("maxDiscountPct", maxDiscountPct);
+    formData.append("vipCartThreshold", vipCartThreshold);
+    formData.append("supportEmail", supportEmail);
+    formData.append("personalizationEnabled", String(personalizationEnabled));
+    formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
+    excludedPages.forEach((page) => formData.append("excludedPages", page));
+    fetcher.submit(formData, { method: "POST" });
   };
 
   return (
     <s-page heading="Widget Settings">
       <form ref={formRef} data-save-bar onSubmit={handleSubmit}>
-        <s-section heading="Chat appearance">
-          <s-text-field
-            label="Opening greeting"
-            name="widgetGreeting"
-            value={widgetGreeting}
-            onInput={(e: Event) => setWidgetGreeting((e.target as HTMLInputElement).value)}
-          ></s-text-field>
-          <s-color-field
-            label="Widget color"
-            name="widgetColor"
-            value={widgetColor}
-            onInput={(e: Event) => setWidgetColor((e.target as HTMLInputElement).value)}
-          ></s-color-field>
-          <s-select
-            label="Position"
-            name="widgetPosition"
-            value={widgetPosition}
-            onChange={(e: Event) => setWidgetPosition((e.target as HTMLSelectElement).value)}
-          >
-            <s-option value="bottom-right">Bottom right</s-option>
-            <s-option value="bottom-left">Bottom left</s-option>
-          </s-select>
+        <s-section heading="🎨 Appearance">
+          <div style={{ marginBottom: "16px" }}>
+            <s-text-field
+              label="Bot name"
+              name="botName"
+              value={botName}
+              maxLength={30}
+              onInput={(e: Event) => setBotName((e.target as HTMLInputElement).value)}
+              help-text="Appears in the widget header (max 30 characters). Give your bot a friendly name customers will recognize."
+            ></s-text-field>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <s-text-field
+              label="Opening greeting"
+              name="widgetGreeting"
+              value={widgetGreeting}
+              onInput={(e: Event) => setWidgetGreeting((e.target as HTMLInputElement).value)}
+              help-text="The first message customers see. Keep it friendly and inviting."
+            ></s-text-field>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+              <div style={{ flex: 1 }}>
+                <s-color-field
+                  label="Widget color"
+                  name="widgetColor"
+                  value={widgetColor}
+                  onInput={(e: Event) => setWidgetColor((e.target as HTMLInputElement).value)}
+                  help-text="The button and accent color of your chat widget. Choose a brand color."
+                ></s-color-field>
+              </div>
+              <div
+                style={{
+                  width: "60px",
+                  height: "60px",
+                  borderRadius: "8px",
+                  background: widgetColor,
+                  border: "2px solid #e0e0e0",
+                  marginTop: "24px",
+                  flexShrink: 0,
+                }}
+              />
+            </div>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <s-select
+              label="Position"
+              name="widgetPosition"
+              value={widgetPosition}
+              onChange={(e: Event) => setWidgetPosition((e.target as HTMLSelectElement).value)}
+              help-text="Where the chat button appears on your storefront."
+            >
+              <s-option value="bottom-right">Bottom right</s-option>
+              <s-option value="bottom-left">Bottom left</s-option>
+            </s-select>
+          </div>
 
-          <s-text tone="neutral">Live preview</s-text>
-          <WidgetPreview color={widgetColor} position={widgetPosition} greeting={widgetGreeting} />
+          <div
+            style={{
+              marginTop: "24px",
+              padding: "12px",
+              background: "#f5f5f5",
+              borderRadius: "8px",
+              borderLeft: "4px solid #1a1a1a",
+            }}
+          >
+            <s-text tone="neutral">
+              <strong>Live Preview</strong>
+            </s-text>
+            <p style={{ fontSize: "12px", color: "#666", margin: "8px 0 0" }}>
+              This is how your widget looks on the storefront:
+            </p>
+          </div>
+          <div style={{ marginTop: "12px" }}>
+            <WidgetPreview color={widgetColor} position={widgetPosition} greeting={widgetGreeting} botName={botName} />
+          </div>
         </s-section>
-        <s-section heading="AI behavior">
-          <s-text-field
-            label="Brand voice"
-            name="brandVoice"
-            value={merchant.brandVoice}
-            placeholder="e.g. friendly and helpful"
-          ></s-text-field>
-          <s-number-field
-            label="Max discount %"
-            name="maxDiscountPct"
-            value={String(merchant.maxDiscountPct)}
-            min={0}
-            max={20}
-          ></s-number-field>
-          <s-money-field
-            label="VIP free-shipping cart threshold"
-            name="vipCartThreshold"
-            value={String(merchant.vipCartThreshold / 100)}
-            min={0}
-          ></s-money-field>
+        <s-section heading="🤖 AI Behavior">
+          <div style={{ marginBottom: "16px" }}>
+            <s-text-field
+              label="Brand voice"
+              name="brandVoice"
+              value={brandVoice}
+              onInput={(e: Event) => setBrandVoice((e.target as HTMLInputElement).value)}
+              placeholder="e.g. friendly and helpful"
+              help-text="Describe the tone and personality your AI should use. Examples: 'professional and concise', 'enthusiastic and supportive', 'playful and fun'"
+            ></s-text-field>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <s-number-field
+              label="Max discount %"
+              name="maxDiscountPct"
+              value={maxDiscountPct}
+              onInput={(e: Event) => setMaxDiscountPct((e.target as HTMLInputElement).value)}
+              min={0}
+              max={20}
+              help-text="The highest discount percentage the AI can offer (0-20%). Protects your margins."
+            ></s-number-field>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <s-money-field
+              label="VIP free-shipping cart threshold"
+              name="vipCartThreshold"
+              value={vipCartThreshold}
+              onInput={(e: Event) => setVipCartThreshold((e.target as HTMLInputElement).value)}
+              min={0}
+              help-text="Carts above this value unlock VIP offers. Example: $50 cart gets free shipping."
+            ></s-money-field>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <s-switch
+              label="Enable personalized discounts"
+              name="personalizationEnabled"
+              help-text="When enabled, the AI can offer discounts to VIP customers and loyal shoppers."
+              checked={personalizationEnabled}
+              onChange={(e: Event) => setPersonalizationEnabled((e.target as HTMLInputElement).checked)}
+            ></s-switch>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <s-switch
+              label="Email me when AI escalates to human support"
+              name="escalationEmailEnabled"
+              help-text="Sends an email to your support address when the bot can't resolve a customer issue."
+              checked={escalationEmailEnabled}
+              onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
+            ></s-switch>
+            <p style={{ color: "#b45309", fontSize: "12px", marginTop: "8px" }}>
+              ⚠️ Email notifications are coming soon — no emails are currently sent. We'll notify you when this is live.
+            </p>
+          </div>
         </s-section>
-        <s-section heading="Support">
-          <s-email-field
-            label="Support email"
-            name="supportEmail"
-            value={merchant.supportEmail ?? ""}
-          ></s-email-field>
+        <s-section heading="📧 Support">
+          <div style={{ marginBottom: "16px" }}>
+            <s-email-field
+              label="Support email"
+              name="supportEmail"
+              value={supportEmail}
+              onInput={(e: Event) => setSupportEmail((e.target as HTMLInputElement).value)}
+              help-text="Where escalated conversations and support alerts are sent."
+            ></s-email-field>
+          </div>
         </s-section>
-        <s-button type="submit" variant="primary">
-          Save
-        </s-button>
+        <s-section heading="👁️ Widget Visibility">
+          <div
+            style={{
+              padding: "12px",
+              background: "#f5f5f5",
+              borderRadius: "8px",
+              marginBottom: "16px",
+            }}
+          >
+            <p style={{ margin: 0, fontSize: "13px", color: "#666" }}>
+              Hide the chat widget on these pages to avoid distracting customers during critical flows:
+            </p>
+          </div>
+          {['checkout', 'cart', 'account', 'blog'].map((page) => (
+            <div key={page} style={{ marginBottom: "12px" }}>
+              <s-checkbox
+                name="excludedPages"
+                value={page}
+                label={page.charAt(0).toUpperCase() + page.slice(1) + (page === "checkout" ? " (recommended)" : "")}
+                checked={excludedPages.includes(page)}
+                onChange={(e: Event) => {
+                  const isChecked = (e.target as HTMLInputElement).checked;
+                  setExcludedPages(isChecked ? [...excludedPages, page] : excludedPages.filter((p) => p !== page));
+                }}
+              ></s-checkbox>
+            </div>
+          ))}
+        </s-section>
+        <div style={{ padding: "16px 0" }}>
+          <s-button type="submit" variant="primary">Save settings</s-button>
+        </div>
       </form>
     </s-page>
   );
