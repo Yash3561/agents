@@ -15,6 +15,8 @@ export interface CustomerMemory {
   last_search?: string;
   summary?: string;                        // 2-sentence compressed history
   abandoned_cart?: { items: unknown[]; total: number; timestamp: string };
+  firstName?: string;           // customer's first name from Shopify profile
+  phone?: string;               // customer's phone number from Shopify profile
 }
 
 // ---------------------------------------------------------------------------
@@ -35,6 +37,8 @@ export async function fetchCustomerMemory(
   try {
     const data = await adminGraphql<{
       customer: {
+        firstName: string | null;
+        phone: string | null;
         metafields: { edges: Array<{ node: { key: string; value: string } }> };
       };
     }>(
@@ -42,6 +46,8 @@ export async function fetchCustomerMemory(
       accessToken,
       `query GetMemory($id: ID!, $ns: String!) {
         customer(id: $id) {
+          firstName
+          phone
           metafields(namespace: $ns, first: 10) {
             edges { node { key value } }
           }
@@ -64,6 +70,9 @@ export async function fetchCustomerMemory(
         // Corrupted metafield — skip silently
       }
     }
+
+    if (data.customer?.firstName) memory.firstName = data.customer.firstName;
+    if (data.customer?.phone) memory.phone = data.customer.phone;
 
     return memory;
   } catch {

@@ -17,6 +17,7 @@ const ABANDONED_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days — beyond thi
 async function findAbandonedCartGreeting(
   shop: string,
   customerId: string,
+  firstName?: string,
 ): Promise<string | null> {
   const conversation = await prisma.conversation.findFirst({
     where: { shopDomain: shop, customerId },
@@ -28,7 +29,8 @@ async function findAbandonedCartGreeting(
   const ageMs = Date.now() - conversation.lastMessageAt.getTime();
   if (ageMs < ABANDONED_MIN_AGE_MS || ageMs > ABANDONED_MAX_AGE_MS) return null;
 
-  return "Welcome back! You still have an item waiting in your cart — want to finish checking out?";
+  const namePrefix = firstName ? `Welcome back, ${firstName}!` : "Welcome back!";
+  return `${namePrefix} You still have an item waiting in your cart — want to finish checking out?`;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -43,17 +45,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   try {
-    const abandonedGreeting = await findAbandonedCartGreeting(shop, customerId);
+    const accessToken = await getStorefrontAccessToken(request, shop);
+    const memory = await fetchCustomerMemory(shop, accessToken, customerId);
+
+    const firstName = memory.firstName;
+
+    const abandonedGreeting = await findAbandonedCartGreeting(shop, customerId, firstName);
     if (abandonedGreeting) {
       return new Response(JSON.stringify({ greeting: abandonedGreeting }), { headers });
     }
 
-    const accessToken = await getStorefrontAccessToken(request, shop);
-    const memory = await fetchCustomerMemory(shop, accessToken, customerId);
-
-    const greeting = memory.last_search
-      ? `Welcome back! Still looking for "${memory.last_search}"? Happy to help you pick up where you left off.`
-      : null;
+    let greeting: string | null = null;
+    if (memory.last_search) {
+      const namePrefix = firstName ? `Welcome back, ${firstName}!` : "Welcome back!";
+      greeting = `${namePrefix} Still looking for "${memory.last_search}"? Happy to help you pick up where you left off.`;
+    }
 
     return new Response(JSON.stringify({ greeting }), { headers });
   } catch {

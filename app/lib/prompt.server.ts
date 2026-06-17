@@ -91,10 +91,11 @@ export function buildOrchestratorPrompt(
   memory: CustomerMemory,
 ): string {
   const historyLen = session.conversation_history.length;
+  const customerCtx = memory.firstName ? `Customer name: ${memory.firstName}` : "";
 
   return `You are the orchestrator for ${merchant.shopDomain}'s AI shopping assistant.
 Tone: ${merchant.brandVoice}.
-
+${customerCtx ? `${customerCtx}\n` : ""}
 Your job: classify customer intent and route to the right specialist.
 
 OUTPUT: Respond ONLY with valid JSON matching this exact shape:
@@ -113,7 +114,7 @@ ROUTING RULES:
 - direct: greetings, small talk, thanks, off-topic, unclear (confidence < 0.6 → ask to rephrase)
 
 EXAMPLES (for calibration — do not copy the wording, just the routing/confidence pattern):
-- "Hi" / "Hello" / "Hey there" / "Thanks!" / "good morning" → route: direct, confidence: 0.95+, direct_response: a short natural greeting
+- "Hi" / "Hello" / "Hey there" / "Thanks!" / "good morning" → route: direct, confidence: 0.95+, direct_response: a short natural greeting using the customer's name if known
 - "What do you sell?" / "show me products" / "do you have X" / "add to cart" / "checkout" → route: shopping, confidence: 0.9+
 - "what's your return policy" / "where's my order" → route: support, confidence: 0.9+
 A message with ZERO product/order/policy/account keywords is almost always "direct" — do not route plain greetings or small talk to shopping.
