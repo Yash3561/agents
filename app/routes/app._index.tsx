@@ -76,7 +76,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Agent routing breakdown from agentTrace JSON — agentTrace column exists in schema
   const rawRouting = await prisma.$queryRaw<Array<{ route: string; count: bigint }>>`
-    SELECT agentTrace::json->0->>'route' as route, COUNT(*) as count
+    SELECT "agentTrace"::json->0->>'route' as route, COUNT(*) as count
     FROM "Conversation" WHERE "shopDomain" = ${shop}
     ${since ? Prisma.sql`AND "startedAt" >= ${since}` : Prisma.sql``}
     AND "agentTrace" IS NOT NULL GROUP BY 1
