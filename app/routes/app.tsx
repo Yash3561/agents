@@ -15,12 +15,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
 
+  const navItems = [
+    { href: "/app", label: "Home", icon: "📊" },
+    { href: "/app/conversations", label: "Conversations", icon: "💬" },
+    { href: "/app/settings", label: "Settings", icon: "⚙️" },
+    { href: "/app/ai-config", label: "Knowledge Base", icon: "🤖" },
+    { href: "/app/billing", label: "Billing", icon: "💳" },
+  ];
+
   return (
     <AppProvider embedded apiKey={apiKey}>
       <s-app-nav>
-        <s-link href="/app">Home</s-link>
-        <s-link href="/app/settings">Settings</s-link>
-        <s-link href="/app/additional">Additional page</s-link>
+        {navItems.map((item) => (
+          <s-link key={item.href} href={item.href}>
+            <span style={{ marginRight: "6px" }}>{item.icon}</span>
+            {item.label}
+          </s-link>
+        ))}
       </s-app-nav>
       <Outlet />
     </AppProvider>
