@@ -59,6 +59,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (memory.last_search) {
       const namePrefix = firstName ? `Welcome back, ${firstName}!` : "Welcome back!";
       greeting = `${namePrefix} Still looking for "${memory.last_search}"? Happy to help you pick up where you left off.`;
+    } else if (firstName) {
+      greeting = `Hi ${firstName}! How can I help you today?`;
     }
 
     return new Response(JSON.stringify({ greeting }), { headers });
