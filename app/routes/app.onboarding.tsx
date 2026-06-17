@@ -8,7 +8,7 @@ const VOICE_PRESETS = [
   {
     value: "friendly and helpful",
     label: "Friendly & helpful",
-    preview: "Hey there! 😊 Let me know if you need help finding anything!",
+    preview: "Hey there! Let me know if you need help finding anything!",
   },
   {
     value: "professional and concise",
@@ -18,7 +18,7 @@ const VOICE_PRESETS = [
   {
     value: "playful and fun",
     label: "Playful & fun",
-    preview: "Heyyy! 🎉 What are we shopping for today?",
+    preview: "Heyyy! What are we shopping for today?",
   },
   {
     value: "premium and polished",
@@ -41,21 +41,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect("/app");
   }
 
-  const apiUrl = `${process.env.SHOPIFY_APP_URL ?? ""}/api/chat`;
-
-  return { shop, merchant, apiUrl };
+  return { shop, merchant, appUrl: process.env.SHOPIFY_APP_URL ?? "" };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
 
-  if (formData.get("intent") === "skip") {
+  if (formData.get("intent") === "save-step") {
     await prisma.merchant.update({
       where: { shopDomain: session.shop },
-      data: { onboardedAt: new Date() },
+      data: { onboardingStep: Number(formData.get("step")) || 1 },
     });
-    return redirect("/app");
+    return { ok: true };
   }
 
   const maxDiscountPct = Math.min(20, Math.max(0, Number(formData.get("maxDiscountPct")) || 0));
@@ -71,14 +69,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       vipCartThreshold: Math.round(vipCartThresholdDollars * 100),
       personalizationEnabled: formData.get("personalizationEnabled") === "true",
       onboardedAt: new Date(),
+      onboardingStep: 4,
     },
   });
 
   return redirect("/app");
 };
 
-async function sendTestMessage(shop: string): Promise<string> {
-  const res = await fetch("/api/chat", {
+async function sendTestMessage(shop: string, appUrl: string): Promise<string> {
+  const res = await fetch(`${appUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -105,11 +104,24 @@ async function sendTestMessage(shop: string): Promise<string> {
   return text || "(no response text)";
 }
 
+function WidgetPreview({ color, greeting }: { color: string; greeting: string }) {
+  return (
+    <div style={{ position: "relative", height: 200, background: "#f0f0f3", borderRadius: 12, border: "1px solid #e1e1e1", overflow: "hidden", marginTop: "16px" }}>
+      <div style={{ position: "absolute", top: 10, left: 12, fontSize: 11, color: "#9a9a9a", fontFamily: "system-ui, sans-serif" }}>Your storefront</div>
+      <div style={{ position: "absolute", bottom: 56, right: 16, width: 190, borderRadius: 14, background: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,.18)", overflow: "hidden", fontFamily: "system-ui, sans-serif" }}>
+        <div style={{ background: color || "#1a1a1a", color: "#fff", padding: "8px 12px", fontSize: 12, fontWeight: 600 }}>Your Bot</div>
+        <div style={{ padding: 10, background: "#fff", fontSize: 11, color: "#111" }}>{greeting || "Hi! How can I help you today?"}</div>
+      </div>
+      <div style={{ position: "absolute", bottom: 12, right: 16, width: 36, height: 36, borderRadius: "50%", background: color || "#1a1a1a" }} />
+    </div>
+  );
+}
+
 export default function Onboarding() {
-  const { shop, merchant, apiUrl } = useLoaderData<typeof loader>();
+  const { shop, merchant, appUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(merchant.onboardingStep || 1);
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
   const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
@@ -126,7 +138,10 @@ export default function Onboarding() {
 
   const selectedPreset = VOICE_PRESETS.find((p) => p.value === brandVoice);
 
-  const skip = () => fetcher.submit({ intent: "skip" }, { method: "POST" });
+  const goToStep = (nextStep: number) => {
+    setStep(nextStep);
+    fetcher.submit({ intent: "save-step", step: String(nextStep) }, { method: "POST" });
+  };
 
   const finish = () => {
     fetcher.submit(
@@ -146,7 +161,7 @@ export default function Onboarding() {
     setTestLoading(true);
     setTestResult(null);
     try {
-      const text = await sendTestMessage(shop);
+      const text = await sendTestMessage(shop, appUrl);
       setTestResult(text);
     } catch {
       setTestResult("Something went wrong reaching the assistant. Try again.");
@@ -154,6 +169,8 @@ export default function Onboarding() {
       setTestLoading(false);
     }
   };
+
+  const themeEditorUrl = `https://admin.shopify.com/store/${shop.replace(".myshopify.com", "")}/themes/current/editor?context=apps`;
 
   return (
     <s-page heading="Welcome to NeonPing">
@@ -163,17 +180,17 @@ export default function Onboarding() {
             label="Opening greeting"
             value={widgetGreeting}
             onInput={(e: Event) => setWidgetGreeting((e.target as HTMLInputElement).value)}
+            help-text="The first message customers see when they open your chat widget."
           ></s-text-field>
           <s-color-field
             label="Widget color"
             value={widgetColor}
             onInput={(e: Event) => setWidgetColor((e.target as HTMLInputElement).value)}
+            help-text="Choose a color that matches your brand."
           ></s-color-field>
+          <WidgetPreview color={widgetColor} greeting={widgetGreeting} />
           <s-stack direction="inline" gap="base">
-            <s-button onClick={skip} variant="tertiary">
-              Skip setup
-            </s-button>
-            <s-button onClick={() => setStep(2)} variant="primary">
+            <s-button onClick={() => goToStep(2)} variant="primary">
               Next
             </s-button>
           </s-stack>
@@ -200,10 +217,10 @@ export default function Onboarding() {
             </s-paragraph>
           ) : null}
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => setStep(1)} variant="tertiary">
+            <s-button onClick={() => goToStep(1)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={() => setStep(3)} variant="primary">
+            <s-button onClick={() => goToStep(3)} variant="primary">
               Next
             </s-button>
           </s-stack>
@@ -237,10 +254,10 @@ export default function Onboarding() {
             </>
           ) : null}
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => setStep(2)} variant="tertiary">
+            <s-button onClick={() => goToStep(2)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={() => setStep(4)} variant="primary">
+            <s-button onClick={() => goToStep(4)} variant="primary">
               Next
             </s-button>
           </s-stack>
@@ -250,17 +267,11 @@ export default function Onboarding() {
       {step === 4 && (
         <s-section heading="Step 4 of 4 — Go live">
           <s-paragraph>
-            Add NeonPing to your storefront: open your theme editor's App Embeds panel
-            and paste this API URL into the NeonPing Chat block's settings.
+            Enable the NeonPing chat widget on your storefront by opening your theme editor
+            and turning on the App Embed.
           </s-paragraph>
-          <s-box padding="base" background="subdued" borderRadius="base">
-            <s-text>{apiUrl}</s-text>
-          </s-box>
-          <s-link
-            href={`https://${shop}/admin/themes/current/editor?context=apps`}
-            target="_blank"
-          >
-            Open theme editor
+          <s-link href={themeEditorUrl} target="_blank">
+            Open Theme Editor - App Embeds
           </s-link>
           <s-checkbox
             label="I've added the widget to my theme"
@@ -278,13 +289,18 @@ export default function Onboarding() {
           ) : null}
 
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => setStep(3)} variant="tertiary">
+            <s-button onClick={() => goToStep(3)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={finish} variant="primary">
+            <s-button onClick={finish} variant="primary" disabled={!themeConfirmed}>
               Finish
             </s-button>
           </s-stack>
+          {!themeConfirmed && (
+            <p style={{ fontSize: "12px", color: "#b45309", marginTop: "8px" }}>
+              ⚠️ Please confirm you've added the widget to your theme before finishing.
+            </p>
+          )}
         </s-section>
       )}
     </s-page>

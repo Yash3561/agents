@@ -17,11 +17,17 @@ model Merchant {
   widgetColor         String         @default("#1a1a1a")
   widgetPosition      String         @default("bottom-right")
   widgetGreeting      String         @default("Hi! How can I help you today?")
+  botName             String?        @default("NeonPing")
   brandVoice          String         @default("friendly and helpful")
   maxDiscountPct      Int            @default(15)
   vipCartThreshold    Int            @default(10000)
   personalizationEnabled Boolean     @default(true)
   supportEmail        String?
+  escalationEmailEnabled Boolean     @default(false)
+  excludedPages       String[]       @default([])
+  onboardingStep      Int            @default(1)
+  customFaqs          Json           @default("[]")
+  quickReplies        String[]       @default([])
   whatsappNumber      String?
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
