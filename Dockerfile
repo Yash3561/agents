@@ -7,6 +7,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+ARG BUILD_VERSION=dev
+ENV BUILD_VERSION=$BUILD_VERSION
+
 COPY package.json package-lock.json* ./
 
 RUN npm ci --omit=dev && npm cache clean --force
