@@ -180,7 +180,7 @@ export default function AiConfig() {
         {/* Fix D — empty state */}
         {faqs.length === 0 ? (
           <div style={{ padding: "24px 0", textAlign: "center" }}>
-            <s-text tone="subdued">
+            <s-text tone="neutral">
               FAQs let you teach your bot to answer common questions exactly the way you want — returns, shipping, sizing, and anything else customers ask repeatedly.
             </s-text>
             <div style={{ marginTop: "16px" }}>

@@ -143,8 +143,6 @@ export default function Conversations() {
             setSearch(target.value);
           }}
           placeholder="Type a session ID..."
-          clearButton
-          onClearButtonClick={() => setSearch("")}
         />
       </s-section>
 
@@ -174,7 +172,7 @@ export default function Conversations() {
                     </Link>
                   </s-table-cell>
                   <s-table-cell>
-                    <s-text tone="neutral" variant="body-sm">
+                    <s-text tone="neutral">
                       {c.sessionId.slice(0, 12)}…
                     </s-text>
                   </s-table-cell>

@@ -93,7 +93,7 @@ export default function ConversationDetail() {
           </div>
           {conversation.orderId && (
             <div style={{ marginTop: "6px" }}>
-              <s-text tone="subdued">Order: </s-text>
+              <s-text tone="neutral">Order: </s-text>
               <a
                 href={`https://admin.shopify.com/store/${storeHandle}/orders/${conversation.orderId}`}
                 target="_blank"

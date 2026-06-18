@@ -30,7 +30,6 @@ jobs:
 
       - name: Run typecheck
         run: npm run typecheck
-        continue-on-error: true  # pre-existing Polaris tone="subdued" deprecations; tracked separately
 
   # ── Job 2: Build Docker image and deploy to Azure Container Apps ────────────
   build-and-deploy:
@@ -161,6 +160,7 @@ jobs:
 
       - name: Deploy Shopify app (webhooks + extensions)
         run: npx shopify app deploy --allow-updates
+        continue-on-error: true  # requires SHOPIFY_CLI_PARTNERS_TOKEN — set in GitHub secrets to enable
         env:
           SHOPIFY_CLI_PARTNERS_TOKEN: ${{ secrets.SHOPIFY_CLI_PARTNERS_TOKEN }}
           SHOPIFY_API_KEY: ${{ secrets.SHOPIFY_API_KEY }}

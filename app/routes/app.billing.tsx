@@ -210,7 +210,7 @@ export default function BillingPage() {
                 </ul>
                 {!isCurrent && (
                   <div style={{ marginTop: "auto" }}>
-                    <s-text tone="subdued">Your current plan includes all free tier features.</s-text>
+                    <s-text tone="neutral">Your current plan includes all free tier features.</s-text>
                   </div>
                 )}
               </div>
@@ -306,7 +306,7 @@ export default function BillingPage() {
       </s-section>
 
       <s-section heading="Manage subscription">
-        <s-text tone="subdued">
+        <s-text tone="neutral">
           To cancel or change your billing, visit your Shopify subscription settings.
         </s-text>
         <div style={{ marginTop: "12px" }}>
