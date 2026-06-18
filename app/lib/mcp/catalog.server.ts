@@ -104,9 +104,15 @@ export async function searchCatalog(
 ): Promise<CatalogSearchResult> {
   const { maxPriceCents, limit = 3, currency = "USD", intent, addressCountry = "US" } = opts;
 
+  // Strip emoji and other non-text Unicode so they don't pollute the search query
+  const cleanQuery = query
+    .replace(/\p{Emoji_Presentation}/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
   const args: Record<string, unknown> = {
     catalog: {
-      query,
+      query: cleanQuery,
       context: {
         currency,
         address_country: addressCountry,
