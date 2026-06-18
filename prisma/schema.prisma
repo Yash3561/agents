@@ -22,6 +22,7 @@ model Merchant {
   maxDiscountPct      Int            @default(15)
   vipCartThreshold    Int            @default(10000)
   personalizationEnabled Boolean     @default(true)
+  allowedDiscountCodes String       @default("")
   supportEmail        String?
   escalationEmailEnabled Boolean     @default(false)
   proactiveEngagementEnabled Boolean @default(true)

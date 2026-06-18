@@ -39,13 +39,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
 
-  const maxDiscountPct = Math.min(20, Math.max(0, Number(formData.get("maxDiscountPct")) || 0));
-  const vipCartThresholdDollars = Number(formData.get("vipCartThreshold")) || 0;
   const personalizationEnabled = formData.get("personalizationEnabled") === "true";
   const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
   const proactiveEngagementEnabled = formData.get("proactiveEngagementEnabled") === "true";
   const excludedPages = formData.getAll("excludedPages") as string[];
   const botName = String(formData.get("botName") ?? "").trim() || "NeonPing";
+
+  // Validate and store discount codes JSON
+  const rawDiscountCodes = String(formData.get("allowedDiscountCodes") ?? "");
+  let allowedDiscountCodes = "[]";
+  try {
+    const parsed = JSON.parse(rawDiscountCodes);
+    if (Array.isArray(parsed)) {
+      allowedDiscountCodes = rawDiscountCodes;
+    }
+  } catch {
+    // leave as "[]"
+  }
 
   const merchant = await prisma.merchant.update({
     where: { shopDomain: session.shop },
@@ -55,13 +65,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       widgetColor: String(formData.get("widgetColor") ?? "#1a1a1a"),
       widgetPosition: String(formData.get("widgetPosition") ?? "bottom-right"),
       brandVoice: String(formData.get("brandVoice") ?? "friendly and helpful"),
-      maxDiscountPct,
-      vipCartThreshold: Math.round(vipCartThresholdDollars * 100),
       supportEmail: String(formData.get("supportEmail") ?? "") || null,
       personalizationEnabled,
       escalationEmailEnabled,
       proactiveEngagementEnabled,
       excludedPages,
+      allowedDiscountCodes,
     },
   });
 
@@ -182,13 +191,24 @@ export default function Settings() {
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetPosition, setWidgetPosition] = useState(merchant.widgetPosition);
   const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
-  const [maxDiscountPct, setMaxDiscountPct] = useState(String(merchant.maxDiscountPct));
-  const [vipCartThreshold, setVipCartThreshold] = useState(String(merchant.vipCartThreshold / 100));
   const [supportEmail, setSupportEmail] = useState(merchant.supportEmail ?? "");
   const [personalizationEnabled, setPersonalizationEnabled] = useState(merchant.personalizationEnabled);
   const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
   const [proactiveEngagementEnabled, setProactiveEngagementEnabled] = useState(merchant.proactiveEngagementEnabled);
   const [excludedPages, setExcludedPages] = useState(merchant.excludedPages ?? []);
+
+  const parseDiscountCodes = (raw: string): Array<{ code: string; label: string; eligibility: string }> => {
+    try {
+      const parsed = JSON.parse(raw || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const [discountCodes, setDiscountCodes] = useState<Array<{ code: string; label: string; eligibility: string }>>(
+    () => parseDiscountCodes(merchant.allowedDiscountCodes ?? ""),
+  );
 
   useEffect(() => {
     if (fetcher.data?.saved) {
@@ -204,13 +224,12 @@ export default function Settings() {
     formData.append("widgetColor", widgetColor);
     formData.append("widgetPosition", widgetPosition);
     formData.append("brandVoice", brandVoice);
-    formData.append("maxDiscountPct", maxDiscountPct);
-    formData.append("vipCartThreshold", vipCartThreshold);
     formData.append("supportEmail", supportEmail);
     formData.append("personalizationEnabled", String(personalizationEnabled));
     formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
     formData.append("proactiveEngagementEnabled", String(proactiveEngagementEnabled));
     excludedPages.forEach((page) => formData.append("excludedPages", page));
+    formData.append("allowedDiscountCodes", JSON.stringify(discountCodes));
     fetcher.submit(formData, { method: "POST" });
   };
 
@@ -309,25 +328,79 @@ export default function Settings() {
             </s-select>
           </div>
           <div style={{ marginBottom: "16px" }}>
-            <s-number-field
-              label="Max discount %"
-              name="maxDiscountPct"
-              value={maxDiscountPct}
-              onInput={(e: Event) => setMaxDiscountPct((e.target as HTMLInputElement).value)}
-              min={0}
-              max={20}
-              help-text="The highest discount percentage the AI can offer (0-20%). Protects your margins."
-            ></s-number-field>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
-            <s-money-field
-              label="VIP free-shipping cart threshold"
-              name="vipCartThreshold"
-              value={vipCartThreshold}
-              onInput={(e: Event) => setVipCartThreshold((e.target as HTMLInputElement).value)}
-              min={0}
-              help-text="Carts above this value unlock VIP offers. Example: $50 cart gets free shipping."
-            ></s-money-field>
+            <div style={{ marginBottom: "8px" }}>
+              <s-text>
+                <strong>Discount codes</strong>
+              </s-text>
+              <p style={{ fontSize: "12px", color: "#666", margin: "4px 0 12px" }}>
+                Add existing Shopify discount codes that NeonPing can share with eligible customers in chat. Create the codes in your Shopify Discounts tab first.
+              </p>
+            </div>
+            {discountCodes.map((entry, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 1fr auto",
+                  gap: "8px",
+                  alignItems: "flex-end",
+                  marginBottom: "12px",
+                  padding: "12px",
+                  background: "#f9f9f9",
+                  borderRadius: "8px",
+                  border: "1px solid #e5e5e5",
+                }}
+              >
+                <s-text-field
+                  label="Code"
+                  value={entry.code}
+                  onInput={(e: Event) => {
+                    const updated = [...discountCodes];
+                    updated[idx] = { ...updated[idx], code: (e.target as HTMLInputElement).value.toUpperCase() };
+                    setDiscountCodes(updated);
+                  }}
+                ></s-text-field>
+                <s-text-field
+                  label="Label"
+                  value={entry.label}
+                  onInput={(e: Event) => {
+                    const updated = [...discountCodes];
+                    updated[idx] = { ...updated[idx], label: (e.target as HTMLInputElement).value };
+                    setDiscountCodes(updated);
+                  }}
+                ></s-text-field>
+                <s-select
+                  label="Eligibility"
+                  value={entry.eligibility}
+                  onChange={(e: Event) => {
+                    const updated = [...discountCodes];
+                    updated[idx] = { ...updated[idx], eligibility: (e.target as HTMLSelectElement).value };
+                    setDiscountCodes(updated);
+                  }}
+                >
+                  <s-option value="vip">VIP only</s-option>
+                  <s-option value="loyalty">Loyalty (3+ orders)</s-option>
+                  <s-option value="cart">Large cart</s-option>
+                  <s-option value="any">Any eligible customer</s-option>
+                </s-select>
+                <div style={{ paddingBottom: "2px" }}>
+                  <s-button
+                    tone="critical"
+                    onClick={() => setDiscountCodes(discountCodes.filter((_, i) => i !== idx))}
+                  >
+                    Remove
+                  </s-button>
+                </div>
+              </div>
+            ))}
+            <s-button
+              variant="secondary"
+              onClick={() =>
+                setDiscountCodes([...discountCodes, { code: "", label: "", eligibility: "any" }])
+              }
+            >
+              + Add code
+            </s-button>
           </div>
           <div style={{ marginBottom: "16px" }}>
             <s-switch

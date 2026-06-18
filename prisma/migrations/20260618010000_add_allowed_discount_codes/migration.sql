@@ -1,0 +1,1 @@
+ALTER TABLE "Merchant" ADD COLUMN IF NOT EXISTS "allowedDiscountCodes" TEXT NOT NULL DEFAULT '';
