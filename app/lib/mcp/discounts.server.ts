@@ -4,6 +4,8 @@ export interface ActiveDiscount {
   code: string;
   title: string;
   summary: string; // human-readable e.g. "15% off your order"
+  type: "percentage" | "fixed_amount" | "free_shipping" | "buy_x_get_y";
+  value: number; // percentage as 0–100 for "percentage", cents for "fixed_amount", 0 for others
 }
 
 export async function getActiveDiscounts(
@@ -87,19 +89,27 @@ export async function getActiveDiscounts(
 
       const title = d.title ?? "Discount";
       let summary = title;
+      let type: ActiveDiscount["type"] = "buy_x_get_y";
+      let value = 0;
 
       if (d.__typename === "DiscountCodeBasic" && d.customerGets?.value) {
         const v = d.customerGets.value;
         if (v.__typename === "DiscountPercentage" && v.percentage) {
           summary = `${Math.round(v.percentage * 100)}% off your order`;
+          type = "percentage";
+          value = Math.round(v.percentage * 100);
         } else if (v.__typename === "DiscountAmount" && v.amount) {
           summary = `${v.amount.amount} ${v.amount.currencyCode} off your order`;
+          type = "fixed_amount";
+          value = Math.round(parseFloat(v.amount.amount) * 100);
         }
       } else if (d.__typename === "DiscountCodeFreeShipping") {
         summary = "free shipping";
+        type = "free_shipping";
+        value = 0;
       }
 
-      results.push({ code, title, summary });
+      results.push({ code, title, summary, type, value });
     }
 
     return results;
