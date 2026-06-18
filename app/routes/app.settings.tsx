@@ -43,6 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const vipCartThresholdDollars = Number(formData.get("vipCartThreshold")) || 0;
   const personalizationEnabled = formData.get("personalizationEnabled") === "true";
   const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
+  const proactiveEngagementEnabled = formData.get("proactiveEngagementEnabled") === "true";
   const excludedPages = formData.getAll("excludedPages") as string[];
   const botName = String(formData.get("botName") ?? "").trim() || "NeonPing";
 
@@ -59,6 +60,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       supportEmail: String(formData.get("supportEmail") ?? "") || null,
       personalizationEnabled,
       escalationEmailEnabled,
+      proactiveEngagementEnabled,
       excludedPages,
     },
   });
@@ -185,6 +187,7 @@ export default function Settings() {
   const [supportEmail, setSupportEmail] = useState(merchant.supportEmail ?? "");
   const [personalizationEnabled, setPersonalizationEnabled] = useState(merchant.personalizationEnabled);
   const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
+  const [proactiveEngagementEnabled, setProactiveEngagementEnabled] = useState(merchant.proactiveEngagementEnabled);
   const [excludedPages, setExcludedPages] = useState(merchant.excludedPages ?? []);
 
   useEffect(() => {
@@ -206,6 +209,7 @@ export default function Settings() {
     formData.append("supportEmail", supportEmail);
     formData.append("personalizationEnabled", String(personalizationEnabled));
     formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
+    formData.append("proactiveEngagementEnabled", String(proactiveEngagementEnabled));
     excludedPages.forEach((page) => formData.append("excludedPages", page));
     fetcher.submit(formData, { method: "POST" });
   };
@@ -345,6 +349,15 @@ export default function Settings() {
             <p style={{ color: "#b45309", fontSize: "12px", marginTop: "8px" }}>
               ⚠️ Email notifications are coming soon — no emails are currently sent. We'll notify you when this is live.
             </p>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <s-checkbox
+              name="proactiveEngagementEnabled"
+              label="Proactive engagement"
+              help-text="When enabled, the widget automatically opens after 30 seconds or when the customer moves to leave the page. Disable for a more passive experience."
+              checked={proactiveEngagementEnabled}
+              onChange={(e: Event) => setProactiveEngagementEnabled((e.target as HTMLInputElement).checked)}
+            ></s-checkbox>
           </div>
         </s-section>
         <s-section heading="📧 Support">

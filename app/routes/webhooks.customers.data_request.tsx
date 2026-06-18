@@ -1,16 +1,46 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
 
-/**
- * Mandatory GDPR webhook. Shopify sends this when a store owner requests a
- * customer's data export on a customer's behalf. We have no automated export
- * pipeline (no admin UI for it yet) — log the request so it can be fulfilled
- * manually within Shopify's 30-day window. Must always return 200.
- */
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, payload, topic } = await authenticate.webhook(request);
+  const { shop, payload } = await authenticate.webhook(request);
 
-  console.log(`Received ${topic} webhook for ${shop}`, JSON.stringify(payload));
+  const gdprPayload = payload as {
+    customer: { id: number; email: string };
+    data_request: { id: number };
+  };
 
-  return new Response();
+  const customerId = `gid://shopify/Customer/${gdprPayload.customer.id}`;
+  const customerEmail = gdprPayload.customer.email;
+
+  const conversations = await prisma.conversation.findMany({
+    where: { shopDomain: shop, customerId },
+    select: {
+      id: true,
+      sessionId: true,
+      startedAt: true,
+      lastMessageAt: true,
+      messageCount: true,
+      orderId: true,
+      orderRevenueCents: true,
+      cartId: true,
+      discountCode: true,
+      escalated: true,
+    },
+  });
+
+  const export_data = {
+    data_request_id: gdprPayload.data_request.id,
+    shop,
+    customer_id: customerId,
+    customer_email: customerEmail,
+    exported_at: new Date().toISOString(),
+    note: "Chat message content is not stored server-side. Only conversation metadata is retained.",
+    conversations,
+  };
+
+  console.log(`[GDPR data_request] shop=${shop} customer=${customerEmail} conversations=${conversations.length}`);
+  console.log(JSON.stringify(export_data));
+
+  return new Response(null, { status: 200 });
 };

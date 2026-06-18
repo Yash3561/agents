@@ -31,6 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       greeting: merchant.widgetGreeting,
       botName: merchant.botName,
       excludedPages: merchant.excludedPages,
+      proactiveEngagement: merchant.proactiveEngagementEnabled,
     }),
     { headers },
   );

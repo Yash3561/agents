@@ -1,12 +1,6 @@
 export default function TermsOfService() {
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 20px", fontFamily: "system-ui, sans-serif", lineHeight: 1.6, color: "#1a1a1a" }}>
-      <div style={{ background: "#fff3cd", border: "1px solid #ffe69c", borderRadius: 8, padding: "12px 16px", marginBottom: 32, fontSize: 14 }}>
-        <strong>Draft content — not legal advice.</strong> This page has not been
-        reviewed by a lawyer. Have it reviewed before relying on it for a real App
-        Store submission.
-      </div>
-
       <h1>Terms of Service</h1>
       <p><em>Last updated: June 16, 2026</em></p>
 

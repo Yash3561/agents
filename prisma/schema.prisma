@@ -24,6 +24,7 @@ model Merchant {
   personalizationEnabled Boolean     @default(true)
   supportEmail        String?
   escalationEmailEnabled Boolean     @default(false)
+  proactiveEngagementEnabled Boolean @default(true)
   excludedPages       String[]       @default([])
   onboardingStep      Int            @default(1)
   customFaqs          Json           @default("[]")
