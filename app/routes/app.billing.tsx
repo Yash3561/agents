@@ -38,7 +38,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     console.log("[billing] check failed:", e);
   }
 
-  return { usage, activeSubscription, resetAt: merchant?.conversationResetAt ?? null };
+  const now = new Date();
+  const resetAt = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const resetAtStr = resetAt.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+
+  return { usage, activeSubscription, resetAt: merchant?.conversationResetAt ?? null, resetAtStr };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -109,7 +113,7 @@ const PLANS: Array<{
 ];
 
 export default function BillingPage() {
-  const { usage, activeSubscription, resetAt } = useLoaderData<typeof loader>();
+  const { usage, activeSubscription, resetAt, resetAtStr } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
 
   const usagePct =
@@ -173,6 +177,13 @@ export default function BillingPage() {
             </div>
           )}
         </s-box>
+
+        <div style={{ padding: "12px 0" }}>
+          <s-text>
+            <strong>This month's usage:</strong> {usage.used.toLocaleString()} / {usage.limit >= 999_000 ? "Unlimited" : usage.limit.toLocaleString()} conversations
+          </s-text>
+          <s-text tone="neutral">Resets {resetAtStr}</s-text>
+        </div>
 
         {usagePct >= 80 && usagePct < 100 && (
           <s-banner tone="warning">

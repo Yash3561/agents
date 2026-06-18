@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getUsage } from "../lib/billing.server";
+import { adminGraphql } from "../lib/mcp/admin.server";
 import {
   AreaChart,
   Area,
@@ -132,9 +133,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     count: Number(r.count),
   }));
 
+  let currencyCode = "USD";
+  try {
+    const shopData = await adminGraphql<{ shop: { currencyCode: string } }>(
+      session.shop,
+      session.accessToken ?? "",
+      `{ shop { currencyCode } }`,
+    );
+    currencyCode = shopData.shop?.currencyCode ?? "USD";
+  } catch {
+    // fall back to USD silently
+  }
+
   return {
     days,
     shopDomain: shop,
+    currencyCode,
     stats: {
       totalConversations,
       escalatedCount,
@@ -292,7 +306,7 @@ const DAY_OPTIONS = [
 ];
 
 export default function Index() {
-  const { stats, days, recentEscalations, usage, routingData, dailyData, shopDomain, conversionByRoute, topIntents } =
+  const { stats, days, recentEscalations, usage, routingData, dailyData, shopDomain, conversionByRoute, topIntents, currencyCode } =
     useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -303,10 +317,12 @@ export default function Index() {
   const conversionRatePct = stats.totalConversations
     ? Math.round((stats.conversionsCount / stats.totalConversations) * 100)
     : 0;
-  const revenue = (stats.revenueCents / 100).toFixed(2);
+  const fmt = (cents: number) =>
+    new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(cents / 100);
+  const revenue = fmt(stats.revenueCents);
   const aov = stats.conversionsCount
-    ? (stats.revenueCents / stats.conversionsCount / 100).toFixed(2)
-    : "0.00";
+    ? fmt(stats.revenueCents / stats.conversionsCount)
+    : fmt(0);
   const cartRecoveryRatePct = stats.cartsCreatedCount
     ? Math.round((stats.cartsRecoveredCount / stats.cartsCreatedCount) * 100)
     : 0;
@@ -458,30 +474,19 @@ export default function Index() {
       )}
 
       <s-section heading="Conversations over time">
-        <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        <s-select
+          label="Date range"
+          value={days}
+          onChange={(e: Event) => {
+            const next = new URLSearchParams(searchParams);
+            next.set("days", (e.target as HTMLSelectElement).value);
+            setSearchParams(next);
+          }}
+        >
           {DAY_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => {
-                const next = new URLSearchParams(searchParams);
-                next.set("days", opt.value);
-                setSearchParams(next);
-              }}
-              style={{
-                padding: "5px 14px",
-                borderRadius: "6px",
-                border: "1px solid #d1d1d1",
-                background: days === opt.value ? "#1a1a1a" : "#fff",
-                color: days === opt.value ? "#fff" : "#333",
-                cursor: "pointer",
-                fontSize: "13px",
-                fontWeight: days === opt.value ? 600 : 400,
-              }}
-            >
-              {opt.label}
-            </button>
+            <s-option key={opt.value} value={opt.value}>{opt.label}</s-option>
           ))}
-        </div>
+        </s-select>
         <ConversationsChart data={dailyData} days={days} />
       </s-section>
 
@@ -489,9 +494,9 @@ export default function Index() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
           <Metric label="Conversations" value={String(stats.totalConversations)} />
           <Metric label="Resolution rate" value={`${resolutionRatePct}%`} />
-          <Metric label="Revenue attributed" value={`$${revenue}`} />
+          <Metric label="Revenue attributed" value={revenue} />
           <Metric label="Conversion rate" value={`${conversionRatePct}%`} />
-          <Metric label="Avg order value" value={`$${aov}`} />
+          <Metric label="Avg order value" value={aov} />
           <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} />
           <Metric label="Discounts used" value={String(stats.discountsUsedCount)} />
           <Metric

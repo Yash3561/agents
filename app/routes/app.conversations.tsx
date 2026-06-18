@@ -3,6 +3,7 @@ import { Link, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { adminGraphql } from "../lib/mcp/admin.server";
 import { useState } from "react";
 
 const PAGE_SIZE = 50;
@@ -41,17 +42,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const where = { shopDomain: shop, ...statusFilter, ...dateFilter };
 
-  const [conversations, total] = await Promise.all([
-    prisma.conversation.findMany({
-      where,
-      orderBy: { lastMessageAt: "desc" },
-      take: PAGE_SIZE,
-      skip: page * PAGE_SIZE,
-    }),
-    prisma.conversation.count({ where }),
+  const [[conversations, total], shopData] = await Promise.all([
+    Promise.all([
+      prisma.conversation.findMany({
+        where,
+        orderBy: { lastMessageAt: "desc" },
+        take: PAGE_SIZE,
+        skip: page * PAGE_SIZE,
+      }),
+      prisma.conversation.count({ where }),
+    ]),
+    adminGraphql<{ shop: { currencyCode: string } }>(
+      session.shop,
+      session.accessToken ?? "",
+      `{ shop { currencyCode } }`,
+    ).catch(() => ({ shop: { currencyCode: "USD" } })),
   ]);
 
-  return { conversations, total, page, status, days };
+  const currencyCode = shopData.shop?.currencyCode ?? "USD";
+
+  return { conversations, total, page, status, days, currencyCode };
 };
 
 const FILTER_OPTIONS = [
@@ -61,9 +71,12 @@ const FILTER_OPTIONS = [
 ] as const;
 
 export default function Conversations() {
-  const { conversations, total, page, status, days } = useLoaderData<typeof loader>();
+  const { conversations, total, page, status, days, currencyCode } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
+
+  const fmtRevenue = (cents: number) =>
+    new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(cents / 100);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -180,7 +193,7 @@ export default function Conversations() {
                   <s-table-cell>{c.messageCount}</s-table-cell>
                   <s-table-cell>
                     {c.orderRevenueCents
-                      ? `$${(c.orderRevenueCents / 100).toFixed(2)}`
+                      ? fmtRevenue(c.orderRevenueCents)
                       : "—"}
                   </s-table-cell>
                   <s-table-cell>

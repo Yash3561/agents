@@ -6,6 +6,25 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
+const VOICE_PRESETS = [
+  {
+    value: "friendly and helpful",
+    label: "Friendly & helpful",
+  },
+  {
+    value: "professional and concise",
+    label: "Professional & concise",
+  },
+  {
+    value: "playful and fun",
+    label: "Playful & fun",
+  },
+  {
+    value: "premium and polished",
+    label: "Premium & polished",
+  },
+];
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const merchant = await prisma.merchant.upsert({
@@ -273,14 +292,17 @@ export default function Settings() {
         </s-section>
         <s-section heading="🤖 AI Behavior">
           <div style={{ marginBottom: "16px" }}>
-            <s-text-field
+            <s-select
               label="Brand voice"
               name="brandVoice"
               value={brandVoice}
-              onInput={(e: Event) => setBrandVoice((e.target as HTMLInputElement).value)}
-              placeholder="e.g. friendly and helpful"
-              help-text="Describe the tone and personality your AI should use. Examples: 'professional and concise', 'enthusiastic and supportive', 'playful and fun'"
-            ></s-text-field>
+              onChange={(e: Event) => setBrandVoice((e.target as HTMLSelectElement).value)}
+              help-text="Choose the tone and personality your AI assistant should use when talking to customers."
+            >
+              {VOICE_PRESETS.map((p) => (
+                <s-option key={p.value} value={p.value}>{p.label}</s-option>
+              ))}
+            </s-select>
           </div>
           <div style={{ marginBottom: "16px" }}>
             <s-number-field

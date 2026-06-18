@@ -167,7 +167,7 @@ export default function AiConfig() {
   };
 
   return (
-    <s-page heading="AI Config">
+    <s-page heading="Knowledge Base">
       {/* ------------------------------------------------------------------ */}
       {/* Section 1 — Custom Knowledge Base (FAQs)                            */}
       {/* ------------------------------------------------------------------ */}
@@ -290,6 +290,27 @@ export default function AiConfig() {
             }}
           ></s-text-field>
         ))}
+        {quickReplies.some(r => r.trim()) && (
+          <div style={{ padding: "12px", background: "#f5f5f5", borderRadius: "8px" }}>
+            <s-text tone="neutral">Preview — how customers will see these:</s-text>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" }}>
+              {quickReplies.filter(r => r.trim()).map((r, i) => (
+                <span key={i} style={{
+                  display: "inline-block",
+                  padding: "6px 14px",
+                  borderRadius: "18px",
+                  border: "1px solid #e0e0e0",
+                  background: "#fff",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}>
+                  {r}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <s-button variant="primary" onClick={submitQuickReplies}>
           Save quick replies
         </s-button>
