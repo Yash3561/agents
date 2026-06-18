@@ -200,6 +200,7 @@ export async function runOrchestrator(opts: {
         merchant,
         memory,
         cartTotalCents,
+        currentMessage,
       });
       // If no discount was surfaced, fall through to shopping for context
       if (!out.text) {

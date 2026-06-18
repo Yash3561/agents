@@ -19,8 +19,6 @@ model Merchant {
   widgetGreeting      String         @default("Hi! How can I help you today?")
   botName             String?        @default("NeonPing")
   brandVoice          String         @default("friendly and helpful")
-  maxDiscountPct      Int            @default(15)
-  vipCartThreshold    Int            @default(10000)
   personalizationEnabled Boolean     @default(true)
   allowedDiscountCodes String       @default("")
   supportEmail        String?

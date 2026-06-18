@@ -1,5 +1,4 @@
 import type { ConversationSession } from "~/lib/session.server";
-import type { Merchant } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
 // Error
@@ -48,18 +47,3 @@ export function assertDiscountNotApplied(session: ConversationSession): void {
   }
 }
 
-/**
- * Caps discount at merchant's configured maximum (default 15%, hard cap 20%).
- */
-export function assertDiscountWithinLimit(
-  pct: number,
-  merchant: Pick<Merchant, "maxDiscountPct">,
-): void {
-  const limit = Math.min(merchant.maxDiscountPct, 20);
-  if (pct > limit) {
-    throw new GuardrailError(
-      "discount_exceeds_limit",
-      `Discount ${pct}% exceeds merchant limit of ${limit}%`,
-    );
-  }
-}

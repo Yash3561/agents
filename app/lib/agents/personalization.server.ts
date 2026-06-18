@@ -1,4 +1,4 @@
-import { adminGraphql } from "~/lib/mcp/admin.server";
+import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
 import {
   assertDiscountNotApplied,
   GuardrailError,
@@ -8,38 +8,32 @@ import type { CustomerMemory } from "~/lib/agents/memory.server";
 import type { Merchant } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface DiscountEntry {
-  code: string;
-  label: string;
-  eligibility: "vip" | "loyalty" | "cart" | "any";
-}
-
-// ---------------------------------------------------------------------------
 // Output type
 // ---------------------------------------------------------------------------
 
 export interface PersonalizationAgentOutput {
-  text: string | null;         // null = no discount offered (caller skips this turn)
+  text: string | null; // null = no discount offered (caller skips this turn)
   discountCode?: string;
   toolsCalled: string[];
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Intent detection — does the current message ask for a discount?
 // ---------------------------------------------------------------------------
 
-function parseAllowedDiscounts(raw: string): DiscountEntry[] {
-  if (!raw || raw.trim() === "") return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as DiscountEntry[];
-  } catch {
-    return [];
-  }
+const DISCOUNT_INTENT_WORDS = [
+  "discount",
+  "promo",
+  "coupon",
+  "code",
+  "offer",
+  "deal",
+  "save",
+];
+
+function customerAskedForDiscount(message: string): boolean {
+  const lower = message.toLowerCase();
+  return DISCOUNT_INTENT_WORDS.some((word) => lower.includes(word));
 }
 
 // ---------------------------------------------------------------------------
@@ -54,8 +48,10 @@ export async function runPersonalizationAgent(opts: {
   merchant: Merchant;
   memory: CustomerMemory;
   cartTotalCents?: number;
+  currentMessage: string;
 }): Promise<PersonalizationAgentOutput> {
-  const { shopDomain, accessToken, customerId, session, merchant, memory, cartTotalCents } = opts;
+  const { shopDomain, accessToken, session, merchant, memory, currentMessage } =
+    opts;
 
   const toolsCalled: string[] = [];
 
@@ -70,71 +66,33 @@ export async function runPersonalizationAgent(opts: {
     throw err;
   }
 
-  // No customer ID = no personalization possible
-  if (!customerId) return { text: null, toolsCalled };
+  // Fetch live active discount codes from the merchant's Shopify store
+  toolsCalled.push("admin_graphql:code_discount_nodes");
+  const discounts = await getActiveDiscounts(shopDomain, accessToken);
 
-  // Parse merchant-configured discount codes
-  const allowedCodes = parseAllowedDiscounts(merchant.allowedDiscountCodes);
+  // No discounts configured → nothing to offer
+  if (discounts.length === 0) return { text: null, toolsCalled };
 
-  try {
-    // Fetch customer tags and order count
-    toolsCalled.push("admin_graphql:customer_tags");
-    const data = await adminGraphql<{
-      customer: { tags: string[]; numberOfOrders: number };
-    }>(
-      shopDomain,
-      accessToken,
-      `query GetCustomerSignals($id: ID!) {
-        customer(id: $id) {
-          tags
-          numberOfOrders
-        }
-      }`,
-      { id: customerId },
-    );
+  const first = discounts[0];
 
-    const { tags, numberOfOrders } = data.customer;
-
-    // Determine eligibility tiers (priority order: vip → loyalty → cart → any)
-    const isVip = tags.includes("VIP");
-    const isLoyal = numberOfOrders >= 3;
-    const hasLargeCart = Boolean(cartTotalCents && cartTotalCents >= merchant.vipCartThreshold);
-
-    // Find a matching pre-configured discount code in priority order
-    const eligibilityOrder: Array<DiscountEntry["eligibility"]> = ["vip", "loyalty", "cart", "any"];
-
-    let matchedEntry: DiscountEntry | undefined;
-
-    for (const tier of eligibilityOrder) {
-      // Check if the customer qualifies for this tier
-      if (tier === "vip" && !isVip) continue;
-      if (tier === "loyalty" && !isLoyal) continue;
-      if (tier === "cart" && !hasLargeCart) continue;
-      // "any" always qualifies (if we reach it)
-
-      matchedEntry = allowedCodes.find((e) => e.eligibility === tier);
-      if (matchedEntry) break;
-    }
-
-    if (matchedEntry) {
-      return {
-        text: `Here's a discount code for you: **${matchedEntry.code}**${matchedEntry.label ? ` — ${matchedEntry.label}` : ""}.`,
-        discountCode: matchedEntry.code,
-        toolsCalled,
-      };
-    }
-
-    // No matching configured code — fall back to abandoned cart nudge if applicable
-    if (memory.abandoned_cart) {
-      return {
-        text: `Still thinking about what you had in your cart? I can add those items back for you.`,
-        toolsCalled,
-      };
-    }
-
-    return { text: null, toolsCalled };
-  } catch {
-    // Admin MCP failure → skip silently (personalization is enhancement, not core)
-    return { text: null, toolsCalled };
+  // Case 1: Abandoned cart recovery — nudge customer back with a discount
+  if (memory.abandoned_cart) {
+    return {
+      text: `Still thinking about what you had in your cart? Use code **${first.code}** at checkout — ${first.summary}. I can add those items back for you!`,
+      discountCode: first.code,
+      toolsCalled,
+    };
   }
+
+  // Case 2: Customer explicitly asked for a discount/promo
+  if (customerAskedForDiscount(currentMessage)) {
+    return {
+      text: `Here's a discount code for you: **${first.code}** — ${first.summary}.`,
+      discountCode: first.code,
+      toolsCalled,
+    };
+  }
+
+  // Otherwise — no unsolicited discounts
+  return { text: null, toolsCalled };
 }

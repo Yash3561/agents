@@ -45,18 +45,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const excludedPages = formData.getAll("excludedPages") as string[];
   const botName = String(formData.get("botName") ?? "").trim() || "NeonPing";
 
-  // Validate and store discount codes JSON
-  const rawDiscountCodes = String(formData.get("allowedDiscountCodes") ?? "");
-  let allowedDiscountCodes = "[]";
-  try {
-    const parsed = JSON.parse(rawDiscountCodes);
-    if (Array.isArray(parsed)) {
-      allowedDiscountCodes = rawDiscountCodes;
-    }
-  } catch {
-    // leave as "[]"
-  }
-
   const merchant = await prisma.merchant.update({
     where: { shopDomain: session.shop },
     data: {
@@ -70,7 +58,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       escalationEmailEnabled,
       proactiveEngagementEnabled,
       excludedPages,
-      allowedDiscountCodes,
     },
   });
 
@@ -197,19 +184,6 @@ export default function Settings() {
   const [proactiveEngagementEnabled, setProactiveEngagementEnabled] = useState(merchant.proactiveEngagementEnabled);
   const [excludedPages, setExcludedPages] = useState(merchant.excludedPages ?? []);
 
-  const parseDiscountCodes = (raw: string): Array<{ code: string; label: string; eligibility: string }> => {
-    try {
-      const parsed = JSON.parse(raw || "[]");
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const [discountCodes, setDiscountCodes] = useState<Array<{ code: string; label: string; eligibility: string }>>(
-    () => parseDiscountCodes(merchant.allowedDiscountCodes ?? ""),
-  );
-
   useEffect(() => {
     if (fetcher.data?.saved) {
       shopify.toast.show("Settings saved");
@@ -229,7 +203,6 @@ export default function Settings() {
     formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
     formData.append("proactiveEngagementEnabled", String(proactiveEngagementEnabled));
     excludedPages.forEach((page) => formData.append("excludedPages", page));
-    formData.append("allowedDiscountCodes", JSON.stringify(discountCodes));
     fetcher.submit(formData, { method: "POST" });
   };
 
@@ -328,85 +301,10 @@ export default function Settings() {
             </s-select>
           </div>
           <div style={{ marginBottom: "16px" }}>
-            <div style={{ marginBottom: "8px" }}>
-              <s-text>
-                <strong>Discount codes</strong>
-              </s-text>
-              <p style={{ fontSize: "12px", color: "#666", margin: "4px 0 12px" }}>
-                Add existing Shopify discount codes that NeonPing can share with eligible customers in chat. Create the codes in your Shopify Discounts tab first.
-              </p>
-            </div>
-            {discountCodes.map((entry, idx) => (
-              <div
-                key={idx}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr auto",
-                  gap: "8px",
-                  alignItems: "flex-end",
-                  marginBottom: "12px",
-                  padding: "12px",
-                  background: "#f9f9f9",
-                  borderRadius: "8px",
-                  border: "1px solid #e5e5e5",
-                }}
-              >
-                <s-text-field
-                  label="Code"
-                  value={entry.code}
-                  onInput={(e: Event) => {
-                    const updated = [...discountCodes];
-                    updated[idx] = { ...updated[idx], code: (e.target as HTMLInputElement).value.toUpperCase() };
-                    setDiscountCodes(updated);
-                  }}
-                ></s-text-field>
-                <s-text-field
-                  label="Label"
-                  value={entry.label}
-                  onInput={(e: Event) => {
-                    const updated = [...discountCodes];
-                    updated[idx] = { ...updated[idx], label: (e.target as HTMLInputElement).value };
-                    setDiscountCodes(updated);
-                  }}
-                ></s-text-field>
-                <s-select
-                  label="Eligibility"
-                  value={entry.eligibility}
-                  onChange={(e: Event) => {
-                    const updated = [...discountCodes];
-                    updated[idx] = { ...updated[idx], eligibility: (e.target as HTMLSelectElement).value };
-                    setDiscountCodes(updated);
-                  }}
-                >
-                  <s-option value="vip">VIP only</s-option>
-                  <s-option value="loyalty">Loyalty (3+ orders)</s-option>
-                  <s-option value="cart">Large cart</s-option>
-                  <s-option value="any">Any eligible customer</s-option>
-                </s-select>
-                <div style={{ paddingBottom: "2px" }}>
-                  <s-button
-                    tone="critical"
-                    onClick={() => setDiscountCodes(discountCodes.filter((_, i) => i !== idx))}
-                  >
-                    Remove
-                  </s-button>
-                </div>
-              </div>
-            ))}
-            <s-button
-              variant="secondary"
-              onClick={() =>
-                setDiscountCodes([...discountCodes, { code: "", label: "", eligibility: "any" }])
-              }
-            >
-              + Add code
-            </s-button>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
             <s-switch
               label="Enable personalized discounts"
               name="personalizationEnabled"
-              help-text="When enabled, the AI can offer discounts to VIP customers and loyal shoppers."
+              help-text="When enabled, the AI can share discount codes from your Shopify Discounts tab when customers ask, or to recover abandoned carts."
               checked={personalizationEnabled}
               onChange={(e: Event) => setPersonalizationEnabled((e.target as HTMLInputElement).checked)}
             ></s-switch>

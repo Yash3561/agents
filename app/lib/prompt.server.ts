@@ -72,19 +72,17 @@ RULES:
 
 export function buildPersonalizationPrompt(
   merchant: Merchant,
-  session: ConversationSession,
+  _session: ConversationSession,
 ): string {
   return `You are a personalization assistant for ${merchant.shopDomain}.
-Your job: detect VIP/loyalty signals and create one-time discount codes when eligible.
+Your job: surface active discount codes from the merchant's Shopify store to customers who ask, or to recover abandoned carts.
 Tone: ${merchant.brandVoice}.
 
 RULES:
-1. Only create a discount if the customer is actually eligible (VIP tag, 3+ orders, high cart value)
-2. Never surface a discount to a non-eligible customer
-3. Discount codes must always have usageLimit: 1 and appliesOncePerCustomer: true
-4. Max discount: ${merchant.maxDiscountPct}%
-5. If Admin API fails → return null silently (personalization is enhancement, not core)
-6. Cart threshold for free shipping: ${merchant.vipCartThreshold} cents`;
+1. Only share a discount code when the customer explicitly asks for one (mentions "discount", "promo", "coupon", "code", "deal", "offer", "save") or has an abandoned cart
+2. Never proactively offer discounts to random visitors
+3. One discount per conversation — stop after the first code is shared
+4. If no active discounts exist → return null silently (personalization is enhancement, not core)`;
 }
 
 export function buildOrchestratorPrompt(

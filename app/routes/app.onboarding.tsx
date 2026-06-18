@@ -56,9 +56,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { ok: true };
   }
 
-  const maxDiscountPct = Math.min(20, Math.max(0, Number(formData.get("maxDiscountPct")) || 0));
-  const vipCartThresholdDollars = Number(formData.get("vipCartThreshold")) || 0;
-
   await prisma.merchant.update({
     where: { shopDomain: session.shop },
     data: {
@@ -66,8 +63,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       widgetGreeting: String(formData.get("widgetGreeting") ?? ""),
       botName: String(formData.get("botName") ?? "").trim() || "NeonPing",
       brandVoice: String(formData.get("brandVoice") ?? "friendly and helpful"),
-      maxDiscountPct,
-      vipCartThreshold: Math.round(vipCartThresholdDollars * 100),
       personalizationEnabled: formData.get("personalizationEnabled") === "true",
       onboardedAt: new Date(),
       onboardingStep: 4,
@@ -130,10 +125,6 @@ export default function Onboarding() {
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
   const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
-  const [maxDiscountPct, setMaxDiscountPct] = useState(String(merchant.maxDiscountPct));
-  const [vipCartThreshold, setVipCartThreshold] = useState(
-    String(merchant.vipCartThreshold / 100),
-  );
   const [personalizationEnabled, setPersonalizationEnabled] = useState(
     merchant.personalizationEnabled,
   );
@@ -155,8 +146,6 @@ export default function Onboarding() {
         widgetColor,
         widgetGreeting,
         brandVoice,
-        maxDiscountPct,
-        vipCartThreshold,
         personalizationEnabled: String(personalizationEnabled),
       },
       { method: "POST" },
@@ -274,24 +263,8 @@ export default function Onboarding() {
             onChange={(e: Event) =>
               setPersonalizationEnabled((e.target as HTMLInputElement).checked)
             }
+            help-text="When enabled, NeonPing shares active discount codes from your Shopify Discounts tab when customers ask, or to recover abandoned carts."
           ></s-switch>
-          {personalizationEnabled ? (
-            <>
-              <s-number-field
-                label="Max discount %"
-                value={maxDiscountPct}
-                min={0}
-                max={20}
-                onInput={(e: Event) => setMaxDiscountPct((e.target as HTMLInputElement).value)}
-              ></s-number-field>
-              <s-money-field
-                label="VIP free-shipping cart threshold"
-                value={vipCartThreshold}
-                min={0}
-                onInput={(e: Event) => setVipCartThreshold((e.target as HTMLInputElement).value)}
-              ></s-money-field>
-            </>
-          ) : null}
           <s-stack direction="inline" gap="base">
             <s-button onClick={() => goToStep(2)} variant="tertiary">
               Back
