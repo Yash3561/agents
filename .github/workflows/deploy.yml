@@ -162,6 +162,7 @@ jobs:
       - name: Deploy Shopify app (webhooks + extensions)
         run: npx shopify app deploy --allow-updates
         env:
+          SHOPIFY_CLI_PARTNERS_TOKEN: ${{ secrets.SHOPIFY_CLI_PARTNERS_TOKEN }}
           SHOPIFY_API_KEY: ${{ secrets.SHOPIFY_API_KEY }}
           SHOPIFY_API_SECRET: ${{ secrets.SHOPIFY_API_SECRET }}
           SHOPIFY_APP_URL: https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io
