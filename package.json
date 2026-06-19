@@ -46,7 +46,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@shopify/api-codegen-preset": "^1.2.0",
+    "@shopify/api-codegen-preset": "^2.0.0",
     "@shopify/polaris-types": "^1.0.1",
     "@types/eslint": "^9.6.1",
     "@types/node": "^22.18.8",
@@ -73,7 +73,9 @@
     "@shopify/plugin-cloudflare"
   ],
   "overrides": {
-    "p-map": "^4.0.0"
+    "p-map": "^4.0.0",
+    "minimatch": "^9.0.7",
+    "lodash": "^4.18.0"
   },
   "author": "krkaushikkumar"
 }
