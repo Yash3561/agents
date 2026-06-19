@@ -48,7 +48,12 @@ export async function getSession(
   const raw = await redis.get(KEY(shopDomain, sessionId)).catch(() => null);
   if (!raw) return DEFAULT_SESSION();
   try {
-    return JSON.parse(raw) as ConversationSession;
+    const parsed = JSON.parse(raw) as ConversationSession;
+    // Migrate sessions written before discount_negotiation was introduced
+    if (!parsed.discount_negotiation) {
+      parsed.discount_negotiation = { offered_codes: [], level: 0 };
+    }
+    return parsed;
   } catch {
     return DEFAULT_SESSION();
   }

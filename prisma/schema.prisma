@@ -20,7 +20,6 @@ model Merchant {
   botName             String?        @default("NeonPing")
   brandVoice          String         @default("friendly and helpful")
   personalizationEnabled Boolean     @default(true)
-  allowedDiscountCodes String       @default("")
   supportEmail        String?
   escalationEmailEnabled Boolean     @default(false)
   proactiveEngagementEnabled Boolean @default(true)
