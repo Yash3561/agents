@@ -45,24 +45,3 @@ redirect_urls = [ "https://neonping.politeocean-a6f0ef16.southcentralus.azurecon
 
 [build]
 automatically_update_urls_on_dev = true
-
-[[billing.plans]]
-name = "Starter"
-price = 29.0
-currency_code = "USD"
-interval = "EVERY_30_DAYS"
-trial_days = 7
-
-[[billing.plans]]
-name = "Growth"
-price = 79.0
-currency_code = "USD"
-interval = "EVERY_30_DAYS"
-trial_days = 7
-
-[[billing.plans]]
-name = "Pro"
-price = 199.0
-currency_code = "USD"
-interval = "EVERY_30_DAYS"
-trial_days = 7
