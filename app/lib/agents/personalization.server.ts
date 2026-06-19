@@ -1,4 +1,7 @@
-import { getActiveDiscounts, type ActiveDiscount } from "~/lib/mcp/discounts.server";
+import { z } from "zod";
+import { generateStructured, deployments } from "~/lib/llm.server";
+import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
+import { buildPersonalizationPrompt } from "~/lib/prompt.server";
 import {
   assertDiscountNegotiationAllowed,
   GuardrailError,
@@ -13,42 +16,12 @@ export interface PersonalizationAgentOutput {
   toolsCalled: string[];
 }
 
-// Words that signal the customer wants a better deal than what was offered
-const RESISTANCE_WORDS = [
-  "more", "better", "higher", "bigger", "extra", "additional",
-  "increase", "less", "another", "improve", "beat", "match",
-  "anything else", "best you can", "best deal", "lower price",
-  "cheaper", "not enough", "not much", "that's it",
-];
-
-function detectResistance(message: string): boolean {
-  const lower = message.toLowerCase();
-  return RESISTANCE_WORDS.some((w) => lower.includes(w));
-}
-
-const DISCOUNT_REQUEST_WORDS = [
-  "discount", "promo", "coupon", "code", "offer",
-  "deal", "save", "promotion", "voucher",
-];
-
-function customerAskedForDiscount(message: string): boolean {
-  const lower = message.toLowerCase();
-  return DISCOUNT_REQUEST_WORDS.some((w) => lower.includes(w));
-}
-
-function pickDiscount(
-  discounts: ActiveDiscount[],
-  level: number,
-  offeredCodes: string[],
-): ActiveDiscount | null {
-  // Filter out codes we've already mentioned
-  const fresh = discounts.filter((d) => !offeredCodes.includes(d.code));
-  if (fresh.length === 0) return null;
-
-  // Clamp level to available fresh discounts
-  const idx = Math.min(level, fresh.length - 1);
-  return fresh[idx];
-}
+const NegotiationSchema = z.object({
+  shouldOffer: z.boolean(),
+  chosenCode: z.string().nullable(),
+  negotiationStance: z.enum(["firm", "generous", "final"]),
+  message: z.string(),
+});
 
 export async function runPersonalizationAgent(opts: {
   shopDomain: string;
@@ -60,21 +33,22 @@ export async function runPersonalizationAgent(opts: {
   cartTotalCents?: number;
   currentMessage: string;
 }): Promise<PersonalizationAgentOutput> {
-  const { shopDomain, accessToken, session, merchant, memory, currentMessage } = opts;
+  const { shopDomain, accessToken, session, merchant, memory, currentMessage, cartTotalCents } = opts;
   const toolsCalled: string[] = [];
 
   if (!merchant.personalizationEnabled) return { text: null, toolsCalled };
 
-  // Guard: max offers per conversation
+  // Hard guardrail: cap at 3 offers per conversation
   try {
     assertDiscountNegotiationAllowed(session);
   } catch (err) {
     if (err instanceof GuardrailError) {
-      // We've hit the cap — if customer is still pushing back, acknowledge gracefully
-      if (detectResistance(currentMessage) && session.discount_negotiation.offered_codes.length > 0) {
-        const lastCode = session.discount_negotiation.offered_codes[session.discount_negotiation.offered_codes.length - 1];
+      // Cap reached — if still pushing back, acknowledge gracefully with last offered code
+      const { offered_codes } = session.discount_negotiation;
+      if (offered_codes.length > 0) {
+        const lastCode = offered_codes[offered_codes.length - 1];
         return {
-          text: `I've shared all the discounts I have available — the best I can offer is **${lastCode}**. That's our top deal right now!`,
+          text: `I've shared everything I have — **${lastCode}** is genuinely our best offer right now. I'd hate to see you miss out!`,
           toolsCalled,
         };
       }
@@ -83,57 +57,58 @@ export async function runPersonalizationAgent(opts: {
     throw err;
   }
 
+  // Fetch live active discount codes from Shopify
   toolsCalled.push("admin_graphql:code_discount_nodes");
   const discounts = await getActiveDiscounts(shopDomain, accessToken);
+
   if (discounts.length === 0) return { text: null, toolsCalled };
 
   const { offered_codes, level } = session.discount_negotiation;
-  const hasOfferedBefore = offered_codes.length > 0;
 
-  // Determine situation
-  const isAbandonedCart = Boolean(memory.abandoned_cart);
-  const isResisting = hasOfferedBefore && detectResistance(currentMessage);
-  const isAsking = customerAskedForDiscount(currentMessage);
+  // Format recent conversation history (last 6 turns) for LLM context
+  const recentHistory = session.conversation_history
+    .slice(-6)
+    .map(m => `${m.role.toUpperCase()}: ${m.content}`)
+    .join("\n");
 
-  // Decide what level to offer at
-  let offerLevel: number;
+  // Build system prompt with full context
+  const systemPrompt = buildPersonalizationPrompt({
+    shopDomain,
+    brandVoice: merchant.brandVoice,
+    availableCodes: discounts,
+    cartTotalCents: cartTotalCents ?? 0,
+    offeredCodes: offered_codes,
+    negotiationLevel: level,
+    memory,
+    recentHistory,
+  });
 
-  if (isAbandonedCart && !hasOfferedBefore) {
-    // Abandoned cart: start at level 1 (mid-tier) — customer is already leaving,
-    // bottom-tier may not be compelling enough to recover the cart
-    offerLevel = Math.min(1, discounts.length - 1);
-  } else if (isResisting) {
-    // Customer pushed back — escalate one level
-    offerLevel = level; // level already incremented on the previous turn
-  } else if (isAsking || isAbandonedCart) {
-    offerLevel = level;
-  } else {
-    // Not asking, not resisting, not abandoned cart → don't offer
+  // LLM makes the decision
+  toolsCalled.push("llm:negotiation_decision");
+  let decision: z.infer<typeof NegotiationSchema>;
+  try {
+    decision = await generateStructured({
+      deployment: deployments.personalize(),
+      system: systemPrompt,
+      prompt: `Current customer message: "${currentMessage}"\n\nDecide whether to offer a discount, which code, and write the response message.`,
+      schema: NegotiationSchema,
+      maxOutputTokens: 200,
+    });
+  } catch {
     return { text: null, toolsCalled };
   }
 
-  const chosen = pickDiscount(discounts, offerLevel, offered_codes);
-  if (!chosen) {
-    // All codes already offered
-    if (hasOfferedBefore) {
-      return {
-        text: `I've already shared all the discounts I have — use **${offered_codes[offered_codes.length - 1]}** for the best deal available!`,
-        toolsCalled,
-      };
-    }
-    return { text: null, toolsCalled };
-  }
+  if (!decision.shouldOffer || !decision.chosenCode) return { text: null, toolsCalled };
 
-  // Build message based on situation
-  let text: string;
-  if (isAbandonedCart) {
-    text = `Still thinking about your cart? Here's a little nudge — use **${chosen.code}** at checkout for ${chosen.summary}. Want me to add those items back?`;
-  } else if (isResisting && hasOfferedBefore) {
-    const prevCode = offered_codes[offered_codes.length - 1];
-    text = `I hear you — let me do better. Use **${chosen.code}** for ${chosen.summary}. That's a step up from ${prevCode}!`;
-  } else {
-    text = `Here's a discount for you: **${chosen.code}** — ${chosen.summary}.`;
-  }
+  // Hard guardrail: LLM must pick a real code that hasn't been offered yet
+  const validCode = discounts.find(
+    d => d.code === decision.chosenCode && !offered_codes.includes(d.code)
+  );
+  if (!validCode) return { text: null, toolsCalled };
 
-  return { text, discountCode: chosen.code, toolsCalled };
+  return {
+    text: decision.message,
+    discountCode: validCode.code,
+    toolsCalled,
+  };
 }
