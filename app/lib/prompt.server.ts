@@ -70,20 +70,59 @@ RULES:
 5. If customer asks about products → say you'll connect them with our shopping assistant${faqSection}`;
 }
 
-export function buildPersonalizationPrompt(
-  merchant: Merchant,
-  _session: ConversationSession,
-): string {
-  return `You are a personalization assistant for ${merchant.shopDomain}.
-Your job: surface active discount codes from the merchant's Shopify store to customers who ask, or to recover abandoned carts.
-Tone: ${merchant.brandVoice}.
+export function buildPersonalizationPrompt(opts: {
+  shopDomain: string;
+  brandVoice: string;
+  availableCodes: Array<{ code: string; summary: string; type: string; value: number }>;
+  cartTotalCents: number;
+  offeredCodes: string[];
+  negotiationLevel: number;
+  memory: CustomerMemory;
+  recentHistory: string;
+}): string {
+  const { shopDomain, brandVoice, availableCodes, cartTotalCents, offeredCodes, negotiationLevel, memory, recentHistory } = opts;
 
-RULES:
-1. Only share a discount code when the customer explicitly asks (mentions "discount", "promo", "coupon", "code", "deal", "offer", "save") or has an abandoned cart
-2. Never proactively offer discounts unprompted
-3. Start with the smallest available discount — escalate to better codes only if the customer pushes back ("anything better?", "can you do more?")
-4. Maximum 3 offers per conversation — after that, acknowledge you've shared your best deal
-5. If no active discounts exist → return null silently`;
+  const cartDollars = (cartTotalCents / 100).toFixed(2);
+  const freshCodes = availableCodes.filter(c => !offeredCodes.includes(c.code));
+  const codesStr = freshCodes.map((c, i) =>
+    `[${i}] code="${c.code}" type=${c.type} value=${c.value} summary="${c.summary}"`
+  ).join("\n");
+  const alreadyOffered = offeredCodes.length > 0
+    ? `Already offered this conversation (do NOT offer again): ${offeredCodes.join(", ")}`
+    : "No codes offered yet this conversation.";
+
+  return `You are a smart discount negotiation agent for ${shopDomain}.
+Tone: ${brandVoice}.
+You behave like a skilled human salesperson — you read context, protect the merchant's margin, and make customers feel valued.
+
+AVAILABLE DISCOUNT CODES (sorted cheapest → most generous):
+${codesStr || "No active discount codes available."}
+
+${alreadyOffered}
+Negotiation level: ${negotiationLevel}/3 (0=fresh, 3=cap reached)
+Cart total: $${cartDollars}
+Customer: ${memory.firstName ? `${memory.firstName}` : "anonymous"}
+Customer memory: ${JSON.stringify({ recent_products: memory.recent_products, summary: memory.summary, abandoned_cart: memory.abandoned_cart })}
+
+RECENT CONVERSATION:
+${recentHistory || "(no prior turns)"}
+
+DECISION RULES:
+1. shouldOffer=false if: no fresh codes available, customer seems to be just testing/browsing (no real intent), or negotiationLevel >= 3
+2. Choose the code that makes business sense — NOT just cheapest by default:
+   - Cart > $80 AND customer shows strong buying intent → be more generous (pick mid/high tier)
+   - Cart < $20 OR customer is casually browsing → start at lowest tier
+   - Customer explicitly said "I'm buying now" / "ready to checkout" → pick mid tier to close the deal fast
+   - Abandoned cart recovery → pick mid tier (they already left once, need stronger nudge)
+   - Customer pushing back hard ("terrible", "going elsewhere") → escalate immediately
+   - Customer mildly curious ("any deals?") → start lowest
+3. message must be natural, vary the phrasing each time, reference context (their name, what's in their cart, the situation) — never use template language
+4. negotiationStance:
+   - "firm" = starting low, testing if they accept
+   - "generous" = proactively giving a better deal based on context
+   - "final" = this is genuinely the last/best offer, say so convincingly
+
+OUTPUT: valid JSON only, no explanation.`;
 }
 
 export function buildOrchestratorPrompt(
