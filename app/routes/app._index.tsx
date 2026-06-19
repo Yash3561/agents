@@ -167,19 +167,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
-function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Metric({ label, value, sub, color, icon }: {
+  label: string; value: string; sub?: string;
+  color: { bg: string; border: string; text: string };
+  icon: string;
+}) {
   return (
-    <s-box padding="base" background="subdued" borderRadius="base">
-      <s-text tone="neutral">{label}</s-text>
-      <div style={{ marginTop: "4px" }}>
-        <s-heading>{value}</s-heading>
+    <div style={{
+      background: color.bg,
+      border: `1px solid ${color.border}`,
+      borderRadius: "12px",
+      padding: "16px 20px",
+      display: "flex",
+      flexDirection: "column",
+      gap: "6px",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: "13px", color: "#6b7280", fontWeight: 500 }}>{label}</span>
+        <span style={{ fontSize: "20px" }}>{icon}</span>
       </div>
-      {sub && (
-        <div style={{ marginTop: "2px" }}>
-          <s-text tone="neutral">{sub}</s-text>
-        </div>
-      )}
-    </s-box>
+      <div style={{ fontSize: "28px", fontWeight: 700, color: color.text, lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ fontSize: "12px", color: "#9ca3af" }}>{sub}</div>}
+    </div>
   );
 }
 
@@ -259,8 +268,8 @@ function ConversationsChart({
         >
           <defs>
             <linearGradient id="convGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#1a1a1a" stopOpacity={0.12} />
-              <stop offset="95%" stopColor="#1a1a1a" stopOpacity={0} />
+              <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.12} />
+              <stop offset="95%" stopColor="#7c3aed" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
@@ -279,15 +288,15 @@ function ConversationsChart({
             tickLine={false}
           />
           {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-          <Tooltip content={<CustomTooltip />} cursor={{ stroke: "#1a1a1a", strokeWidth: 1, strokeDasharray: "4 4" }} />
+          <Tooltip content={<CustomTooltip />} cursor={{ stroke: "#7c3aed", strokeWidth: 1, strokeDasharray: "4 4" }} />
           <Area
             type="monotone"
             dataKey="count"
-            stroke="#1a1a1a"
+            stroke="#7c3aed"
             strokeWidth={2}
             fill="url(#convGradient)"
             dot={false}
-            activeDot={{ r: 4, fill: "#1a1a1a", strokeWidth: 0 }}
+            activeDot={{ r: 4, fill: "#7c3aed", strokeWidth: 0 }}
             isAnimationActive={true}
             animationDuration={400}
             animationEasing="ease-out"
@@ -363,8 +372,9 @@ export default function Index() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                padding: "10px 0",
+                padding: "10px 12px",
                 borderBottom: "1px solid #e1e1e1",
+                borderLeft: "4px solid #d97706",
               }}
             >
               <span style={{ fontSize: "13px", color: "#444" }}>
@@ -492,17 +502,19 @@ export default function Index() {
 
       <s-section heading="Performance">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
-          <Metric label="Conversations" value={String(stats.totalConversations)} />
-          <Metric label="Resolution rate" value={`${resolutionRatePct}%`} />
-          <Metric label="Revenue attributed" value={revenue} />
-          <Metric label="Conversion rate" value={`${conversionRatePct}%`} />
-          <Metric label="Avg order value" value={aov} />
-          <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} />
-          <Metric label="Discounts used" value={String(stats.discountsUsedCount)} />
+          <Metric label="Conversations" value={String(stats.totalConversations)} color={{ bg: "#f5f3ff", border: "#ddd6fe", text: "#6d28d9" }} icon="💬" />
+          <Metric label="Resolution rate" value={`${resolutionRatePct}%`} color={{ bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d" }} icon="📈" />
+          <Metric label="Revenue attributed" value={revenue} color={{ bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" }} icon="💰" />
+          <Metric label="Conversion rate" value={`${conversionRatePct}%`} color={{ bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d" }} icon="📈" />
+          <Metric label="Avg order value" value={aov} color={{ bg: "#fff7ed", border: "#fed7aa", text: "#c2410c" }} icon="🛒" />
+          <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} color={{ bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d" }} icon="📈" />
+          <Metric label="Discounts used" value={String(stats.discountsUsedCount)} color={{ bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" }} icon="💰" />
           <Metric
             label="Monthly usage"
             value={`${usage.used} / ${usage.limit}`}
             sub={`${usagePercent}% used`}
+            color={{ bg: "#f5f3ff", border: "#ddd6fe", text: "#6d28d9" }}
+            icon="💬"
           />
         </div>
       </s-section>
@@ -521,6 +533,12 @@ export default function Index() {
                   personalization: "Offers & discounts",
                   direct: "General chat",
                 };
+                const routeColor: Record<string, string> = {
+                  shopping: "#2563eb",
+                  support: "#7c3aed",
+                  personalization: "#16a34a",
+                  direct: "#6b7280",
+                };
                 const total = routingData.reduce((s, r) => s + r.count, 0);
                 return routingData.map((r) => {
                   const conv = conversionByRoute[r.route];
@@ -531,7 +549,7 @@ export default function Index() {
                         {ROUTE_LABELS[r.route] ?? r.route}
                       </span>
                       <div style={{ flex: 1, background: "#f0f0f0", borderRadius: "4px", height: "6px" }}>
-                        <div style={{ width: `${Math.round((r.count / total) * 100)}%`, background: "#1a1a1a", height: "6px", borderRadius: "4px" }} />
+                        <div style={{ width: `${Math.round((r.count / total) * 100)}%`, background: routeColor[r.route] ?? "#d97706", height: "6px", borderRadius: "4px" }} />
                       </div>
                       <span style={{ width: "32px", textAlign: "right", fontSize: "12px", color: "#888" }}>
                         {Math.round((r.count / total) * 100)}%
@@ -568,11 +586,19 @@ export default function Index() {
       )}
 
       <s-section heading="Quick actions">
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <s-button href="/app/conversations" variant="secondary">View conversations</s-button>
-          <s-button href="/app/settings" variant="secondary">Widget settings</s-button>
-          <s-button href="/app/ai-config" variant="secondary">Knowledge base</s-button>
-          <s-button href="/app/billing" variant="secondary">Billing</s-button>
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <a href="/app/conversations" style={{ flex: "1 1 160px", textDecoration: "none", border: "1px solid #e5e7eb", borderTop: "3px solid #2563eb", borderRadius: "8px", padding: "16px", background: "#fff", display: "block", color: "#1a1a1a", fontWeight: 500, fontSize: "14px" }}>
+            View conversations
+          </a>
+          <a href="/app/settings" style={{ flex: "1 1 160px", textDecoration: "none", border: "1px solid #e5e7eb", borderTop: "3px solid #7c3aed", borderRadius: "8px", padding: "16px", background: "#fff", display: "block", color: "#1a1a1a", fontWeight: 500, fontSize: "14px" }}>
+            Widget settings
+          </a>
+          <a href="/app/ai-config" style={{ flex: "1 1 160px", textDecoration: "none", border: "1px solid #e5e7eb", borderTop: "3px solid #7c3aed", borderRadius: "8px", padding: "16px", background: "#fff", display: "block", color: "#1a1a1a", fontWeight: 500, fontSize: "14px" }}>
+            Knowledge base
+          </a>
+          <a href="/app/billing" style={{ flex: "1 1 160px", textDecoration: "none", border: "1px solid #e5e7eb", borderTop: "3px solid #16a34a", borderRadius: "8px", padding: "16px", background: "#fff", display: "block", color: "#1a1a1a", fontWeight: 500, fontSize: "14px" }}>
+            Billing
+          </a>
         </div>
       </s-section>
     </s-page>

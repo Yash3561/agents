@@ -103,8 +103,8 @@ export default function Conversations() {
               style={{
                 padding: "5px 14px",
                 borderRadius: "6px",
-                border: "1px solid #d1d1d1",
-                background: days === opt.value ? "#1a1a1a" : "transparent",
+                border: days === opt.value ? "1px solid #008060" : "1px solid #d1d1d1",
+                background: days === opt.value ? "#008060" : "transparent",
                 color: days === opt.value ? "#fff" : "#1a1a1a",
                 cursor: "pointer",
                 fontWeight: days === opt.value ? 600 : 400,
@@ -132,8 +132,8 @@ export default function Conversations() {
               style={{
                 padding: "6px 16px",
                 borderRadius: "6px",
-                border: "1px solid #1a1a1a",
-                background: status === opt.value ? "#1a1a1a" : "transparent",
+                border: status === opt.value ? "1px solid #008060" : "1px solid #1a1a1a",
+                background: status === opt.value ? "#008060" : "transparent",
                 color: status === opt.value ? "#fff" : "#1a1a1a",
                 cursor: "pointer",
                 fontWeight: status === opt.value ? 600 : 400,
@@ -193,13 +193,14 @@ export default function Conversations() {
                   <s-table-cell>{c.messageCount}</s-table-cell>
                   <s-table-cell>
                     {c.orderRevenueCents
-                      ? fmtRevenue(c.orderRevenueCents)
+                      ? <span style={{ color: "#15803d", fontWeight: 600 }}>{fmtRevenue(c.orderRevenueCents)}</span>
                       : "—"}
                   </s-table-cell>
                   <s-table-cell>
                     {c.escalated ? <s-badge tone="critical">Escalated</s-badge> : null}
                     {c.discountCode ? <s-badge tone="success">Discount</s-badge> : null}
-                    {!c.escalated && !c.discountCode ? (
+                    {c.messageCount > 10 ? <s-badge tone="info">Active</s-badge> : null}
+                    {!c.escalated && !c.discountCode && !(c.messageCount > 10) ? (
                       <s-text tone="neutral">—</s-text>
                     ) : null}
                   </s-table-cell>

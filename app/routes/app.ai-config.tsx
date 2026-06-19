@@ -172,10 +172,12 @@ export default function AiConfig() {
       {/* Section 1 — Custom Knowledge Base (FAQs)                            */}
       {/* ------------------------------------------------------------------ */}
       <s-section heading="Custom knowledge base">
+        <div style={{ borderLeft: "3px solid #7c3aed", paddingLeft: "12px" }}>
         <s-text tone="neutral">
           Add up to 20 Q&amp;A pairs. The support agent will answer these questions exactly as
           written.
         </s-text>
+        </div>
 
         {/* Fix D — empty state */}
         {faqs.length === 0 ? (
@@ -272,10 +274,12 @@ export default function AiConfig() {
       {/* Section 3 — Quick Replies                                            */}
       {/* ------------------------------------------------------------------ */}
       <s-section heading="Quick replies">
+        <div style={{ borderLeft: "3px solid #7c3aed", paddingLeft: "12px" }}>
         <s-text tone="neutral">
           Up to 5 quick-reply buttons shown to customers at the start of a conversation. Leave
           blank to skip a slot.
         </s-text>
+        </div>
         {quickReplies.map((reply, i) => (
           <s-text-field
             key={i}
@@ -299,8 +303,9 @@ export default function AiConfig() {
                   display: "inline-block",
                   padding: "6px 14px",
                   borderRadius: "18px",
-                  border: "1px solid #e0e0e0",
-                  background: "#fff",
+                  border: "1px solid #b2dfdb",
+                  background: "#e6f4f1",
+                  color: "#008060",
                   fontSize: "13px",
                   cursor: "pointer",
                   whiteSpace: "nowrap",

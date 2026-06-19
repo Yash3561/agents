@@ -266,21 +266,23 @@ export default function Settings() {
             </s-select>
           </div>
 
-          <div
-            style={{
-              marginTop: "24px",
-              padding: "12px",
-              background: "#f5f5f5",
-              borderRadius: "8px",
-              borderLeft: "4px solid #1a1a1a",
-            }}
-          >
-            <s-text tone="neutral">
-              <strong>Live Preview</strong>
-            </s-text>
-            <p style={{ fontSize: "12px", color: "#666", margin: "8px 0 0" }}>
-              This is how your widget looks on the storefront:
-            </p>
+          <div style={{ marginTop: "24px", borderRadius: "8px", overflow: "hidden", border: "1px solid #e1e1e1" }}>
+            <div style={{
+              background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+              borderRadius: "8px 8px 0 0",
+              padding: "8px 16px",
+              color: "#fff",
+              fontSize: "12px",
+              fontWeight: 600,
+              letterSpacing: "0.5px",
+            }}>
+              LIVE PREVIEW
+            </div>
+            <div style={{ padding: "12px", background: "#f5f5f5" }}>
+              <p style={{ fontSize: "12px", color: "#666", margin: "0 0 0" }}>
+                This is how your widget looks on the storefront:
+              </p>
+            </div>
           </div>
           <div style={{ marginTop: "12px" }}>
             <WidgetPreview color={widgetColor} position={widgetPosition} greeting={widgetGreeting} botName={botName} />

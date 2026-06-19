@@ -127,7 +127,7 @@ export default function BillingPage() {
 
   // Inline progress bar since s-progress-bar is not in Polaris web types
   const barColor =
-    usagePct >= 100 ? "#d82c0d" : usagePct >= 80 ? "#b98900" : "#008060";
+    usagePct >= 100 ? "#dc2626" : usagePct >= 80 ? "#d97706" : "#16a34a";
 
   const PLAN_ORDER: Record<string, number> = { free: 0, starter: 1, growth: 2, pro: 3 };
   const currentPlanRank = PLAN_ORDER[usage.plan] ?? 0;
@@ -206,9 +206,9 @@ export default function BillingPage() {
           {(() => {
             const isCurrent = usage.plan === "free";
             return (
-              <div style={{ flex: "1 1 240px", border: isCurrent ? "2px solid #008060" : "1px solid #e1e3e5", borderRadius: "8px", padding: "20px", background: isCurrent ? "#f0faf6" : "#ffffff", display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ flex: "1 1 240px", border: isCurrent ? "2px solid #008060" : "1px solid #e1e3e5", borderRadius: "12px", padding: "20px", background: isCurrent ? "#f0faf6" : "#ffffff", display: "flex", flexDirection: "column", gap: "12px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <s-heading>{FREE_PLAN.name}</s-heading>
+                  <s-heading><span style={{ color: "#6b7280", marginRight: "6px" }}>●</span>{FREE_PLAN.name}</s-heading>
                   {isCurrent && <s-badge tone="success">Current</s-badge>}
                 </div>
                 <div>
@@ -229,6 +229,11 @@ export default function BillingPage() {
           })()}
           {PLANS.map((plan) => {
             const isCurrent = usage.plan === plan.key;
+            const planDotColor: Record<string, string> = {
+              starter: "#2563eb",
+              growth: "#7c3aed",
+              pro: "#d97706",
+            };
             return (
               <div
                 key={plan.key}
@@ -237,7 +242,7 @@ export default function BillingPage() {
                   border: isCurrent
                     ? "2px solid #008060"
                     : "1px solid #e1e3e5",
-                  borderRadius: "8px",
+                  borderRadius: "12px",
                   padding: "20px",
                   background: isCurrent ? "#f0faf6" : "#ffffff",
                   display: "flex",
@@ -252,7 +257,7 @@ export default function BillingPage() {
                     alignItems: "center",
                   }}
                 >
-                  <s-heading>{plan.name}</s-heading>
+                  <s-heading><span style={{ color: planDotColor[plan.key] ?? "#6b7280", marginRight: "6px" }}>●</span>{plan.name}</s-heading>
                   {isCurrent && <s-badge tone="success">Current</s-badge>}
                 </div>
                 <div>
