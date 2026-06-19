@@ -1,94 +1,54 @@
-import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
-import type { ActiveDiscount } from "~/lib/mcp/discounts.server";
+import { getActiveDiscounts, type ActiveDiscount } from "~/lib/mcp/discounts.server";
 import {
-  assertDiscountNotApplied,
+  assertDiscountNegotiationAllowed,
   GuardrailError,
 } from "~/lib/guardrails.server";
 import type { ConversationSession } from "~/lib/session.server";
 import type { CustomerMemory } from "~/lib/agents/memory.server";
 import type { Merchant } from "@prisma/client";
 
-// ---------------------------------------------------------------------------
-// Output type
-// ---------------------------------------------------------------------------
-
 export interface PersonalizationAgentOutput {
-  text: string | null; // null = no discount offered (caller skips this turn)
+  text: string | null;
   discountCode?: string;
   toolsCalled: string[];
 }
 
-// ---------------------------------------------------------------------------
-// Intent detection — does the current message ask for a discount?
-// ---------------------------------------------------------------------------
+// Words that signal the customer wants a better deal than what was offered
+const RESISTANCE_WORDS = [
+  "more", "better", "higher", "bigger", "extra", "additional",
+  "increase", "less", "another", "improve", "beat", "match",
+  "anything else", "best you can", "best deal", "lower price",
+  "cheaper", "not enough", "not much", "that's it",
+];
 
-const DISCOUNT_INTENT_WORDS = [
-  "discount",
-  "promo",
-  "coupon",
-  "code",
-  "offer",
-  "deal",
-  "save",
+function detectResistance(message: string): boolean {
+  const lower = message.toLowerCase();
+  return RESISTANCE_WORDS.some((w) => lower.includes(w));
+}
+
+const DISCOUNT_REQUEST_WORDS = [
+  "discount", "promo", "coupon", "code", "offer",
+  "deal", "save", "promotion", "voucher",
 ];
 
 function customerAskedForDiscount(message: string): boolean {
   const lower = message.toLowerCase();
-  return DISCOUNT_INTENT_WORDS.some((word) => lower.includes(word));
+  return DISCOUNT_REQUEST_WORDS.some((w) => lower.includes(w));
 }
 
-// ---------------------------------------------------------------------------
-// Smart discount selection
-// ---------------------------------------------------------------------------
-
-type Situation = "abandoned_cart" | "asked_for_discount";
-
-function pickBestDiscount(
+function pickDiscount(
   discounts: ActiveDiscount[],
-  situation: Situation,
-): ActiveDiscount {
-  // For abandoned cart: free shipping is the #1 checkout barrier remover — prefer it
-  // Then fall back to highest-value % off (most motivating to complete purchase)
-  // Then fixed amount, then anything else
-  if (situation === "abandoned_cart") {
-    const freeShipping = discounts.find((d) => d.type === "free_shipping");
-    if (freeShipping) return freeShipping;
+  level: number,
+  offeredCodes: string[],
+): ActiveDiscount | null {
+  // Filter out codes we've already mentioned
+  const fresh = discounts.filter((d) => !offeredCodes.includes(d.code));
+  if (fresh.length === 0) return null;
 
-    const percentages = discounts
-      .filter((d) => d.type === "percentage")
-      .sort((a, b) => b.value - a.value);
-    if (percentages.length > 0) return percentages[0];
-
-    const fixed = discounts
-      .filter((d) => d.type === "fixed_amount")
-      .sort((a, b) => b.value - a.value);
-    if (fixed.length > 0) return fixed[0];
-
-    return discounts[0];
-  }
-
-  // For direct ask ("do you have a discount?"): customer wants the best deal
-  // Prefer highest % off (feels most rewarding), then fixed amount (concrete saving),
-  // then free shipping, then anything
-  const percentages = discounts
-    .filter((d) => d.type === "percentage")
-    .sort((a, b) => b.value - a.value);
-  if (percentages.length > 0) return percentages[0];
-
-  const fixed = discounts
-    .filter((d) => d.type === "fixed_amount")
-    .sort((a, b) => b.value - a.value);
-  if (fixed.length > 0) return fixed[0];
-
-  const freeShipping = discounts.find((d) => d.type === "free_shipping");
-  if (freeShipping) return freeShipping;
-
-  return discounts[0];
+  // Clamp level to available fresh discounts
+  const idx = Math.min(level, fresh.length - 1);
+  return fresh[idx];
 }
-
-// ---------------------------------------------------------------------------
-// Agent (deterministic logic — no LLM needed here)
-// ---------------------------------------------------------------------------
 
 export async function runPersonalizationAgent(opts: {
   shopDomain: string;
@@ -100,49 +60,80 @@ export async function runPersonalizationAgent(opts: {
   cartTotalCents?: number;
   currentMessage: string;
 }): Promise<PersonalizationAgentOutput> {
-  const { shopDomain, accessToken, session, merchant, memory, currentMessage } =
-    opts;
-
+  const { shopDomain, accessToken, session, merchant, memory, currentMessage } = opts;
   const toolsCalled: string[] = [];
 
-  // Merchant has personalization disabled entirely
   if (!merchant.personalizationEnabled) return { text: null, toolsCalled };
 
-  // Guard: one discount per conversation
+  // Guard: max offers per conversation
   try {
-    assertDiscountNotApplied(session);
+    assertDiscountNegotiationAllowed(session);
   } catch (err) {
-    if (err instanceof GuardrailError) return { text: null, toolsCalled };
+    if (err instanceof GuardrailError) {
+      // We've hit the cap — if customer is still pushing back, acknowledge gracefully
+      if (detectResistance(currentMessage) && session.discount_negotiation.offered_codes.length > 0) {
+        const lastCode = session.discount_negotiation.offered_codes[session.discount_negotiation.offered_codes.length - 1];
+        return {
+          text: `I've shared all the discounts I have available — the best I can offer is **${lastCode}**. That's our top deal right now!`,
+          toolsCalled,
+        };
+      }
+      return { text: null, toolsCalled };
+    }
     throw err;
   }
 
-  // Fetch live active discount codes from the merchant's Shopify store
   toolsCalled.push("admin_graphql:code_discount_nodes");
   const discounts = await getActiveDiscounts(shopDomain, accessToken);
-
-  // No discounts configured → nothing to offer
   if (discounts.length === 0) return { text: null, toolsCalled };
 
-  // Case 1: Abandoned cart recovery — nudge customer back with a discount
-  if (memory.abandoned_cart) {
-    const best = pickBestDiscount(discounts, "abandoned_cart");
-    return {
-      text: `Still thinking about what you had in your cart? Use code **${best.code}** at checkout — ${best.summary}. I can add those items back for you!`,
-      discountCode: best.code,
-      toolsCalled,
-    };
+  const { offered_codes, level } = session.discount_negotiation;
+  const hasOfferedBefore = offered_codes.length > 0;
+
+  // Determine situation
+  const isAbandonedCart = Boolean(memory.abandoned_cart);
+  const isResisting = hasOfferedBefore && detectResistance(currentMessage);
+  const isAsking = customerAskedForDiscount(currentMessage);
+
+  // Decide what level to offer at
+  let offerLevel: number;
+
+  if (isAbandonedCart && !hasOfferedBefore) {
+    // Abandoned cart: start at level 1 (mid-tier) — customer is already leaving,
+    // bottom-tier may not be compelling enough to recover the cart
+    offerLevel = Math.min(1, discounts.length - 1);
+  } else if (isResisting) {
+    // Customer pushed back — escalate one level
+    offerLevel = level; // level already incremented on the previous turn
+  } else if (isAsking || isAbandonedCart) {
+    offerLevel = level;
+  } else {
+    // Not asking, not resisting, not abandoned cart → don't offer
+    return { text: null, toolsCalled };
   }
 
-  // Case 2: Customer explicitly asked for a discount/promo
-  if (customerAskedForDiscount(currentMessage)) {
-    const best = pickBestDiscount(discounts, "asked_for_discount");
-    return {
-      text: `Here's a discount code for you: **${best.code}** — ${best.summary}.`,
-      discountCode: best.code,
-      toolsCalled,
-    };
+  const chosen = pickDiscount(discounts, offerLevel, offered_codes);
+  if (!chosen) {
+    // All codes already offered
+    if (hasOfferedBefore) {
+      return {
+        text: `I've already shared all the discounts I have — use **${offered_codes[offered_codes.length - 1]}** for the best deal available!`,
+        toolsCalled,
+      };
+    }
+    return { text: null, toolsCalled };
   }
 
-  // Otherwise — no unsolicited discounts
-  return { text: null, toolsCalled };
+  // Build message based on situation
+  let text: string;
+  if (isAbandonedCart) {
+    text = `Still thinking about your cart? Here's a little nudge — use **${chosen.code}** at checkout for ${chosen.summary}. Want me to add those items back?`;
+  } else if (isResisting && hasOfferedBefore) {
+    const prevCode = offered_codes[offered_codes.length - 1];
+    text = `I hear you — let me do better. Use **${chosen.code}** for ${chosen.summary}. That's a step up from ${prevCode}!`;
+  } else {
+    text = `Here's a discount for you: **${chosen.code}** — ${chosen.summary}.`;
+  }
+
+  return { text, discountCode: chosen.code, toolsCalled };
 }

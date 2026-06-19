@@ -14,19 +14,24 @@ export interface Message {
   timestamp: number;
 }
 
+export interface DiscountNegotiationState {
+  offered_codes: string[];  // codes already mentioned this conversation
+  level: number;            // how many offers made so far (0 = none yet)
+}
+
 export interface ConversationSession {
   conversation_history: Message[];
   cart_id?: string;
   checkout_id?: string;
   checkout_token?: string;    // real Shopify cart/checkout token (parsed from checkout_url), used to match orders/paid webhooks
-  discount_applied: boolean;  // one discount per conversation
+  discount_negotiation: DiscountNegotiationState;  // replaces discount_applied
   hop_count: number;          // reset each turn, max 3
   agent_calls: string[];      // current-turn trace e.g. ["shopping", "personalization"]
 }
 
 const DEFAULT_SESSION = (): ConversationSession => ({
   conversation_history: [],
-  discount_applied: false,
+  discount_negotiation: { offered_codes: [], level: 0 },
   hop_count: 0,
   agent_calls: [],
 });

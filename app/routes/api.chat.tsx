@@ -261,12 +261,19 @@ function buildSseStream(opts: {
           updatedSession.checkout_token = extractCheckoutToken(result.checkout_url);
         }
         if (result.discount_code) {
-          updatedSession.discount_applied = true;
+          const neg = updatedSession.discount_negotiation;
+          if (!neg.offered_codes.includes(result.discount_code)) {
+            neg.offered_codes.push(result.discount_code);
+          }
+          neg.level = Math.min(neg.level + 1, 3);
+          updatedSession.discount_negotiation = neg;
         }
-        // Also flag if the customer applied their own code via update_cart
+        // Also track if customer applied their own code via update_cart
         const cartDiscounts = (result.cart as { discountCodes?: unknown[] } | undefined)?.discountCodes;
         if (cartDiscounts && (cartDiscounts as unknown[]).length > 0) {
-          updatedSession.discount_applied = true;
+          const neg = updatedSession.discount_negotiation;
+          neg.level = 3; // cap negotiation — they've used a code
+          updatedSession.discount_negotiation = neg;
         }
         await setSession(shop, session_id, updatedSession);
 

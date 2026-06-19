@@ -37,12 +37,14 @@ export function assertHopBudget(session: ConversationSession): void {
   }
 }
 
-/** Enforces one discount per conversation. */
-export function assertDiscountNotApplied(session: ConversationSession): void {
-  if (session.discount_applied) {
+export const MAX_NEGOTIATION_LEVEL = 3; // max 3 offers per conversation
+
+/** Enforces negotiation level cap — throws when max offers reached. */
+export function assertDiscountNegotiationAllowed(session: ConversationSession): void {
+  if (session.discount_negotiation.level >= MAX_NEGOTIATION_LEVEL) {
     throw new GuardrailError(
-      "discount_already_applied",
-      "Only one discount allowed per conversation",
+      "discount_negotiation_exhausted",
+      "Maximum discount offers reached for this conversation",
     );
   }
 }

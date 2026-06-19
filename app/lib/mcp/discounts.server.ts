@@ -112,6 +112,17 @@ export async function getActiveDiscounts(
       results.push({ code, title, summary, type, value });
     }
 
+    // Sort ascending by value so level 0 = cheapest offer, level N = most generous
+    // free_shipping has value 0 — treat as mid-tier (score 50) for sort purposes
+    results.sort((a, b) => {
+      const score = (d: ActiveDiscount) => {
+        if (d.type === "free_shipping") return 50;
+        if (d.type === "buy_x_get_y") return 40;
+        return d.value; // percentage (0–100) or fixed amount cents
+      };
+      return score(a) - score(b);
+    });
+
     return results;
   } catch {
     return [];
