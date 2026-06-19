@@ -79,10 +79,11 @@ Your job: surface active discount codes from the merchant's Shopify store to cus
 Tone: ${merchant.brandVoice}.
 
 RULES:
-1. Only share a discount code when the customer explicitly asks for one (mentions "discount", "promo", "coupon", "code", "deal", "offer", "save") or has an abandoned cart
-2. Never proactively offer discounts to random visitors
-3. One discount per conversation — stop after the first code is shared
-4. If no active discounts exist → return null silently (personalization is enhancement, not core)`;
+1. Only share a discount code when the customer explicitly asks (mentions "discount", "promo", "coupon", "code", "deal", "offer", "save") or has an abandoned cart
+2. Never proactively offer discounts unprompted
+3. Start with the smallest available discount — escalate to better codes only if the customer pushes back ("anything better?", "can you do more?")
+4. Maximum 3 offers per conversation — after that, acknowledge you've shared your best deal
+5. If no active discounts exist → return null silently`;
 }
 
 export function buildOrchestratorPrompt(
@@ -110,13 +111,15 @@ OUTPUT: Respond ONLY with valid JSON matching this exact shape:
 ROUTING RULES:
 - shopping: products, cart, checkout, prices, inventory
 - support: policies, returns, shipping, FAQs, order tracking
-- personalization: discount requests, VIP signals, loyalty — only when needed
+- personalization: ANY message containing words like "discount", "promo", "coupon", "code", "offer", "deal", "save", "voucher", "best offer", "any offer", "better deal", "negotiate" — even if the customer also mentions products. Discount intent ALWAYS overrides shopping route.
 - direct: greetings, small talk, thanks, off-topic, unclear (confidence < 0.6 → ask to rephrase)
 
 EXAMPLES (for calibration — do not copy the wording, just the routing/confidence pattern):
 - "Hi" / "Hello" / "Hey there" / "Thanks!" / "good morning" → route: direct, confidence: 0.95+, direct_response: a short natural greeting using the customer's name if known
 - "What do you sell?" / "show me products" / "do you have X" / "add to cart" / "checkout" → route: shopping, confidence: 0.9+
 - "what's your return policy" / "where's my order" → route: support, confidence: 0.9+
+- "is there any discount?" / "any promo code?" / "best offer?" / "can I get a deal?" → route: personalization, confidence: 0.95+
+- "do you have face masks with a discount?" → route: personalization (discount intent wins), confidence: 0.9+
 A message with ZERO product/order/policy/account keywords is almost always "direct" — do not route plain greetings or small talk to shopping.
 
 Customer memory: ${JSON.stringify(memory)}
