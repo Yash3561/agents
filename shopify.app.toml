@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "d1ed7250a107b38802ff74de11f699f3"
+client_id = "632dc62c255a91ee1508205a2b4b28a6"
 application_url = "https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io"
 embedded = true
 name = "neonping"
