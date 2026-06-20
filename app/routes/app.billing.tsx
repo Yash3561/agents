@@ -20,7 +20,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const result = await billing.check({
       plans: [...VALID_PLANS],
-      isTest: process.env.NODE_ENV !== "production",
+      isTest: process.env.BILLING_TEST_MODE === "true",
     });
     if (result.hasActivePayment && result.appSubscriptions?.length > 0) {
       const sub = result.appSubscriptions[0];
@@ -56,7 +56,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   await billing.request({
     plan: plan as PlanKey,
-    isTest: process.env.NODE_ENV !== "production",
+    isTest: process.env.BILLING_TEST_MODE === "true",
     returnUrl: `${process.env.SHOPIFY_APP_URL}/app/billing`,
   });
 
