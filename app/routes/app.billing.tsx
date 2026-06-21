@@ -54,17 +54,23 @@ export async function action({ request }: ActionFunctionArgs) {
     return { error: "Invalid plan" };
   }
 
-  // billing.request() throws a redirect to Shopify's confirmation URL on
-  // success, or re-throws a Response on auth failure so App Bridge can retry.
-  // We let all thrown Responses propagate — they're handled by the error
-  // boundary or by App Bridge's fetch interceptor (401 + Retry header).
-  await billing.request({
-    plan: plan as PlanKey,
-    isTest: process.env.BILLING_TEST_MODE === "true",
-    returnUrl: `${process.env.SHOPIFY_APP_URL}/app/billing`,
-  });
+  try {
+    await billing.request({
+      plan: plan as PlanKey,
+      isTest: process.env.BILLING_TEST_MODE === "true",
+      returnUrl: `${process.env.SHOPIFY_APP_URL}/app/billing`,
+    });
+  } catch (e) {
+    // Re-throw 3xx redirects — that's the success path (Shopify payment page)
+    if (e instanceof Response && e.status >= 300 && e.status < 400) throw e;
+    // Return 401/403 as data so the UI shows a message instead of crashing
+    if (e instanceof Response && (e.status === 401 || e.status === 403)) {
+      return { error: "billing_unauthorized" };
+    }
+    throw e;
+  }
 
-  return null; // unreachable — billing.request always throws (redirect or error)
+  return null;
 }
 
 const ALL_FEATURES = [
@@ -123,6 +129,7 @@ interface PlanCardProps {
 function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
   const fetcher = useFetcher<typeof action>();
   const isSubmitting = fetcher.state === "submitting";
+  const billingError = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
 
   return (
     <div
@@ -170,6 +177,18 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
         ))}
       </ul>
       <div style={{ marginTop: "auto" }}>
+        {billingError === "billing_unauthorized" && (
+          <div style={{ marginBottom: "8px", padding: "8px 12px", background: "#fff0f0", border: "1px solid #fca5a5", borderRadius: "6px" }}>
+            <s-text tone="critical">
+              Billing unavailable for this store. Please contact support or try from a store linked to your Partner account.
+            </s-text>
+          </div>
+        )}
+        {billingError && billingError !== "billing_unauthorized" && (
+          <div style={{ marginBottom: "8px", padding: "8px 12px", background: "#fff0f0", border: "1px solid #fca5a5", borderRadius: "6px" }}>
+            <s-text tone="critical">Something went wrong. Please try again.</s-text>
+          </div>
+        )}
         <fetcher.Form method="POST">
           <input type="hidden" name="plan" value={plan.key} />
           <button
@@ -265,7 +284,7 @@ export default function BillingPage() {
           </div>
           {resetAt && (
             <div style={{ marginTop: "4px" }}>
-              <s-text tone="neutral">Resets on {new Date(resetAt).toLocaleDateString()}</s-text>
+              <s-text tone="neutral">Resets on {new Date(resetAt).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric" })}</s-text>
             </div>
           )}
         </s-box>
