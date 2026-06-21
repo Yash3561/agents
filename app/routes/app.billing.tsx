@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, Form, useNavigation } from "react-router";
+import { useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getUsage } from "../lib/billing.server";
 import db from "../db.server";
@@ -54,13 +54,17 @@ export async function action({ request }: ActionFunctionArgs) {
     return { error: "Invalid plan" };
   }
 
+  // billing.request() throws a redirect to Shopify's confirmation URL on
+  // success, or re-throws a Response on auth failure so App Bridge can retry.
+  // We let all thrown Responses propagate — they're handled by the error
+  // boundary or by App Bridge's fetch interceptor (401 + Retry header).
   await billing.request({
     plan: plan as PlanKey,
     isTest: process.env.BILLING_TEST_MODE === "true",
     returnUrl: `${process.env.SHOPIFY_APP_URL}/app/billing`,
   });
 
-  return null; // unreachable — billing.request redirects
+  return null; // unreachable — billing.request always throws (redirect or error)
 }
 
 const ALL_FEATURES = [
@@ -105,7 +109,8 @@ const PLANS: Array<{
 
 export default function BillingPage() {
   const { usage, activeSubscription, resetAt, resetAtStr } = useLoaderData<typeof loader>();
-  const navigation = useNavigation();
+  const fetcher = useFetcher<typeof action>();
+  const isSubmitting = fetcher.state === "submitting";
 
   const usagePct =
     usage.limit > 0
@@ -113,8 +118,10 @@ export default function BillingPage() {
       : 0;
   const limitDisplay =
     usage.limit >= 999_000 ? "Unlimited" : usage.limit.toLocaleString();
-  const planLabel =
-    usage.plan.charAt(0).toUpperCase() + usage.plan.slice(1);
+  const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
+  const planLabel = PAID_PLANS.has(usage.plan)
+    ? usage.plan.charAt(0).toUpperCase() + usage.plan.slice(1)
+    : "No active plan";
 
   // Inline progress bar since s-progress-bar is not in Polaris web types
   const barColor =
@@ -129,7 +136,7 @@ export default function BillingPage() {
         <s-box padding="base" background="subdued" borderRadius="base">
           <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
             <s-text>Current plan:</s-text>
-            <s-badge tone="success">
+            <s-badge tone={PAID_PLANS.has(usage.plan) ? "success" : "neutral"}>
               {planLabel}
             </s-badge>
             {activeSubscription && (
@@ -253,35 +260,37 @@ export default function BillingPage() {
                   ))}
                 </ul>
                 <div style={{ marginTop: "auto" }}>
-                  <Form method="post">
-                    <input type="hidden" name="plan" value={plan.key} />
-                    <button
-                      type="submit"
-                      disabled={isCurrent || navigation.state === "submitting"}
-                      style={{
-                        width: "100%",
-                        padding: "10px 16px",
-                        background: isCurrent ? "#e1e3e5" : "#008060",
-                        color: isCurrent ? "#6d7175" : "#ffffff",
-                        border: "none",
-                        borderRadius: "6px",
-                        cursor: isCurrent || navigation.state === "submitting" ? "default" : "pointer",
-                        fontWeight: 600,
-                        fontSize: "14px",
-                        opacity: navigation.state === "submitting" ? 0.7 : 1,
-                      }}
-                    >
-                      {isCurrent
-                        ? "Current plan"
-                        : navigation.state === "submitting"
-                        ? "Loading..."
-                        : currentPlanRank === -1
-                        ? `Choose ${plan.name}`
-                        : PLAN_ORDER[plan.key] > currentPlanRank
-                        ? `Upgrade to ${plan.name}`
-                        : `Switch to ${plan.name}`}
-                    </button>
-                  </Form>
+                  <button
+                    type="button"
+                    disabled={isCurrent || isSubmitting}
+                    onClick={() => {
+                      const formData = new FormData();
+                      formData.append("plan", plan.key);
+                      fetcher.submit(formData, { method: "POST" });
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "10px 16px",
+                      background: isCurrent ? "#e1e3e5" : "#008060",
+                      color: isCurrent ? "#6d7175" : "#ffffff",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: isCurrent || isSubmitting ? "default" : "pointer",
+                      fontWeight: 600,
+                      fontSize: "14px",
+                      opacity: isSubmitting ? 0.7 : 1,
+                    }}
+                  >
+                    {isCurrent
+                      ? "Current plan"
+                      : isSubmitting
+                      ? "Loading..."
+                      : currentPlanRank === -1
+                      ? `Choose ${plan.name}`
+                      : PLAN_ORDER[plan.key] > currentPlanRank
+                      ? `Upgrade to ${plan.name}`
+                      : `Switch to ${plan.name}`}
+                  </button>
                 </div>
               </div>
             );
