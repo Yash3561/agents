@@ -4,7 +4,7 @@ import { authenticate } from "../shopify.server";
 import { getUsage } from "../lib/billing.server";
 import db from "../db.server";
 
-const VALID_PLANS = ["starter", "growth", "pro"] as const;
+const VALID_PLANS = ["spark", "pulse", "surge"] as const;
 type PlanKey = (typeof VALID_PLANS)[number];
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -63,51 +63,58 @@ export async function action({ request }: ActionFunctionArgs) {
   return null; // unreachable — billing.request redirects
 }
 
-const FREE_PLAN = {
-  name: "Free",
-  price: "$0",
-  conversations: "500 conversations/mo",
-  features: ["AI-powered chat widget", "Live catalog search", "Basic widget customization"],
-};
-
 const PLANS: Array<{
   key: PlanKey;
   name: string;
   price: string;
   conversations: string;
   features: string[];
+  pitch: string;
+  recommended?: boolean;
 }> = [
   {
-    key: "starter",
-    name: "Starter",
+    key: "spark",
+    name: "Spark",
     price: "$29",
     conversations: "500 conversations/mo",
+    pitch: "One recovered sale a month pays for 6 months.",
     features: [
-      "AI-powered chat widget",
-      "Product recommendations",
-      "Basic analytics",
+      "Live catalog search (always real-time)",
+      "AI product recommendations",
+      "Widget customization",
+      "Single-tier discount offers",
+      "Revenue attribution dashboard",
     ],
   },
   {
-    key: "growth",
-    name: "Growth",
+    key: "pulse",
+    name: "Pulse",
     price: "$79",
-    conversations: "2,000 conversations/mo",
+    conversations: "2,500 conversations/mo",
+    pitch: "Personalized AI that remembers your customers — for less than two lattes a day.",
+    recommended: true,
     features: [
-      "Everything in Starter",
+      "Everything in Spark",
+      "Customer memory & personalization",
+      "Personalized greetings by name",
       "Abandoned cart recovery",
-      "Revenue attribution",
+      "Multi-tier discount negotiation (5→10→15%)",
+      "Cart recovery rate KPI",
     ],
   },
   {
-    key: "pro",
-    name: "Pro",
+    key: "surge",
+    name: "Surge",
     price: "$199",
-    conversations: "Unlimited conversations",
+    conversations: "10,000 conversations/mo",
+    pitch: "At $100K/mo GMV, one recovered cart pays for 3 months of Surge.",
     features: [
-      "Everything in Growth",
-      "Priority support",
-      "Custom AI personas",
+      "Everything in Pulse",
+      "Advanced funnel analytics",
+      "Custom discount tiers",
+      "Multi-language responses",
+      "Priority support (24h response)",
+      "Early access to new features",
     ],
   },
 ];
@@ -129,7 +136,7 @@ export default function BillingPage() {
   const barColor =
     usagePct >= 100 ? "#dc2626" : usagePct >= 80 ? "#d97706" : "#16a34a";
 
-  const PLAN_ORDER: Record<string, number> = { free: 0, starter: 1, growth: 2, pro: 3 };
+  const PLAN_ORDER: Record<string, number> = { spark: 0, pulse: 1, surge: 2 };
   const currentPlanRank = PLAN_ORDER[usage.plan] ?? 0;
 
   return (
@@ -138,7 +145,7 @@ export default function BillingPage() {
         <s-box padding="base" background="subdued" borderRadius="base">
           <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
             <s-text>Current plan:</s-text>
-            <s-badge tone={usage.plan === "free" ? "neutral" : "success"}>
+            <s-badge tone="success">
               {planLabel}
             </s-badge>
             {activeSubscription && (
@@ -203,36 +210,12 @@ export default function BillingPage() {
 
       <s-section heading="Choose a Plan" id="plans">
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
-          {(() => {
-            const isCurrent = usage.plan === "free";
-            return (
-              <div style={{ flex: "1 1 240px", border: isCurrent ? "2px solid #008060" : "1px solid #e1e3e5", borderRadius: "12px", padding: "20px", background: isCurrent ? "#f0faf6" : "#ffffff", display: "flex", flexDirection: "column", gap: "12px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <s-heading><span style={{ color: "#6b7280", marginRight: "6px" }}>●</span>{FREE_PLAN.name}</s-heading>
-                  {isCurrent && <s-badge tone="success">Current</s-badge>}
-                </div>
-                <div>
-                  <span style={{ fontSize: "28px", fontWeight: 700 }}>{FREE_PLAN.price}</span>
-                  <span style={{ color: "#6d7175" }}> / month</span>
-                </div>
-                <s-text tone="neutral">{FREE_PLAN.conversations}</s-text>
-                <ul style={{ margin: "0", paddingLeft: "20px", color: "#202223" }}>
-                  {FREE_PLAN.features.map((f) => <li key={f} style={{ marginBottom: "4px" }}><s-text>{f}</s-text></li>)}
-                </ul>
-                {!isCurrent && (
-                  <div style={{ marginTop: "auto" }}>
-                    <s-text tone="neutral">Your current plan includes all free tier features.</s-text>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
           {PLANS.map((plan) => {
             const isCurrent = usage.plan === plan.key;
             const planDotColor: Record<string, string> = {
-              starter: "#2563eb",
-              growth: "#7c3aed",
-              pro: "#d97706",
+              spark: "#2563eb",
+              pulse: "#7c3aed",
+              surge: "#d97706",
             };
             return (
               <div
@@ -241,6 +224,8 @@ export default function BillingPage() {
                   flex: "1 1 240px",
                   border: isCurrent
                     ? "2px solid #008060"
+                    : plan.recommended
+                    ? "2px solid #7c3aed"
                     : "1px solid #e1e3e5",
                   borderRadius: "12px",
                   padding: "20px",
@@ -258,7 +243,10 @@ export default function BillingPage() {
                   }}
                 >
                   <s-heading><span style={{ color: planDotColor[plan.key] ?? "#6b7280", marginRight: "6px" }}>●</span>{plan.name}</s-heading>
-                  {isCurrent && <s-badge tone="success">Current</s-badge>}
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    {plan.recommended && !isCurrent && <s-badge tone="info">Most Popular</s-badge>}
+                    {isCurrent && <s-badge tone="success">Current</s-badge>}
+                  </div>
                 </div>
                 <div>
                   <span style={{ fontSize: "28px", fontWeight: 700 }}>
@@ -280,6 +268,9 @@ export default function BillingPage() {
                     </li>
                   ))}
                 </ul>
+                <div style={{ marginTop: "4px" }}>
+                  <s-text tone="neutral"><em>{plan.pitch}</em></s-text>
+                </div>
                 <div style={{ marginTop: "auto" }}>
                   <Form method="post">
                     <input type="hidden" name="plan" value={plan.key} />

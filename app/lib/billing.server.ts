@@ -4,16 +4,14 @@ import { redis } from "~/redis.server";
 /**
  * Conversation-per-month limits per plan. Real plan assignment depends on
  * Shopify's Billing API (#27, not yet built) — until then every merchant
- * defaults to "free" via the Merchant model. This map and the limit
- * enforcement below are real and active regardless; only the mechanism
- * that upgrades merchant.plan is missing.
+ * defaults to "free" via the Merchant model (enforced at spark limits).
+ * This map and the limit enforcement below are real and active regardless;
+ * only the mechanism that upgrades merchant.plan is missing.
  */
 const PLAN_LIMITS: Record<string, number> = {
-  free: 500,
-  trial: 500,
-  starter: 500,
-  growth: 2000,
-  pro: 999_999,
+  spark: 500,
+  pulse: 2500,
+  surge: 10000,
 };
 
 const usageKey = (shopDomain: string) => `usage:${shopDomain}`;
@@ -45,10 +43,10 @@ function isNewBillingMonth(resetAt: Date, now: Date): boolean {
 export async function checkAndIncrementUsage(shopDomain: string): Promise<UsageCheck> {
   const merchant = await prisma.merchant.findUnique({ where: { shopDomain } });
   if (!merchant) {
-    return { allowed: true, used: 0, limit: PLAN_LIMITS.free };
+    return { allowed: true, used: 0, limit: PLAN_LIMITS.spark };
   }
 
-  const limit = PLAN_LIMITS[merchant.plan] ?? PLAN_LIMITS.free;
+  const limit = PLAN_LIMITS[merchant.plan] ?? PLAN_LIMITS.spark;
   const now = new Date();
   let durableCount = merchant.conversationCount;
 
@@ -103,8 +101,8 @@ export async function getUsage(shopDomain: string): Promise<{ used: number; limi
     where: { shopDomain },
     select: { plan: true, conversationCount: true, conversationResetAt: true },
   });
-  if (!merchant) return { used: 0, limit: 500, plan: "free" };
-  const limit = PLAN_LIMITS[merchant.plan as keyof typeof PLAN_LIMITS] ?? 500;
+  if (!merchant) return { used: 0, limit: PLAN_LIMITS.spark, plan: "spark" };
+  const limit = PLAN_LIMITS[merchant.plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.spark;
   try {
     const key = usageKey(shopDomain);
     const val = await redis.get(key);

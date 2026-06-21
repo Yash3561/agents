@@ -21,37 +21,19 @@ const shopify = shopifyApp({
     expiringOfflineAccessTokens: true,
   },
   billing: {
-    starter: {
-      lineItems: [
-        {
-          amount: 29,
-          currencyCode: "USD",
-          interval: BillingInterval.Every30Days,
-        },
-      ],
+    spark: {
+      lineItems: [{ amount: 29, currencyCode: "USD", interval: BillingInterval.Every30Days }],
       trialDays: 7,
     },
-    growth: {
-      lineItems: [
-        {
-          amount: 79,
-          currencyCode: "USD",
-          interval: BillingInterval.Every30Days,
-        },
-      ],
+    pulse: {
+      lineItems: [{ amount: 79, currencyCode: "USD", interval: BillingInterval.Every30Days }],
       trialDays: 7,
     },
-    pro: {
-      lineItems: [
-        {
-          amount: 199,
-          currencyCode: "USD",
-          interval: BillingInterval.Every30Days,
-        },
-      ],
+    surge: {
+      lineItems: [{ amount: 199, currencyCode: "USD", interval: BillingInterval.Every30Days }],
       trialDays: 7,
     },
-  },
+  } as const,
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),
