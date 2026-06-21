@@ -137,7 +137,7 @@ export default function BillingPage() {
     usagePct >= 100 ? "#dc2626" : usagePct >= 80 ? "#d97706" : "#16a34a";
 
   const PLAN_ORDER: Record<string, number> = { spark: 0, pulse: 1, surge: 2 };
-  const currentPlanRank = PLAN_ORDER[usage.plan] ?? 0;
+  const currentPlanRank = PLAN_ORDER[usage.plan] ?? -1; // -1 = no paid plan, all 3 show as "Choose"
 
   return (
     <s-page heading="Plan &amp; Billing">
@@ -294,9 +294,11 @@ export default function BillingPage() {
                         ? "Current plan"
                         : navigation.state === "submitting"
                         ? "Loading..."
+                        : currentPlanRank === -1
+                        ? `Choose ${plan.name}`
                         : PLAN_ORDER[plan.key] > currentPlanRank
                         ? `Upgrade to ${plan.name}`
-                        : `Downgrade to ${plan.name}`}
+                        : `Switch to ${plan.name}`}
                     </button>
                   </Form>
                 </div>
