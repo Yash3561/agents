@@ -63,13 +63,23 @@ export async function action({ request }: ActionFunctionArgs) {
   return null; // unreachable — billing.request redirects
 }
 
+const ALL_FEATURES = [
+  "AI-powered chat widget on your storefront",
+  "Live catalog search (always real-time, never stale)",
+  "Personalized product recommendations",
+  "Customer memory & personalized greetings",
+  "Abandoned cart recovery",
+  "Multi-tier discount negotiation",
+  "Revenue attribution dashboard",
+  "Widget customization (color, position, greeting)",
+  "GDPR compliant",
+];
+
 const PLANS: Array<{
   key: PlanKey;
   name: string;
   price: string;
   conversations: string;
-  features: string[];
-  pitch: string;
   recommended?: boolean;
 }> = [
   {
@@ -77,45 +87,19 @@ const PLANS: Array<{
     name: "Spark",
     price: "$29",
     conversations: "500 conversations/mo",
-    pitch: "One recovered sale a month pays for 6 months.",
-    features: [
-      "Live catalog search (always real-time)",
-      "AI product recommendations",
-      "Widget customization",
-      "Single-tier discount offers",
-      "Revenue attribution dashboard",
-    ],
   },
   {
     key: "pulse",
     name: "Pulse",
     price: "$79",
     conversations: "2,500 conversations/mo",
-    pitch: "Personalized AI that remembers your customers — for less than two lattes a day.",
     recommended: true,
-    features: [
-      "Everything in Spark",
-      "Customer memory & personalization",
-      "Personalized greetings by name",
-      "Abandoned cart recovery",
-      "Multi-tier discount negotiation (5→10→15%)",
-      "Cart recovery rate KPI",
-    ],
   },
   {
     key: "surge",
     name: "Surge",
     price: "$199",
     conversations: "10,000 conversations/mo",
-    pitch: "At $100K/mo GMV, one recovered cart pays for 3 months of Surge.",
-    features: [
-      "Everything in Pulse",
-      "Advanced funnel analytics",
-      "Custom discount tiers",
-      "Multi-language responses",
-      "Priority support (24h response)",
-      "Early access to new features",
-    ],
   },
 ];
 
@@ -262,15 +246,12 @@ export default function BillingPage() {
                     color: "#202223",
                   }}
                 >
-                  {plan.features.map((f) => (
+                  {ALL_FEATURES.map((f) => (
                     <li key={f} style={{ marginBottom: "4px" }}>
                       <s-text>{f}</s-text>
                     </li>
                   ))}
                 </ul>
-                <div style={{ marginTop: "4px" }}>
-                  <s-text tone="neutral"><em>{plan.pitch}</em></s-text>
-                </div>
                 <div style={{ marginTop: "auto" }}>
                   <Form method="post">
                     <input type="hidden" name="plan" value={plan.key} />
