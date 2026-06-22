@@ -254,9 +254,11 @@ function buildSseStream(opts: {
             }
           }
         }
-        // Surface cart failure to the agent so it can inform the customer
-        const agentMessage = cartAction && preCartFailed
-          ? `[cart-add failed — could not add item to cart. Tell the customer something went wrong and suggest they try again.]\n${message}`
+        // Surface cart outcome to the agent — success signal prevents a redundant update_cart tool call
+        const agentMessage = cartAction
+          ? preCartFailed
+            ? `[cart-add failed — could not add item to cart. Tell the customer something went wrong and suggest they try again.]\n${message}`
+            : `[cart-add already complete — item was added successfully. Just confirm cheerfully and offer checkout. Do NOT call update_cart again.]\n${message}`
           : message;
 
         // 2 + 3. Append user message and fetch customer memory in parallel — they're independent
@@ -277,6 +279,20 @@ function buildSseStream(opts: {
         const t1 = Date.now();
         let firstToken = false;
 
+        const thinkingTexts: Record<string, string> = {
+          search_catalog: "Searching our catalog…",
+          lookup_catalog: "Looking up products…",
+          get_product: "Looking up product details…",
+          create_cart: "Creating your cart…",
+          update_cart: "Updating your cart…",
+          get_cart: "Checking your cart…",
+          get_checkout_url: "Preparing checkout…",
+          offer_discount: "Checking available discounts…",
+          search_policies_and_faqs: "Looking up our policies…",
+          get_order: "Looking up your order…",
+          get_customer_orders: "Fetching your order history…",
+        };
+
         // 4. Run the unified agent — tokens stream to SSE in real-time via onToken.
         //    The LLM's first token fires the first delta immediately; no buffering.
         const result = await runUnifiedAgent({
@@ -288,6 +304,13 @@ function buildSseStream(opts: {
           accessToken,
           customerAccessToken: customer_access_token,
           cartTotalCents: cart_total_cents,
+          onToolStart: (toolName) => {
+            // Only send thinking text if no real text has streamed yet
+            if (!firstToken) {
+              const text = thinkingTexts[toolName] ?? "Thinking…";
+              send("thinking", JSON.stringify({ text }));
+            }
+          },
           onToken: (token) => {
             if (!firstToken) {
               firstToken = true;
@@ -308,12 +331,25 @@ function buildSseStream(opts: {
         // agent result takes precedence if it also touched the cart (e.g. applied discount).
         const effectiveCart = result.cart ?? preCartResult.cart;
         const effectiveCheckoutUrl = result.checkout_url ?? preCartResult.checkoutUrl;
+
+        // Contextual quick replies based on what happened this turn
+        let quickReplies = result.quick_replies; // set when no tool was called (greeting/small talk)
+        if (!quickReplies) {
+          if (effectiveCart) {
+            quickReplies = result.discount_code
+              ? ["Checkout now", "Keep shopping"]
+              : ["Apply a discount", "Checkout now", "Keep shopping"];
+          } else if (result.products?.length) {
+            quickReplies = ["Tell me more", "Add to cart", "See alternatives"];
+          }
+        }
+
         const meta: Record<string, unknown> = {};
         if (result.products?.length) meta.products = result.products;
         if (effectiveCart) meta.cart = effectiveCart;
         if (effectiveCheckoutUrl) meta.checkout_url = effectiveCheckoutUrl;
         if (result.discount_code) meta.discount_code = result.discount_code;
-        if (result.quick_replies?.length) meta.quick_replies = result.quick_replies;
+        if (quickReplies?.length) meta.quick_replies = quickReplies;
         if (result.escalate_to_human) meta.escalate_to_human = true;
         meta.agent_trace = result.agent_trace;
         if (result.last_search_query) meta.last_search_query = result.last_search_query;

@@ -1,8 +1,16 @@
 import { callMcpTool } from "~/lib/mcp/client.server";
+import { redis } from "~/redis.server";
 
 // Shopify Storefront MCP — public, no auth required for catalog operations.
 // Discovery (/.well-known/ucp) is not implemented on most stores; use /api/mcp directly.
 const endpoint = (shop: string) => ({ endpoint: `https://${shop}/api/mcp` });
+
+const SEARCH_CACHE_TTL = 60; // seconds — balance freshness vs latency
+
+function searchCacheKey(shop: string, query: string, maxPriceCents?: number): string {
+  const price = maxPriceCents != null ? String(maxPriceCents) : "any";
+  return `search:${shop}:${query.toLowerCase().trim()}:${price}`;
+}
 
 // ---------------------------------------------------------------------------
 // Types — aligned with Shopify UCP catalog search response
@@ -125,6 +133,15 @@ export async function searchCatalog(
     },
   };
 
+  // Cache check — eliminates 700ms Shopify MCP call on repeated searches
+  const cacheKey = searchCacheKey(shopDomain, cleanQuery, maxPriceCents);
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(String(cached)) as CatalogSearchResult;
+  } catch {
+    // Redis unavailable — fall through to live fetch
+  }
+
   const result = await callMcpTool<Record<string, unknown>>(
     endpoint(shopDomain),
     "search_catalog",
@@ -134,11 +151,16 @@ export async function searchCatalog(
   const raw = result.structuredContent;
   const rawProducts = (raw.products as Array<Record<string, unknown>>) ?? [];
 
-  return {
+  const searchResult: CatalogSearchResult = {
     products: rawProducts.map(mapProduct),
     total: rawProducts.length,
     pagination: raw.pagination as CatalogSearchResult["pagination"],
   };
+
+  // Write to cache (fire-and-forget — never blocks the response)
+  redis.setex(cacheKey, SEARCH_CACHE_TTL, JSON.stringify(searchResult)).catch(() => null);
+
+  return searchResult;
 }
 
 /** Look up specific products by GID — implemented as parallel get_product_details calls. */

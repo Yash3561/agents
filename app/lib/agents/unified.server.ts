@@ -127,6 +127,7 @@ export async function runUnifiedAgent(opts: {
   accessToken: string;
   customerAccessToken?: string;
   cartTotalCents?: number;
+  onToolStart?: (toolName: string) => void; // called when a tool begins executing
   onToken?: (token: string) => void; // called for each text token as it streams
 }): Promise<UnifiedAgentOutput> {
   const {
@@ -138,6 +139,7 @@ export async function runUnifiedAgent(opts: {
     accessToken,
     customerAccessToken,
     cartTotalCents = 0,
+    onToolStart,
     onToken,
   } = opts;
 
@@ -201,6 +203,7 @@ export async function runUnifiedAgent(opts: {
         maxResults: z.number().min(1).max(3).optional(),
       }),
       execute: async (input) => {
+        onToolStart?.("search_catalog");
         toolsCalled.push("search_catalog");
         if (input.query) lastSearchQuery = input.query;
         const result = await searchCatalog(shopDomain, input.query, {
@@ -218,6 +221,7 @@ export async function runUnifiedAgent(opts: {
       description: "Look up specific product variants by GID",
       inputSchema: z.object({ ids: z.array(z.string()) }),
       execute: async (input) => {
+        onToolStart?.("lookup_catalog");
         toolsCalled.push("lookup_catalog");
         return lookupCatalog(shopDomain, input.ids);
       },
@@ -232,6 +236,7 @@ export async function runUnifiedAgent(opts: {
           .optional(),
       }),
       execute: async (input) => {
+        onToolStart?.("get_product");
         toolsCalled.push("get_product");
         return getProduct(shopDomain, input.productId, input.selectedOptions);
       },
@@ -249,6 +254,7 @@ export async function runUnifiedAgent(opts: {
         currency: z.string().optional(),
       }),
       execute: async (input) => {
+        onToolStart?.("create_cart");
         assertCartNotEmpty(input.lineItems);
         toolsCalled.push("create_cart");
         const result = await createCart(shopDomain, input.lineItems, {
@@ -264,6 +270,7 @@ export async function runUnifiedAgent(opts: {
       description: "Fetch current cart state",
       inputSchema: z.object({ cartId: z.string() }),
       execute: async (input) => {
+        onToolStart?.("get_cart");
         toolsCalled.push("get_cart");
         const result = await getCart(shopDomain, input.cartId);
         cart = result;
@@ -287,6 +294,7 @@ export async function runUnifiedAgent(opts: {
         giftCardCodes: z.array(z.string()).optional(),
       }),
       execute: async (input) => {
+        onToolStart?.("update_cart");
         toolsCalled.push("update_cart");
         const result = await updateCart(shopDomain, input.cartId, {
           add: input.add,
@@ -304,6 +312,7 @@ export async function runUnifiedAgent(opts: {
       description: "Get the checkout URL for a cart so the buyer can complete their purchase.",
       inputSchema: z.object({ cartId: z.string() }),
       execute: async (input) => {
+        onToolStart?.("get_checkout_url");
         toolsCalled.push("get_checkout_url");
         const cartData = await getCart(shopDomain, input.cartId);
         const checkout = checkoutFromCart(cartData);
@@ -321,6 +330,7 @@ export async function runUnifiedAgent(opts: {
         context: z.string().optional(),
       }),
       execute: async (input) => {
+        onToolStart?.("search_policies_and_faqs");
         toolsCalled.push("search_policies_and_faqs");
         const result = await searchPoliciesAndFaqs(shopDomain, input.query, input.context);
         if (!result) return { text: null, message: "No policy found for that query." };
@@ -332,6 +342,7 @@ export async function runUnifiedAgent(opts: {
       description: "Look up an order by ID for status and tracking",
       inputSchema: z.object({ orderId: z.string() }),
       execute: async (input) => {
+        onToolStart?.("get_order");
         toolsCalled.push("get_order");
         try {
           return await getOrder(shopDomain, input.orderId);
@@ -349,6 +360,7 @@ export async function runUnifiedAgent(opts: {
       description: "Get order history for the logged-in customer",
       inputSchema: z.object({}),
       execute: async () => {
+        onToolStart?.("get_customer_orders");
         toolsCalled.push("get_customer_orders");
         if (!customerAccessToken) return { error: "Customer not logged in", orders: [] };
         try {
@@ -376,6 +388,7 @@ export async function runUnifiedAgent(opts: {
         message: z.string().describe("The natural language message to show the customer when offering this code. Must sound human, vary phrasing, reference context."),
       }),
       execute: async (input) => {
+        onToolStart?.("offer_discount");
         toolsCalled.push("offer_discount");
         if (discountLevel_local >= 3) {
           return { error: "discount_cap_reached", message: "No more discount offers available for this conversation." };
