@@ -759,39 +759,6 @@ export default function Index() {
         </s-section>
       )}
 
-      {/* ── Quick actions ── */}
-      <s-section heading="Quick actions">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
-          {[
-            { href: "/app/conversations", label: "View conversations", desc: "Browse chat history", accent: "#2563eb" },
-            { href: "/app/settings", label: "Widget settings", desc: "Greeting, color, position", accent: "#7c3aed" },
-            { href: "/app/ai-config", label: "Knowledge base", desc: "FAQs and AI personality", accent: "#0891b2" },
-            { href: "/app/billing", label: "Billing & plan", desc: "Usage, limits, upgrade", accent: "#16a34a" },
-          ].map((action) => (
-            <a
-              key={action.href}
-              href={action.href}
-              style={{
-                textDecoration: "none",
-                display: "block",
-                padding: "18px 20px",
-                background: "#fff",
-                border: "1px solid #e5e7eb",
-                borderTop: `3px solid ${action.accent}`,
-                borderRadius: "10px",
-                transition: "box-shadow 0.15s ease",
-              }}
-            >
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#111827", marginBottom: "4px" }}>
-                {action.label}
-              </div>
-              <div style={{ fontSize: "12px", color: "#6b7280" }}>
-                {action.desc}
-              </div>
-            </a>
-          ))}
-        </div>
-      </s-section>
     </s-page>
   );
 }
