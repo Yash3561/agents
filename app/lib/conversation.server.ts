@@ -74,6 +74,10 @@ export async function persistConversationTurn(opts: {
       customerId,
       messages: session.conversation_history as unknown as Prisma.InputJsonValue,
       messageCount: session.conversation_history.length,
+      firstUserMessage: (
+        (session.conversation_history as Array<{ role: string; content: string }>)
+          .find((m) => m.role === "user")?.content?.slice(0, 200) ?? null
+      ),
       cartId: session.cart_id,
       checkoutToken,
       discountCode,
@@ -105,4 +109,17 @@ export async function persistConversationTurn(opts: {
       ).catch(console.error);
     }
   }
+}
+
+export function computeOutcome(c: {
+  orderId: string | null;
+  escalated: boolean;
+  cartId: string | null;
+  lastMessageAt: Date;
+}): "converted" | "in_cart" | "escalated" | "active" | "ended" {
+  if (c.orderId) return "converted";
+  if (c.escalated) return "escalated";
+  if (new Date(c.lastMessageAt) > new Date(Date.now() - 10 * 60 * 1000)) return "active";
+  if (c.cartId) return "in_cart";
+  return "ended";
 }

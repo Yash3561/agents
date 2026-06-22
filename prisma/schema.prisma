@@ -54,6 +54,7 @@ model Conversation {
   routeReason       String?
   startedAt         DateTime @default(now())
   lastMessageAt     DateTime @updatedAt
+  firstUserMessage  String?
   merchant          Merchant @relation(fields: [shopDomain], references: [shopDomain])
 
   @@unique([shopDomain, sessionId])
