@@ -13,7 +13,7 @@ import {
   buildSupportPrompt,
   type CustomerMemory,
 } from "~/lib/prompt.server";
-import { assertCartNotEmpty, assertDiscountNegotiationAllowed } from "~/lib/guardrails.server";
+import { assertCartNotEmpty } from "~/lib/guardrails.server";
 import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.server";
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
 import { checkoutFromCart } from "~/lib/mcp/checkout.server";
@@ -117,7 +117,6 @@ export async function runUnifiedAgent(opts: {
   merchant: Merchant;
   memory: CustomerMemory;
   accessToken: string;
-  customerId?: string;
   customerAccessToken?: string;
   cartTotalCents?: number;
 }): Promise<UnifiedAgentOutput> {
@@ -144,6 +143,9 @@ export async function runUnifiedAgent(opts: {
   // Discount state from session
   const { offered_codes, level: discountLevel } = session.discount_negotiation;
   const discountsRemaining = Math.max(0, 3 - discountLevel);
+  // Mutable local copies — updated within the turn so within-turn double-offers are blocked
+  const offered_codes_local = [...offered_codes];
+  let discountLevel_local = discountLevel;
 
   // Fetch active discounts upfront (cheap, cached by Shopify CDN usually)
   const availableDiscounts =
@@ -176,7 +178,7 @@ export async function runUnifiedAgent(opts: {
   // Tool definitions
   // ---------------------------------------------------------------------------
 
-  const tools = {
+  const baseTools = {
     // -- Shopping tools --
     search_catalog: tool({
       description:
@@ -347,8 +349,11 @@ export async function runUnifiedAgent(opts: {
       },
     }),
 
-    // -- Discount tool --
-    offer_discount: tool({
+  };
+
+  // Conditionally add offer_discount only when there are fresh codes available
+  if (merchant.personalizationEnabled && availableDiscounts.length > 0) {
+    (baseTools as Record<string, unknown>)["offer_discount"] = tool({
       description:
         "Call this tool when you decide to offer a discount code to the customer. Only call it when: (1) discount_offers_remaining > 0, (2) the customer has shown real buying intent or asked about discounts/deals, (3) the chosen code has not been offered yet this conversation. Do NOT call this tool for casual browsers or just to be nice.",
       inputSchema: z.object({
@@ -362,19 +367,27 @@ export async function runUnifiedAgent(opts: {
       }),
       execute: async (input) => {
         toolsCalled.push("offer_discount");
-        // Enforce centralized guardrail — throws GuardrailError if cap (3) reached
-        assertDiscountNegotiationAllowed(session);
-        // Validate the code is in our available list and not already offered
+        // Inline cap check using local counter — catches within-turn double-offers
+        // that a session-level check would miss (session is snapshot, not live)
+        if (discountLevel_local >= 3) {
+          return { error: "discount_cap_reached", message: "No more discount offers available for this conversation." };
+        }
+        // Validate the code is in our available list and not already offered this turn
         const isValid = availableDiscounts.some((d) => d.code === input.code);
-        const alreadyOffered = offered_codes.includes(input.code);
+        const alreadyOffered = offered_codes_local.includes(input.code);
         if (!isValid || alreadyOffered) {
           return { error: "Code not available or already offered" };
         }
         discountCode = input.code;
+        // Update local state so within-turn double-offer is blocked
+        offered_codes_local.push(input.code);
+        discountLevel_local += 1;
         return { success: true, code: input.code, stance: input.negotiationStance };
       },
-    }),
-  };
+    });
+  }
+
+  const tools = baseTools;
 
   // ---------------------------------------------------------------------------
   // Run
@@ -391,7 +404,7 @@ export async function runUnifiedAgent(opts: {
 
   let text = "";
   try {
-    text = await (await stream).text;
+    text = await stream.text;
   } catch {
     text = "I'm having trouble with that right now. Please try again in a moment.";
   }

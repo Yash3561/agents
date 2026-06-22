@@ -24,16 +24,12 @@ export interface ConversationSession {
   cart_id?: string;
   checkout_id?: string;
   checkout_token?: string;    // real Shopify cart/checkout token (parsed from checkout_url), used to match orders/paid webhooks
-  discount_negotiation: DiscountNegotiationState;  // replaces discount_applied
-  hop_count: number;          // reset each turn, max 3
-  agent_calls: string[];      // current-turn trace e.g. ["shopping", "personalization"]
+  discount_negotiation: DiscountNegotiationState;
 }
 
 const DEFAULT_SESSION = (): ConversationSession => ({
   conversation_history: [],
   discount_negotiation: { offered_codes: [], level: 0 },
-  hop_count: 0,
-  agent_calls: [],
 });
 
 // ---------------------------------------------------------------------------
@@ -74,15 +70,12 @@ export async function setSession(
     .catch(() => null);
 }
 
-/** Reset hop_count and agent_calls at the start of each new turn. */
+/** Load session at the start of each new turn. */
 export async function resetTurn(
   shopDomain: string,
   sessionId: string,
 ): Promise<ConversationSession> {
-  const session = await getSession(shopDomain, sessionId);
-  const updated = { ...session, hop_count: 0, agent_calls: [] };
-  await setSession(shopDomain, sessionId, updated);
-  return updated;
+  return getSession(shopDomain, sessionId);
 }
 
 /** Append a message to conversation history and persist. */

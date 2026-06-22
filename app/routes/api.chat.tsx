@@ -3,7 +3,7 @@
  *
  * SSE streaming endpoint consumed by the storefront widget.
  * Authenticates the request, loads session + memory + merchant config,
- * runs the orchestrator, streams the response, and persists state.
+ * runs the unified agent, streams the response, and persists state.
  *
  * Request body (JSON):
  *   {
@@ -224,6 +224,7 @@ function buildSseStream(opts: {
 
         // 1b. Pre-handle cart action deterministically — no LLM parsing of GIDs needed
         let preCartResult: { cart?: unknown; checkoutUrl?: string } = {};
+        let preCartFailed = false;
         if (cartAction) {
           if (session.cart_id) {
             try {
@@ -232,7 +233,7 @@ function buildSseStream(opts: {
               });
               preCartResult = { cart: updated, checkoutUrl: updated.checkoutUrl };
             } catch {
-              // fail silently — agent will handle naturally
+              preCartFailed = true;
             }
           } else {
             try {
@@ -241,13 +242,17 @@ function buildSseStream(opts: {
               ]);
               preCartResult = { cart: newCart, checkoutUrl: newCart.checkoutUrl };
               session.cart_id = newCart.id; // store for this turn
+              // Persist cart_id immediately so it's durable before any other write
+              await setSession(shop, session_id, session);
             } catch {
-              // fail silently — agent will handle naturally
+              preCartFailed = true;
             }
           }
         }
-        // Always pass a clean message — no GID prefix needed anymore
-        const agentMessage = message;
+        // Surface cart failure to the agent so it can inform the customer
+        const agentMessage = cartAction && preCartFailed
+          ? `[cart-add failed — could not add item to cart. Tell the customer something went wrong and suggest they try again.]\n${message}`
+          : message;
 
         // 2 + 3. Append user message and fetch customer memory in parallel — they're independent
         const appendP = appendMessage(shop, session_id, {
@@ -272,7 +277,6 @@ function buildSseStream(opts: {
           merchant,
           memory,
           accessToken,
-          customerId: customer_id,
           customerAccessToken: customer_access_token,
           cartTotalCents: cart_total_cents,
         });
@@ -314,7 +318,6 @@ function buildSseStream(opts: {
           if (cartId) updatedSession.cart_id = cartId;
         }
         if (effectiveCheckoutUrl && !result.escalate_to_human) {
-          updatedSession.checkout_id = session_id; // mark checkout initiated
           updatedSession.checkout_token = extractCheckoutToken(effectiveCheckoutUrl);
         }
         if (result.discount_code) {

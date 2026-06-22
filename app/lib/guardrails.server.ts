@@ -24,19 +24,6 @@ export function assertCartNotEmpty(lineItems: unknown[]): void {
   }
 }
 
-/**
- * Caps agent hops at 3 per turn.
- * Orchestrator calls this before dispatching to each specialist.
- */
-export function assertHopBudget(session: ConversationSession): void {
-  if (session.hop_count >= 3) {
-    throw new GuardrailError(
-      "hop_budget_exceeded",
-      "Max 3 specialist hops per turn exceeded",
-    );
-  }
-}
-
 export const MAX_NEGOTIATION_LEVEL = 3; // max 3 offers per conversation
 
 /** Enforces negotiation level cap — throws when max offers reached. */
