@@ -127,6 +127,7 @@ export async function runUnifiedAgent(opts: {
   accessToken: string;
   customerAccessToken?: string;
   cartTotalCents?: number;
+  onToken?: (token: string) => void; // called for each text token as it streams
 }): Promise<UnifiedAgentOutput> {
   const {
     shopDomain,
@@ -137,6 +138,7 @@ export async function runUnifiedAgent(opts: {
     accessToken,
     customerAccessToken,
     cartTotalCents = 0,
+    onToken,
   } = opts;
 
   const agentTrace: string[] = ["unified"];
@@ -428,8 +430,9 @@ export async function runUnifiedAgent(opts: {
   // Run
   // ---------------------------------------------------------------------------
 
-  // Retry on 429 (Azure AI Foundry free-tier quota) with exponential backoff.
-  // Two retries covers transient bursts; third failure returns a clear user message.
+  // Stream tokens in real-time via onToken callback.
+  // Retry on 429 with exponential backoff (1s, 2s). 429 errors fire before
+  // any tokens, so retrying a mid-stream failure is not a concern in practice.
   let text = "";
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -445,16 +448,22 @@ export async function runUnifiedAgent(opts: {
         maxOutputTokens: 600,
         maxSteps: 6,
       });
-      text = await stream.text;
+      // Iterate token-by-token so the caller receives text as it generates,
+      // not all at once after the full response is buffered.
+      for await (const token of stream.textStream) {
+        text += token;
+        onToken?.(token);
+      }
       lastErr = undefined;
       break;
     } catch (err) {
       lastErr = err;
+      text = ""; // reset in case partial text was streamed before error
       const is429 =
         String(err).includes("429") ||
         String(err).toLowerCase().includes("rate") ||
         (err as { statusCode?: number })?.statusCode === 429;
-      if (!is429) break; // non-429 errors don't benefit from retry
+      if (!is429) break;
     }
   }
   if (lastErr !== undefined) {
@@ -465,6 +474,7 @@ export async function runUnifiedAgent(opts: {
     text = is429
       ? "Our assistant is briefly busy — please send your message again in a moment."
       : "I'm having trouble with that right now. Please try again in a moment.";
+    onToken?.(text); // emit error text so caller doesn't receive silence
   }
 
   // Merchant-configured quick replies for low-confidence / direct responses

@@ -271,7 +271,8 @@ function buildSseStream(opts: {
           memory.firstName = customer_first_name;
         }
 
-        // 4. Run the unified agent (shopping + support + personalization in one LLM call)
+        // 4. Run the unified agent — tokens stream to SSE in real-time via onToken.
+        //    The LLM's first token fires the first delta immediately; no buffering.
         const result = await runUnifiedAgent({
           shopDomain: shop,
           agentMessage,
@@ -281,14 +282,13 @@ function buildSseStream(opts: {
           accessToken,
           customerAccessToken: customer_access_token,
           cartTotalCents: cart_total_cents,
+          onToken: (token) => send("delta", JSON.stringify({ text: token })),
         });
 
-        // 5. Stream the text response as deltas (word-level for widget UX)
+        // 5. Fallback — only fires if agent returned empty text (shouldn't happen normally)
         const replyText = result.text?.trim() || "I'm not sure how to help with that. Could you rephrase?";
-        const words = replyText.split(" ");
-        for (let i = 0; i < words.length; i++) {
-          const chunk = i === 0 ? words[i] : ` ${words[i]}`;
-          send("delta", JSON.stringify({ text: chunk }));
+        if (!result.text?.trim()) {
+          send("delta", JSON.stringify({ text: replyText }));
         }
 
         // 6. Emit structured meta (products, cart, URLs, etc.)
