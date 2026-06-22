@@ -123,8 +123,10 @@ export async function getActiveDiscounts(
       return score(a) - score(b);
     });
 
+    console.debug("[discounts] fetched", results.length, "active discount codes");
     return results;
-  } catch {
+  } catch (err) {
+    console.error("[discounts] getActiveDiscounts failed:", err);
     return [];
   }
 }

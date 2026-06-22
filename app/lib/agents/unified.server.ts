@@ -269,7 +269,7 @@ export async function runUnifiedAgent(opts: {
 
     update_cart: tool({
       description:
-        "Add or update items in the cart, or apply a discount/gift card code the customer mentioned having. Use add[] for new variants, update[] to change quantities (quantity 0 removes), discountCodes/giftCardCodes when the customer offers a code.",
+        "Add or update items in the cart, or apply a discount/gift card code the customer mentioned having. Use add[] for new items (pass product_variant_id). To REMOVE or CHANGE QUANTITY of existing items, you MUST call get_cart first to get the line item IDs (they look like gid://shopify/CartLine/...), then pass those line item IDs in update[] — passing a variant GID in update[] will fail silently. quantity 0 removes the item. Use discountCodes/giftCardCodes when the customer provides a code.",
       inputSchema: z.object({
         cartId: z.string(),
         add: z
