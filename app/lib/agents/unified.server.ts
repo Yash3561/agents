@@ -446,7 +446,7 @@ export async function runUnifiedAgent(opts: {
         messages,
         tools,
         maxOutputTokens: 600,
-        maxSteps: 6,
+        maxSteps: 3, // 1 tool call + response covers 95% of cases; was 6 = up to 12s worst case
       });
       // Iterate token-by-token so the caller receives text as it generates,
       // not all at once after the full response is buffered.

@@ -160,6 +160,7 @@ export async function action({ request }: ActionFunctionArgs) {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       "Access-Control-Allow-Origin": "*",
+      "X-Accel-Buffering": "no", // tell reverse proxy (Envoy/nginx) not to buffer SSE chunks
     },
   });
 }
