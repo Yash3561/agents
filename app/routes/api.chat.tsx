@@ -222,6 +222,8 @@ function buildSseStream(opts: {
       };
 
       try {
+        const t0 = Date.now();
+
         // 1. Load session
         const session = await resetTurn(shop, session_id);
 
@@ -272,6 +274,9 @@ function buildSseStream(opts: {
           memory.firstName = customer_first_name;
         }
 
+        const t1 = Date.now();
+        let firstToken = false;
+
         // 4. Run the unified agent — tokens stream to SSE in real-time via onToken.
         //    The LLM's first token fires the first delta immediately; no buffering.
         const result = await runUnifiedAgent({
@@ -283,7 +288,13 @@ function buildSseStream(opts: {
           accessToken,
           customerAccessToken: customer_access_token,
           cartTotalCents: cart_total_cents,
-          onToken: (token) => send("delta", JSON.stringify({ text: token })),
+          onToken: (token) => {
+            if (!firstToken) {
+              firstToken = true;
+              console.log(`[perf] shop=${shop} pre=${t1 - t0}ms ttft=${Date.now() - t1}ms`);
+            }
+            send("delta", JSON.stringify({ text: token }));
+          },
         });
 
         // 5. Fallback — only fires if agent returned empty text (shouldn't happen normally)
