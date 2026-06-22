@@ -22,24 +22,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
-  if (!PAID_PLANS.has(merchant.plan)) {
-    // Return a minimal payload so the component renders an upgrade prompt inline.
-    // Do NOT redirect to /app/billing — that pushes the path into the Shopify admin
-    // outer URL, and direct navigation to that deep link shows a Shopify 404.
-    return {
-      hasPlan: false as const,
-      shopDomain: shop,
-      days: "30",
-      currencyCode: "USD",
-      stats: null,
-      recentEscalations: [],
-      usage: await getUsage(shop),
-      routingData: [],
-      dailyData: [],
-      conversionByRoute: {},
-      topIntents: [],
-    };
-  }
+  const hasPlan = PAID_PLANS.has(merchant.plan);
 
   const url = new URL(request.url);
   const days = url.searchParams.get("days") || "30";
@@ -157,7 +140,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   return {
-    hasPlan: true as const,
+    hasPlan,
     days,
     shopDomain: shop,
     currencyCode,
@@ -314,41 +297,7 @@ export default function Index() {
   const loaderData = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  if (!loaderData.hasPlan) {
-    return (
-      <s-page heading="Dashboard">
-        <s-section>
-          <div style={{ textAlign: "center", padding: "48px 24px" }}>
-            <div style={{ fontSize: "48px", marginBottom: "16px" }}>🚀</div>
-            <s-heading>Activate NeonPing</s-heading>
-            <div style={{ maxWidth: "440px", margin: "12px auto 24px" }}>
-              <s-text tone="neutral">
-                Choose a plan to turn on your AI chat widget and start converting visitors into customers.
-                All plans include a 7-day free trial — no charge until the trial ends.
-              </s-text>
-            </div>
-            <a
-              href="/app/billing"
-              style={{
-                display: "inline-block",
-                padding: "12px 28px",
-                background: "#008060",
-                color: "#fff",
-                borderRadius: "8px",
-                fontWeight: 600,
-                fontSize: "15px",
-                textDecoration: "none",
-              }}
-            >
-              Choose a plan
-            </a>
-          </div>
-        </s-section>
-      </s-page>
-    );
-  }
-
-  const { stats, days, recentEscalations, usage, routingData, dailyData, shopDomain, conversionByRoute, topIntents, currencyCode } = loaderData;
+  const { hasPlan, stats, days, recentEscalations, usage, routingData, dailyData, shopDomain, conversionByRoute, topIntents, currencyCode } = loaderData;
 
   const escalationRatePct = stats.totalConversations
     ? Math.round((stats.escalatedCount / stats.totalConversations) * 100)
@@ -373,6 +322,13 @@ export default function Index() {
 
   return (
     <s-page heading="Dashboard">
+      {!hasPlan && (
+        <s-banner tone="info">
+          {"Your chat widget is inactive. "}
+          <a href="/app/billing" style={{ fontWeight: 600 }}>Choose a plan</a>
+          {" to activate NeonPing — all plans include a 7-day free trial."}
+        </s-banner>
+      )}
       {isAtCapacity && (
         <s-banner tone="critical">
           {"You've reached your "}
