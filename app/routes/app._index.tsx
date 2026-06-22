@@ -163,79 +163,46 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
-// ─── HeroMetric card ──────────────────────────────────────────────────────────
+// ─── Metric card (Polaris-native) ─────────────────────────────────────────────
 
-interface HeroMetricProps {
+function Metric({ label, value, sub, borderColor = "#e1e3e5" }: {
   label: string;
   value: string;
   sub?: string;
-  accent: string; // CSS color for the 4px top bar
-}
-
-function HeroMetric({ label, value, sub, accent }: HeroMetricProps) {
+  borderColor?: string;
+}) {
   return (
     <div style={{
-      flex: "1 1 200px",
-      background: "rgba(255,255,255,0.75)",
-      backdropFilter: "blur(12px)",
-      WebkitBackdropFilter: "blur(12px)",
-      border: "1px solid rgba(255,255,255,0.9)",
-      borderTop: `4px solid ${accent}`,
-      borderRadius: "14px",
-      padding: "24px 28px 20px",
-      boxShadow: "0 4px 24px rgba(99,102,241,0.08), 0 1px 4px rgba(0,0,0,0.04)",
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-      minWidth: 0,
-    }}>
-      <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px" }}>
-        {label}
-      </div>
-      <div style={{ fontSize: "38px", fontWeight: 800, color: "#111827", lineHeight: 1.1, wordBreak: "break-word" }}>
-        {value}
-      </div>
-      {sub && (
-        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>{sub}</div>
-      )}
-    </div>
-  );
-}
-
-// ─── Metric card ──────────────────────────────────────────────────────────────
-
-interface MetricProps {
-  label: string;
-  value: string;
-  sub?: string;
-  accent: string;
-  textColor: string;
-}
-
-function Metric({ label, value, sub, accent, textColor }: MetricProps) {
-  return (
-    <div style={{
-      background: "rgba(255,255,255,0.7)",
-      backdropFilter: "blur(10px)",
-      WebkitBackdropFilter: "blur(10px)",
-      border: "1px solid rgba(209,213,219,0.5)",
-      borderTop: `3px solid ${accent}`,
-      borderRadius: "12px",
-      padding: "18px 20px 16px",
-      boxShadow: "0 4px 24px rgba(99,102,241,0.06), 0 1px 3px rgba(0,0,0,0.03)",
+      background: "#fff",
+      border: "1px solid #e1e3e5",
+      borderTop: `3px solid ${borderColor}`,
+      borderRadius: "8px",
+      padding: "16px 20px",
       display: "flex",
       flexDirection: "column",
       gap: "4px",
       minWidth: 0,
     }}>
-      <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+      <div style={{
+        fontSize: "12px",
+        color: "#6d7175",
+        fontWeight: 500,
+        textTransform: "uppercase",
+        letterSpacing: "0.4px",
+      }}>
         {label}
       </div>
-      <div style={{ fontSize: "24px", fontWeight: 700, color: textColor, lineHeight: 1.2, wordBreak: "break-word" }}>
+      <div style={{
+        fontSize: "28px",
+        fontWeight: 600,
+        color: "#202223",
+        lineHeight: 1.2,
+        wordBreak: "break-word",
+      }}>
         {value}
       </div>
       {sub && (
-        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>{sub}</div>
+        <div style={{ fontSize: "13px", color: "#8c9196" }}>{sub}</div>
       )}
     </div>
   );
@@ -257,87 +224,81 @@ function fillDates(
   return result;
 }
 
-// ─── Smooth bezier path helper ────────────────────────────────────────────────
-
-function smoothPath(points: Array<[number, number]>): string {
-  if (points.length === 0) return "";
-  if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`;
-  let d = `M ${points[0][0]} ${points[0][1]}`;
-  for (let i = 1; i < points.length; i++) {
-    const [x0, y0] = points[i - 1];
-    const [x1, y1] = points[i];
-    const cx = (x0 + x1) / 2;
-    d += ` C ${cx} ${y0} ${cx} ${y1} ${x1} ${y1}`;
-  }
-  return d;
-}
-
-// ─── LineChart ────────────────────────────────────────────────────────────────
+// ─── LineChart (Polaris-native) ───────────────────────────────────────────────
 
 function LineChart({
   data,
-  days,
+  daysNum,
 }: {
   data: Array<{ date: string; count: number }>;
-  days: number;
+  daysNum: number;
 }) {
-  const [tooltip, setTooltip] = useState<{ svgX: number; svgY: number; date: string; count: number } | null>(null);
+  const [tooltip, setTooltip] = useState<{ idx: number } | null>(null);
 
-  const filled = fillDates(data, days);
+  const filled = fillDates(data, daysNum);
   const maxCount = Math.max(...filled.map((d) => d.count), 1);
 
-  const W = 800;
-  const H = 180;
-  const PAD_LEFT = 8;
-  const PAD_RIGHT = 8;
-  const PAD_TOP = 16;
-  const PAD_BOTTOM = 28;
-  const chartW = W - PAD_LEFT - PAD_RIGHT;
-  const chartH = H - PAD_TOP - PAD_BOTTOM;
+  // SVG coordinate space
+  const W = 600, H = 160;
+  const PL = 40, PR = 16, PT = 12, PB = 32;
+  const cW = W - PL - PR;
+  const cH = H - PT - PB;
 
-  const points: Array<[number, number]> = filled.map((d, i) => [
-    PAD_LEFT + (i / Math.max(filled.length - 1, 1)) * chartW,
-    PAD_TOP + chartH - (d.count / maxCount) * chartH,
+  const pts: Array<[number, number]> = filled.map((d, i) => [
+    PL + (i / Math.max(filled.length - 1, 1)) * cW,
+    PT + cH - (d.count / maxCount) * cH,
   ]);
 
-  const linePath = smoothPath(points);
-
-  // Closed area path (line + bottom)
-  const areaPath =
-    linePath +
-    ` L ${points[points.length - 1][0]} ${PAD_TOP + chartH}` +
-    ` L ${points[0][0]} ${PAD_TOP + chartH} Z`;
-
-  // X-axis labels: max 7, evenly distributed
-  const labelIndices: number[] = [];
-  const maxLabels = Math.min(7, filled.length);
-  if (filled.length <= maxLabels) {
-    filled.forEach((_, i) => labelIndices.push(i));
-  } else {
-    for (let l = 0; l < maxLabels; l++) {
-      labelIndices.push(Math.round((l / (maxLabels - 1)) * (filled.length - 1)));
+  function buildPath(points: Array<[number, number]>): string {
+    if (points.length === 0) return "";
+    if (points.length === 1) return `M${points[0][0]},${points[0][1]}`;
+    let d = `M${points[0][0]},${points[0][1]}`;
+    for (let i = 1; i < points.length; i++) {
+      const [x0, y0] = points[i - 1];
+      const [x1, y1] = points[i];
+      const cx = (x0 + x1) / 2;
+      d += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`;
     }
+    return d;
   }
 
-  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const mx = ((e.clientX - rect.left) / rect.width) * W;
-    let nearest = 0;
-    let nearestDist = Infinity;
-    points.forEach(([px], i) => {
-      const dist = Math.abs(px - mx);
-      if (dist < nearestDist) { nearestDist = dist; nearest = i; }
-    });
-    const [sx, sy] = points[nearest];
-    setTooltip({ svgX: sx, svgY: sy, date: filled[nearest].date, count: filled[nearest].count });
-  };
+  const linePath = buildPath(pts);
+  const areaPath =
+    pts.length > 0
+      ? linePath +
+        ` L${pts[pts.length - 1][0]},${PT + cH} L${pts[0][0]},${PT + cH} Z`
+      : "";
+
+  // Y-axis ticks
+  const yTicks = [0.25, 0.5, 0.75, 1.0].map((f) => ({
+    y: PT + cH - f * cH,
+    label: String(Math.round(f * maxCount)),
+  }));
+
+  // X-axis labels: max 7
+  const maxLabels = Math.min(7, filled.length);
+  const labelIdxs =
+    filled.length <= maxLabels
+      ? filled.map((_, i) => i)
+      : Array.from({ length: maxLabels }, (_, l) =>
+          Math.round((l / (maxLabels - 1)) * (filled.length - 1))
+        );
+
+  const hoverIdx = tooltip?.idx ?? -1;
 
   const isEmpty = filled.every((d) => d.count === 0);
 
   if (isEmpty) {
     return (
-      <div style={{ height: "180px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <span style={{ fontSize: "14px", color: "#9ca3af" }}>
+      <div
+        style={{
+          height: "180px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <span style={{ fontSize: "14px", color: "#8c9196" }}>
           No conversations in this period — share your store link to get started.
         </span>
       </div>
@@ -348,123 +309,168 @@ function LineChart({
     <div style={{ position: "relative", marginTop: "16px" }}>
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", height: "200px", overflow: "visible", cursor: "crosshair" }}
-        onMouseMove={handleMouseMove}
+        style={{ width: "100%", height: "220px", cursor: "default" }}
+        onMouseMove={(e: React.MouseEvent<SVGSVGElement>) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const mx = ((e.clientX - rect.left) / rect.width) * W;
+          let best = 0;
+          let bestDist = Infinity;
+          pts.forEach(([px], i) => {
+            const dist = Math.abs(px - mx);
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = i;
+            }
+          });
+          setTooltip({ idx: best });
+        }}
         onMouseLeave={() => setTooltip(null)}
       >
         <defs>
-          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
+          <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#2c6ecb" stopOpacity="0.12" />
+            <stop offset="100%" stopColor="#2c6ecb" stopOpacity="0" />
           </linearGradient>
         </defs>
 
-        {/* Y-axis grid lines */}
-        {[0.25, 0.5, 0.75].map((frac) => (
-          <line
-            key={frac}
-            x1={PAD_LEFT}
-            y1={PAD_TOP + chartH * (1 - frac)}
-            x2={PAD_LEFT + chartW}
-            y2={PAD_TOP + chartH * (1 - frac)}
-            stroke="#e5e7eb"
-            strokeWidth="1"
-            strokeDasharray="4 4"
-          />
+        {/* Y grid lines + labels */}
+        {yTicks.map((tick, i) => (
+          <g key={i}>
+            <line
+              x1={PL}
+              y1={tick.y}
+              x2={W - PR}
+              y2={tick.y}
+              stroke="#f1f1f1"
+              strokeWidth="1"
+            />
+            <text
+              x={PL - 6}
+              y={tick.y + 4}
+              textAnchor="end"
+              fontSize="10"
+              fill="#8c9196"
+            >
+              {tick.label}
+            </text>
+          </g>
         ))}
 
         {/* Baseline */}
         <line
-          x1={PAD_LEFT} y1={PAD_TOP + chartH}
-          x2={PAD_LEFT + chartW} y2={PAD_TOP + chartH}
-          stroke="#e5e7eb" strokeWidth="1"
+          x1={PL}
+          y1={PT + cH}
+          x2={W - PR}
+          y2={PT + cH}
+          stroke="#e1e3e5"
+          strokeWidth="1"
         />
 
         {/* Area fill */}
-        <path d={areaPath} fill="url(#areaGrad)" />
+        {areaPath && <path d={areaPath} fill="url(#chartFill)" />}
 
         {/* Line */}
-        <path d={linePath} fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-
-        {/* Data point dots */}
-        {points.map(([px, py], i) => (
-          <circle
-            key={i}
-            cx={px} cy={py} r="3"
-            fill="#fff" stroke="#6366f1" strokeWidth="2"
-            opacity={tooltip && filled[i].date === tooltip.date ? 0 : 0.7}
+        {linePath && (
+          <path
+            d={linePath}
+            fill="none"
+            stroke="#2c6ecb"
+            strokeWidth="2"
+            strokeLinecap="round"
           />
+        )}
+
+        {/* Hover vertical line */}
+        {hoverIdx >= 0 && (
+          <line
+            x1={pts[hoverIdx][0]}
+            y1={PT}
+            x2={pts[hoverIdx][0]}
+            y2={PT + cH}
+            stroke="#c9cccf"
+            strokeWidth="1"
+            strokeDasharray="3 3"
+          />
+        )}
+
+        {/* Data dot — only on hover */}
+        {hoverIdx >= 0 && pts[hoverIdx] && (
+          <circle
+            cx={pts[hoverIdx][0]}
+            cy={pts[hoverIdx][1]}
+            r="4.5"
+            fill="#fff"
+            stroke="#2c6ecb"
+            strokeWidth="2"
+          />
+        )}
+
+        {/* X labels */}
+        {labelIdxs.map((idx) => (
+          <text
+            key={idx}
+            x={pts[idx][0]}
+            y={H - 6}
+            textAnchor="middle"
+            fontSize="10"
+            fill="#8c9196"
+          >
+            {new Date(filled[idx].date + "T00:00:00Z").toLocaleDateString(
+              "en-US",
+              { month: "short", day: "numeric", timeZone: "UTC" }
+            )}
+          </text>
         ))}
-
-        {/* Hover active dot */}
-        {tooltip && (() => {
-          const idx = filled.findIndex((d) => d.date === tooltip.date);
-          const pt = idx >= 0 ? points[idx] : null;
-          if (!pt) return null;
-          return (
-            <circle
-              cx={pt[0]}
-              cy={tooltip.svgY}
-              r="5.5"
-              fill="#6366f1"
-              stroke="#fff"
-              strokeWidth="2"
-            />
-          );
-        })()}
-
-        {/* X-axis labels */}
-        {labelIndices.map((idx) => {
-          const [lx] = points[idx];
-          const d = new Date(filled[idx].date + "T00:00:00Z");
-          const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-          return (
-            <text
-              key={idx}
-              x={lx}
-              y={H - 4}
-              textAnchor="middle"
-              fontSize="10"
-              fill="#9ca3af"
-            >
-              {label}
-            </text>
-          );
-        })}
       </svg>
 
-      {/* Hover tooltip */}
-      {tooltip && (() => {
-        const idx = filled.findIndex((d) => d.date === tooltip.date);
-        const pt = idx >= 0 ? points[idx] : null;
-        if (!pt) return null;
-        const leftPct = (pt[0] / W) * 100;
-        return (
-          <div style={{
-            position: "absolute",
-            top: "8px",
-            left: `${leftPct}%`,
-            transform: leftPct > 70 ? "translateX(-110%)" : "translateX(8px)",
-            background: "rgba(17,24,39,0.92)",
-            backdropFilter: "blur(8px)",
-            color: "#fff",
-            padding: "8px 12px",
-            borderRadius: "8px",
-            fontSize: "12px",
-            fontWeight: 500,
-            pointerEvents: "none",
-            whiteSpace: "nowrap",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-          }}>
-            <div style={{ color: "#d1d5db", marginBottom: "2px" }}>
-              {new Date(tooltip.date + "T00:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}
+      {/* Tooltip */}
+      {hoverIdx >= 0 &&
+        pts[hoverIdx] &&
+        (() => {
+          const leftPct = (pts[hoverIdx][0] / W) * 100;
+          return (
+            <div
+              style={{
+                position: "absolute",
+                top: "8px",
+                left: `${leftPct}%`,
+                transform:
+                  leftPct > 65
+                    ? "translateX(calc(-100% - 8px))"
+                    : "translateX(8px)",
+                background: "#202223",
+                color: "#fff",
+                padding: "8px 12px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                pointerEvents: "none",
+                whiteSpace: "nowrap",
+                zIndex: 10,
+              }}
+            >
+              <div
+                style={{
+                  color: "#adb5bd",
+                  marginBottom: "2px",
+                  fontSize: "11px",
+                }}
+              >
+                {new Date(
+                  filled[hoverIdx].date + "T00:00:00Z"
+                ).toLocaleDateString("en-US", {
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                  timeZone: "UTC",
+                })}
+              </div>
+              <div style={{ fontWeight: 600, fontSize: "14px" }}>
+                {filled[hoverIdx].count} conversation
+                {filled[hoverIdx].count !== 1 ? "s" : ""}
+              </div>
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 700 }}>
-              {tooltip.count} conversation{tooltip.count !== 1 ? "s" : ""}
-            </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
     </div>
   );
 }
@@ -483,13 +489,6 @@ const ROUTE_LABELS: Record<string, string> = {
   support: "Support & policies",
   personalization: "Offers & discounts",
   direct: "General chat",
-};
-
-const ROUTE_COLORS: Record<string, string> = {
-  shopping: "#2563eb",
-  support: "#7c3aed",
-  personalization: "#16a34a",
-  direct: "#6b7280",
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -521,7 +520,10 @@ export default function Index() {
     ? Math.round((stats.conversionsCount / stats.totalConversations) * 100)
     : 0;
   const fmtCurrency = (cents: number) =>
-    new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(cents / 100);
+    new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: currencyCode,
+    }).format(cents / 100);
   const revenue = fmtCurrency(stats.revenueCents);
   const aov = stats.conversionsCount
     ? fmtCurrency(stats.revenueCents / stats.conversionsCount)
@@ -530,11 +532,21 @@ export default function Index() {
     ? Math.round((stats.cartsRecoveredCount / stats.cartsCreatedCount) * 100)
     : 0;
 
-  const usagePercent = usage.limit > 0 ? Math.round((usage.used / usage.limit) * 100) : 0;
+  const usagePercent =
+    usage.limit > 0 ? Math.round((usage.used / usage.limit) * 100) : 0;
   const isAtCapacity = usage.limit > 0 && usage.used >= usage.limit;
-  const isNearCapacity = usage.limit > 0 && usage.used >= usage.limit * 0.8 && !isAtCapacity;
+  const isNearCapacity =
+    usage.limit > 0 &&
+    usage.used >= usage.limit * 0.8 &&
+    !isAtCapacity;
 
   const daysNum = parseInt(days, 10) || 30;
+
+  const usageBorderColor = isAtCapacity
+    ? "#d82c0d"
+    : isNearCapacity
+    ? "#ffc453"
+    : "#6d7175";
 
   return (
     <s-page heading="Dashboard">
@@ -542,7 +554,9 @@ export default function Index() {
       {!hasPlan && (
         <s-banner tone="info">
           {"Your chat widget is inactive. "}
-          <a href="/app/billing" style={{ fontWeight: 600 }}>Choose a plan</a>
+          <a href="/app/billing" style={{ fontWeight: 600 }}>
+            Choose a plan
+          </a>
           {" to activate NeonPing — all plans include a 7-day free trial."}
         </s-banner>
       )}
@@ -567,171 +581,71 @@ export default function Index() {
         </s-banner>
       )}
 
-      {/* ── Overview (hero KPIs) ── */}
-      <s-section heading="Overview">
-        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
-          <HeroMetric
-            label="Revenue attributed"
-            value={revenue}
-            sub={`from ${stats.conversionsCount} orders`}
-            accent="#6366f1"
-          />
-          <HeroMetric
-            label="Conversations"
-            value={stats.totalConversations.toLocaleString()}
-            sub={`last ${days} days`}
-            accent="#8b5cf6"
-          />
-          <HeroMetric
-            label="Conversion rate"
-            value={`${conversionRatePct}%`}
-            sub={`${stats.conversionsCount} of ${stats.totalConversations} converted`}
-            accent="#06b6d4"
-          />
-        </div>
-      </s-section>
-
       {/* ── Needs attention ── */}
       {recentEscalations.length > 0 && (
-        <s-section heading={`Needs attention (${recentEscalations.length})`}>
-          <div style={{ borderRadius: "8px", overflow: "hidden", border: "1px solid #fde68a" }}>
-            {recentEscalations.map((e, idx) => (
+        <s-section
+          heading={`Needs attention (${recentEscalations.length})`}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "1px",
+              background: "#e1e3e5",
+              borderRadius: "8px",
+              overflow: "hidden",
+            }}
+          >
+            {recentEscalations.map((e) => (
               <div
                 key={e.id}
                 style={{
                   display: "flex",
-                  justifyContent: "space-between",
                   alignItems: "center",
+                  justifyContent: "space-between",
                   padding: "12px 16px",
-                  borderBottom: idx < recentEscalations.length - 1 ? "1px solid #fde68a" : "none",
-                  background: idx % 2 === 0 ? "#fffbeb" : "#fff",
-                  borderLeft: "4px solid #d97706",
+                  background: "#fff",
                 }}
               >
                 <div>
-                  <span style={{ fontSize: "13px", fontWeight: 600, color: "#1a1a1a" }}>
-                    Session {e.sessionId.slice(0, 8)}
-                  </span>
-                  <span style={{ fontSize: "12px", color: "#888", marginLeft: "10px" }}>
-                    {e.messageCount} msg{e.messageCount !== 1 ? "s" : ""}
-                  </span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <span style={{ fontSize: "12px", color: "#9ca3af" }}>
-                    {new Date(e.lastMessageAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                  </span>
-                  <a
-                    href={`/app/conversations/${e.id}`}
+                  <div
                     style={{
                       fontSize: "13px",
                       fontWeight: 500,
-                      color: "#1a1a1a",
-                      textDecoration: "none",
-                      padding: "5px 12px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: "6px",
-                      background: "#fff",
-                      whiteSpace: "nowrap",
+                      color: "#202223",
                     }}
                   >
-                    Review
-                  </a>
+                    Session {e.sessionId.slice(0, 8)}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#8c9196" }}>
+                    {e.messageCount} message
+                    {e.messageCount !== 1 ? "s" : ""} ·{" "}
+                    {new Date(e.lastMessageAt).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </s-section>
-      )}
-
-      {/* ── Get started (shown only when no data yet) ── */}
-      {stats.totalConversations === 0 && (
-        <s-section heading="Get started">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
-            {[
-              {
-                step: "1",
-                title: "Install widget",
-                desc: "Enable the NeonPing app embed in your theme editor to show the chat widget on your storefront.",
-                href: `https://admin.shopify.com/store/${shopDomain.replace(".myshopify.com", "")}/themes/current/editor?context=apps`,
-                cta: "Open Theme Editor",
-                accentColor: "#2563eb",
-              },
-              {
-                step: "2",
-                title: "Customize your bot",
-                desc: "Set a greeting message, brand color, and AI tone that matches your store's voice.",
-                href: "/app/settings",
-                cta: "Edit Settings",
-                accentColor: "#7c3aed",
-              },
-              {
-                step: "3",
-                title: "Go live",
-                desc: "Share your store — your first conversation will appear here and start generating insights.",
-                href: null,
-                cta: null,
-                accentColor: "#16a34a",
-              },
-            ].map((item) => (
-              <div
-                key={item.step}
-                style={{
-                  background: "#fafafa",
-                  border: "1px solid #e5e7eb",
-                  borderTop: `3px solid ${item.accentColor}`,
-                  borderRadius: "10px",
-                  padding: "20px",
-                }}
-              >
-                <div
+                <a
+                  href={`/app/conversations/${e.id}`}
                   style={{
-                    width: "30px",
-                    height: "30px",
-                    borderRadius: "50%",
-                    background: item.accentColor,
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
                     fontSize: "13px",
-                    fontWeight: 700,
-                    marginBottom: "12px",
+                    color: "#2c6ecb",
+                    fontWeight: 500,
+                    textDecoration: "none",
                   }}
                 >
-                  {item.step}
-                </div>
-                <div style={{ fontSize: "14px", fontWeight: 600, color: "#111827", marginBottom: "6px" }}>
-                  {item.title}
-                </div>
-                <div style={{ fontSize: "13px", color: "#6b7280", lineHeight: "1.5", marginBottom: item.cta ? "16px" : "0" }}>
-                  {item.desc}
-                </div>
-                {item.cta && item.href && (
-                  <a
-                    href={item.href}
-                    target={item.href.startsWith("http") ? "_blank" : undefined}
-                    rel={item.href.startsWith("http") ? "noreferrer" : undefined}
-                    style={{
-                      display: "inline-block",
-                      padding: "7px 16px",
-                      background: item.accentColor,
-                      color: "#fff",
-                      borderRadius: "6px",
-                      textDecoration: "none",
-                      fontSize: "13px",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {item.cta}
-                  </a>
-                )}
+                  Review
+                </a>
               </div>
             ))}
           </div>
         </s-section>
       )}
 
-      {/* ── Conversations chart ── */}
+      {/* ── Conversations over time ── */}
       <s-section heading="Conversations over time">
         <s-select
           label="Date range"
@@ -743,71 +657,290 @@ export default function Index() {
           }}
         >
           {DAY_OPTIONS.map((opt) => (
-            <s-option key={opt.value} value={opt.value}>{opt.label}</s-option>
+            <s-option key={opt.value} value={opt.value}>
+              {opt.label}
+            </s-option>
           ))}
         </s-select>
-        <LineChart data={dailyData} days={daysNum} />
+        <LineChart data={dailyData} daysNum={daysNum} />
       </s-section>
 
-      {/* ── Performance metrics ── */}
+      {/* ── Performance (8 KPI grid) ── */}
       <s-section heading="Performance">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
-          <Metric label="Resolution rate" value={`${resolutionRatePct}%`} accent="#16a34a" textColor="#15803d" />
-          <Metric label="Avg order value" value={aov} accent="#d97706" textColor="#b45309" />
-          <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} accent="#0891b2" textColor="#0e7490" />
-          <Metric label="Discounts used" value={String(stats.discountsUsedCount)} accent="#7c3aed" textColor="#6d28d9" />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: "12px",
+          }}
+        >
+          <Metric
+            label="Conversations"
+            value={stats.totalConversations.toLocaleString()}
+            sub={`last ${days} days`}
+            borderColor="#2c6ecb"
+          />
+          <Metric
+            label="Revenue attributed"
+            value={revenue}
+            sub={`from ${stats.conversionsCount} orders`}
+            borderColor="#008060"
+          />
+          <Metric
+            label="Conversion rate"
+            value={`${conversionRatePct}%`}
+            sub={`${stats.conversionsCount} of ${stats.totalConversations} converted`}
+            borderColor="#008060"
+          />
+          <Metric
+            label="Avg order value"
+            value={aov}
+            borderColor="#2c6ecb"
+          />
+          <Metric
+            label="Resolution rate"
+            value={`${resolutionRatePct}%`}
+            sub={`${stats.escalatedCount} escalated`}
+            borderColor="#008060"
+          />
+          <Metric
+            label="Cart recovery rate"
+            value={`${cartRecoveryRatePct}%`}
+            sub={`${stats.cartsRecoveredCount} of ${stats.cartsCreatedCount} carts`}
+            borderColor="#008060"
+          />
+          <Metric
+            label="Discounts used"
+            value={String(stats.discountsUsedCount)}
+            borderColor="#2c6ecb"
+          />
           <Metric
             label="Monthly usage"
             value={`${usage.used} / ${usage.limit > 0 ? usage.limit.toLocaleString() : "∞"}`}
-            sub={usage.limit > 0 ? `${usagePercent}% used` : "Unlimited"}
-            accent={usagePercent >= 100 ? "#dc2626" : usagePercent >= 80 ? "#d97706" : "#6366f1"}
-            textColor={usagePercent >= 100 ? "#dc2626" : usagePercent >= 80 ? "#d97706" : "#4f46e5"}
+            sub={
+              usage.limit > 0 ? `${usagePercent}% used` : "Unlimited"
+            }
+            borderColor={usageBorderColor}
           />
         </div>
       </s-section>
 
-      {/* ── What customers ask ── */}
+      {/* ── Get started (shown only when no data yet) ── */}
+      {stats.totalConversations === 0 && (
+        <s-section heading="Get started">
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: "12px",
+            }}
+          >
+            {[
+              {
+                n: "1",
+                title: "Install widget",
+                desc: "Enable the NeonPing app embed in your theme editor to show the chat widget on your storefront.",
+                href: `https://admin.shopify.com/store/${shopDomain.replace(
+                  ".myshopify.com",
+                  ""
+                )}/themes/current/editor?context=apps`,
+                cta: "Open Theme Editor",
+              },
+              {
+                n: "2",
+                title: "Customize your bot",
+                desc: "Set a greeting message, brand color, and AI tone that matches your store's voice.",
+                href: "/app/settings",
+                cta: "Edit Settings",
+              },
+              {
+                n: "3",
+                title: "Go live",
+                desc: "Share your store — your first conversation will appear here and start generating insights.",
+                href: null as string | null,
+                cta: null as string | null,
+              },
+            ].map((step) => (
+              <div
+                key={step.n}
+                style={{
+                  background: "#fff",
+                  border: "1px solid #e1e3e5",
+                  borderRadius: "8px",
+                  padding: "20px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "24px",
+                    height: "24px",
+                    borderRadius: "50%",
+                    background: "#2c6ecb",
+                    color: "#fff",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginBottom: "12px",
+                  }}
+                >
+                  {step.n}
+                </div>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    color: "#202223",
+                    marginBottom: "4px",
+                  }}
+                >
+                  {step.title}
+                </div>
+                <div
+                  style={{
+                    fontSize: "13px",
+                    color: "#6d7175",
+                    lineHeight: "1.5",
+                    marginBottom: step.cta ? "14px" : "0",
+                  }}
+                >
+                  {step.desc}
+                </div>
+                {step.cta && step.href && (
+                  <a
+                    href={step.href}
+                    target={
+                      step.href.startsWith("http") ? "_blank" : undefined
+                    }
+                    rel={
+                      step.href.startsWith("http")
+                        ? "noreferrer"
+                        : undefined
+                    }
+                    style={{
+                      fontSize: "13px",
+                      color: "#2c6ecb",
+                      fontWeight: 500,
+                      textDecoration: "none",
+                    }}
+                  >
+                    {step.cta} →
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </s-section>
+      )}
+
+      {/* ── What customers ask about ── */}
       {(routingData.length > 0 || topIntents.length > 0) && (
         <s-section heading="What customers ask about">
-          <div style={{ display: "grid", gridTemplateColumns: routingData.length > 0 && topIntents.length > 0 ? "1fr 1fr" : "1fr", gap: "24px" }}>
-
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                routingData.length > 0 && topIntents.length > 0
+                  ? "1fr 1fr"
+                  : "1fr",
+              gap: "24px",
+            }}
+          >
             {routingData.length > 0 && (
               <div>
-                <div style={{ fontSize: "11px", color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "14px" }}>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "#6d7175",
+                    fontWeight: 500,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.4px",
+                    marginBottom: "14px",
+                  }}
+                >
                   Conversation types
                 </div>
                 {(() => {
-                  const total = routingData.reduce((s, r) => s + r.count, 0);
+                  const total = routingData.reduce(
+                    (s, r) => s + r.count,
+                    0
+                  );
                   return routingData.map((r) => {
-                    const pct = total > 0 ? Math.round((r.count / total) * 100) : 0;
+                    const pct =
+                      total > 0
+                        ? Math.round((r.count / total) * 100)
+                        : 0;
                     const conv = conversionByRoute[r.route];
-                    const convPct = conv && conv.total > 0 ? Math.round((conv.converted / conv.total) * 100) : null;
-                    const color = ROUTE_COLORS[r.route] ?? "#9ca3af";
+                    const convPct =
+                      conv && conv.total > 0
+                        ? Math.round(
+                            (conv.converted / conv.total) * 100
+                          )
+                        : null;
                     return (
                       <div key={r.route} style={{ marginBottom: "14px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
-                          <span style={{ fontSize: "13px", color: "#374151", fontWeight: 500 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: "5px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "13px",
+                              color: "#202223",
+                              fontWeight: 500,
+                            }}
+                          >
                             {ROUTE_LABELS[r.route] ?? r.route}
                           </span>
-                          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "10px",
+                              alignItems: "center",
+                            }}
+                          >
                             {convPct !== null && (
-                              <span style={{ fontSize: "11px", color: convPct > 0 ? "#16a34a" : "#9ca3af", fontWeight: 600 }}>
+                              <span
+                                style={{
+                                  fontSize: "11px",
+                                  color:
+                                    convPct > 0 ? "#008060" : "#8c9196",
+                                  fontWeight: 600,
+                                }}
+                              >
                                 {convPct}% converted
                               </span>
                             )}
-                            <span style={{ fontSize: "12px", color: "#6b7280", minWidth: "32px", textAlign: "right" }}>
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                color: "#6d7175",
+                                minWidth: "32px",
+                                textAlign: "right",
+                              }}
+                            >
                               {pct}%
                             </span>
                           </div>
                         </div>
-                        <div style={{ height: "6px", background: "#f3f4f6", borderRadius: "3px", overflow: "hidden" }}>
+                        <div
+                          style={{
+                            height: "6px",
+                            background: "#e1e3e5",
+                            borderRadius: "3px",
+                          }}
+                        >
                           <div
                             style={{
                               width: `${pct}%`,
                               height: "100%",
-                              background: color,
+                              background: "#2c6ecb",
                               borderRadius: "3px",
-                              transition: "width 0.3s ease",
                             }}
                           />
                         </div>
@@ -820,28 +953,91 @@ export default function Index() {
 
             {topIntents.length > 0 && (
               <div>
-                <div style={{ fontSize: "11px", color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "14px" }}>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "#6d7175",
+                    fontWeight: 500,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.4px",
+                    marginBottom: "14px",
+                  }}
+                >
                   Top customer intents
                 </div>
                 {topIntents.map((intent, i) => {
                   const maxIntentCount = topIntents[0]?.count ?? 1;
-                  const pct = Math.round((intent.count / maxIntentCount) * 100);
+                  const pct = Math.round(
+                    (intent.count / maxIntentCount) * 100
+                  );
                   return (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-                      <span style={{ width: "18px", fontSize: "11px", color: "#9ca3af", textAlign: "right", flexShrink: 0 }}>
+                    <div
+                      key={i}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        marginBottom: "10px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: "18px",
+                          fontSize: "11px",
+                          color: "#8c9196",
+                          textAlign: "right",
+                          flexShrink: 0,
+                        }}
+                      >
                         {i + 1}
                       </span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "3px" }}>
-                          <span style={{ fontSize: "13px", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "calc(100% - 40px)" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: "3px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "13px",
+                              color: "#202223",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              maxWidth: "calc(100% - 40px)",
+                            }}
+                          >
                             {intent.reason}
                           </span>
-                          <span style={{ fontSize: "11px", color: "#9ca3af", flexShrink: 0, marginLeft: "8px" }}>
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              color: "#8c9196",
+                              flexShrink: 0,
+                              marginLeft: "8px",
+                            }}
+                          >
                             {intent.count}x
                           </span>
                         </div>
-                        <div style={{ height: "4px", background: "#f3f4f6", borderRadius: "2px", overflow: "hidden" }}>
-                          <div style={{ width: `${pct}%`, height: "100%", background: "#7c3aed", borderRadius: "2px" }} />
+                        <div
+                          style={{
+                            height: "4px",
+                            background: "#e1e3e5",
+                            borderRadius: "2px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${pct}%`,
+                              height: "100%",
+                              background: "#2c6ecb",
+                              borderRadius: "2px",
+                            }}
+                          />
                         </div>
                       </div>
                     </div>
@@ -852,7 +1048,6 @@ export default function Index() {
           </div>
         </s-section>
       )}
-
     </s-page>
   );
 }
