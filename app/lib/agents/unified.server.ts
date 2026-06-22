@@ -84,8 +84,11 @@ DISCOUNT RULES:
 - Only offer when customer signals real intent (not casual browsing)
 - Choose code that makes business sense: cart > $80 + strong intent → be generous; cart < $20 → start lowest
 - Never volunteer a code unprompted unless the customer mentions "discount", "promo", "code", "deal", "offer", "save", "voucher", or is abandoning cart
-- When you decide to offer a code, call the offer_discount tool with the chosen code and your message — do NOT just mention the code in free text. The tool call is how you formally offer a discount.
-- After offer_discount returns success, you may confirm naturally in your reply text (e.g. "Here's a code for you!") but do NOT repeat the code string in your reply text — the UI surfaces it from the tool result.`
+- When you decide to offer a code, call the offer_discount tool — do NOT mention codes in free text
+- If offer_discount returns { error: "code_not_applicable" }: the code's conditions weren't met (minimum order or product restriction). Do NOT mention that code to the customer. Try the next available code silently, or if none work, say "I don't have any codes that apply to your current order right now."
+- If offer_discount returns { success: true, auto_applied: true }: the discount is ALREADY on the cart. Say "I've applied X off to your order!" — do not say "here's a code to use". Customer doesn't need to do anything.
+- If offer_discount returns { success: true, auto_applied: false } (no cart yet): say "Here's a code for you!" naturally — customer will use it at checkout.
+- Never repeat the code string in your reply text — the UI shows it from the tool result.`
       : "";
 
   const discountGuidanceLine =
@@ -372,22 +375,49 @@ export async function runUnifiedAgent(opts: {
       }),
       execute: async (input) => {
         toolsCalled.push("offer_discount");
-        // Inline cap check using local counter — catches within-turn double-offers
-        // that a session-level check would miss (session is snapshot, not live)
         if (discountLevel_local >= 3) {
           return { error: "discount_cap_reached", message: "No more discount offers available for this conversation." };
         }
-        // Validate the code is in our available list and not already offered this turn
         const isValid = availableDiscounts.some((d) => d.code === input.code);
         const alreadyOffered = offered_codes_local.includes(input.code);
         if (!isValid || alreadyOffered) {
           return { error: "Code not available or already offered" };
         }
+
+        // When a cart already exists, validate the code actually applies before surfacing it.
+        // This catches minimum-order failures BEFORE the customer gets excited about a code
+        // that can't work on their current cart.
+        if (session.cart_id) {
+          try {
+            const testCart = await updateCart(shopDomain, session.cart_id, {
+              discountCodes: [input.code],
+            });
+            // Shopify Storefront MCP may return snake_case (discount_codes) or camelCase
+            const codes = testCart.discountCodes ?? testCart.discount_codes ?? [];
+            const applicable = codes.length === 0
+              ? true  // MCP didn't return discount_codes at all — assume it applied (fail open)
+              : codes.some((d) => d.code === input.code && d.applicable !== false);
+            if (!applicable) {
+              // Code exists but doesn't apply to this cart (minimum not met, wrong products, etc.)
+              // Mark as offered so we don't retry it, but don't surface it to the customer.
+              offered_codes_local.push(input.code);
+              discountLevel_local += 1;
+              return {
+                error: "code_not_applicable",
+                message: `Code ${input.code} requires conditions the current cart doesn't meet (minimum order or product restriction). Try a different code or tell the customer no applicable codes are available right now.`,
+              };
+            }
+            // Code applied successfully — update cart state so caller gets the discount
+            cart = testCart;
+          } catch {
+            // Network/MCP failure — still surface the code; customer can apply manually
+          }
+        }
+
         discountCode = input.code;
-        // Update local state so within-turn double-offer is blocked
         offered_codes_local.push(input.code);
         discountLevel_local += 1;
-        return { success: true, code: input.code, stance: input.negotiationStance };
+        return { success: true, code: input.code, stance: input.negotiationStance, auto_applied: !!session.cart_id };
       },
     });
   }

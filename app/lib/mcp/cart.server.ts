@@ -41,6 +41,9 @@ export interface Cart {
   total_quantity?: number;
   // Keep continue_url as alias so existing code that references it still works
   continue_url?: string;
+  // Shopify returns discount codes applied to the cart
+  discountCodes?: Array<{ code: string; applicable?: boolean }>;
+  discount_codes?: Array<{ code: string; applicable?: boolean }>;
 }
 
 // ---------------------------------------------------------------------------
