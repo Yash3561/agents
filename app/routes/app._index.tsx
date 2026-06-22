@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { redirect, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -162,48 +163,85 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
-// ─── Metric card ────────────────────────────────────────────────────────────
+// ─── HeroMetric card ──────────────────────────────────────────────────────────
 
-interface MetricProps {
+interface HeroMetricProps {
   label: string;
   value: string;
   sub?: string;
-  accent: string;       // border-top colour
-  dimColor: string;     // background tint
-  textColor: string;    // value text colour
+  accent: string; // CSS color for the 4px top bar
 }
 
-function Metric({ label, value, sub, accent, dimColor, textColor }: MetricProps) {
+function HeroMetric({ label, value, sub, accent }: HeroMetricProps) {
   return (
-    <div
-      style={{
-        background: dimColor,
-        border: "1px solid rgba(0,0,0,0.07)",
-        borderTop: `3px solid ${accent}`,
-        borderRadius: "10px",
-        padding: "18px 20px 16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: "4px",
-        minWidth: 0,
-      }}
-    >
-      <div style={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px" }}>
+    <div style={{
+      flex: "1 1 200px",
+      background: "rgba(255,255,255,0.75)",
+      backdropFilter: "blur(12px)",
+      WebkitBackdropFilter: "blur(12px)",
+      border: "1px solid rgba(255,255,255,0.9)",
+      borderTop: `4px solid ${accent}`,
+      borderRadius: "14px",
+      padding: "24px 28px 20px",
+      boxShadow: "0 4px 24px rgba(99,102,241,0.08), 0 1px 4px rgba(0,0,0,0.04)",
+      display: "flex",
+      flexDirection: "column",
+      gap: "6px",
+      minWidth: 0,
+    }}>
+      <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px" }}>
         {label}
       </div>
-      <div style={{ fontSize: "26px", fontWeight: 700, color: textColor, lineHeight: 1.15, wordBreak: "break-word" }}>
+      <div style={{ fontSize: "38px", fontWeight: 800, color: "#111827", lineHeight: 1.1, wordBreak: "break-word" }}>
         {value}
       </div>
       {sub && (
-        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>
-          {sub}
-        </div>
+        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>{sub}</div>
       )}
     </div>
   );
 }
 
-// ─── Date fill helper ────────────────────────────────────────────────────────
+// ─── Metric card ──────────────────────────────────────────────────────────────
+
+interface MetricProps {
+  label: string;
+  value: string;
+  sub?: string;
+  accent: string;
+  textColor: string;
+}
+
+function Metric({ label, value, sub, accent, textColor }: MetricProps) {
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.7)",
+      backdropFilter: "blur(10px)",
+      WebkitBackdropFilter: "blur(10px)",
+      border: "1px solid rgba(209,213,219,0.5)",
+      borderTop: `3px solid ${accent}`,
+      borderRadius: "12px",
+      padding: "18px 20px 16px",
+      boxShadow: "0 4px 24px rgba(99,102,241,0.06), 0 1px 3px rgba(0,0,0,0.03)",
+      display: "flex",
+      flexDirection: "column",
+      gap: "4px",
+      minWidth: 0,
+    }}>
+      <div style={{ fontSize: "11px", color: "#6b7280", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+        {label}
+      </div>
+      <div style={{ fontSize: "24px", fontWeight: 700, color: textColor, lineHeight: 1.2, wordBreak: "break-word" }}>
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>{sub}</div>
+      )}
+    </div>
+  );
+}
+
+// ─── Date fill helper ─────────────────────────────────────────────────────────
 
 function fillDates(
   data: Array<{ date: string; count: number }>,
@@ -219,119 +257,214 @@ function fillDates(
   return result;
 }
 
-// ─── CSS bar chart ────────────────────────────────────────────────────────────
-// No charting library — recharts uses eval() which Shopify's CSP blocks.
+// ─── Smooth bezier path helper ────────────────────────────────────────────────
 
-function ConversationsChart({
+function smoothPath(points: Array<[number, number]>): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`;
+  let d = `M ${points[0][0]} ${points[0][1]}`;
+  for (let i = 1; i < points.length; i++) {
+    const [x0, y0] = points[i - 1];
+    const [x1, y1] = points[i];
+    const cx = (x0 + x1) / 2;
+    d += ` C ${cx} ${y0} ${cx} ${y1} ${x1} ${y1}`;
+  }
+  return d;
+}
+
+// ─── LineChart ────────────────────────────────────────────────────────────────
+
+function LineChart({
   data,
   days,
 }: {
   data: Array<{ date: string; count: number }>;
-  days: string;
+  days: number;
 }) {
-  const daysNum = parseInt(days, 10) || 30;
-  const filled = fillDates(data, daysNum);
+  const [tooltip, setTooltip] = useState<{ svgX: number; svgY: number; date: string; count: number } | null>(null);
+
+  const filled = fillDates(data, days);
   const maxCount = Math.max(...filled.map((d) => d.count), 1);
-  const allZero = filled.every((d) => d.count === 0);
 
-  // Y-axis guide lines at 25 / 50 / 75 / 100 %
-  const guides = [75, 50, 25];
+  const W = 800;
+  const H = 180;
+  const PAD_LEFT = 8;
+  const PAD_RIGHT = 8;
+  const PAD_TOP = 16;
+  const PAD_BOTTOM = 28;
+  const chartW = W - PAD_LEFT - PAD_RIGHT;
+  const chartH = H - PAD_TOP - PAD_BOTTOM;
 
-  // Show at most 7 x-axis date labels to avoid crowding
-  const labelCount = Math.min(7, filled.length);
-  const labelIndices = new Set(
-    Array.from({ length: labelCount }, (_, i) =>
-      Math.round((i / Math.max(labelCount - 1, 1)) * (filled.length - 1))
-    )
-  );
+  const points: Array<[number, number]> = filled.map((d, i) => [
+    PAD_LEFT + (i / Math.max(filled.length - 1, 1)) * chartW,
+    PAD_TOP + chartH - (d.count / maxCount) * chartH,
+  ]);
 
-  const fmtLabel = (iso: string) => {
-    const d = new Date(iso + "T00:00:00");
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const linePath = smoothPath(points);
+
+  // Closed area path (line + bottom)
+  const areaPath =
+    linePath +
+    ` L ${points[points.length - 1][0]} ${PAD_TOP + chartH}` +
+    ` L ${points[0][0]} ${PAD_TOP + chartH} Z`;
+
+  // X-axis labels: max 7, evenly distributed
+  const labelIndices: number[] = [];
+  const maxLabels = Math.min(7, filled.length);
+  if (filled.length <= maxLabels) {
+    filled.forEach((_, i) => labelIndices.push(i));
+  } else {
+    for (let l = 0; l < maxLabels; l++) {
+      labelIndices.push(Math.round((l / (maxLabels - 1)) * (filled.length - 1)));
+    }
+  }
+
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * W;
+    let nearest = 0;
+    let nearestDist = Infinity;
+    points.forEach(([px], i) => {
+      const dist = Math.abs(px - mx);
+      if (dist < nearestDist) { nearestDist = dist; nearest = i; }
+    });
+    const [sx, sy] = points[nearest];
+    setTooltip({ svgX: sx, svgY: sy, date: filled[nearest].date, count: filled[nearest].count });
   };
 
+  const isEmpty = filled.every((d) => d.count === 0);
+
+  if (isEmpty) {
+    return (
+      <div style={{ height: "180px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: "14px", color: "#9ca3af" }}>
+          No conversations in this period — share your store link to get started.
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      {/* Chart area with guide lines */}
-      <div style={{ position: "relative" }}>
-        {/* Horizontal guide lines */}
-        {!allZero && guides.map((pct) => (
-          <div
-            key={pct}
-            style={{
-              position: "absolute",
-              top: `${100 - pct}%`,
-              left: 0,
-              right: 0,
-              height: "1px",
-              background: "#f0f0f0",
-              pointerEvents: "none",
-            }}
+    <div style={{ position: "relative", marginTop: "16px" }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", height: "200px", overflow: "visible", cursor: "crosshair" }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setTooltip(null)}
+      >
+        <defs>
+          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+
+        {/* Y-axis grid lines */}
+        {[0.25, 0.5, 0.75].map((frac) => (
+          <line
+            key={frac}
+            x1={PAD_LEFT}
+            y1={PAD_TOP + chartH * (1 - frac)}
+            x2={PAD_LEFT + chartW}
+            y2={PAD_TOP + chartH * (1 - frac)}
+            stroke="#e5e7eb"
+            strokeWidth="1"
+            strokeDasharray="4 4"
           />
         ))}
-        {/* Bars */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-end",
-            gap: "2px",
-            height: "168px",
-            padding: "0 4px",
-            borderBottom: "2px solid #e5e7eb",
-          }}
-        >
-          {filled.map((d) => {
-            const heightPct = allZero ? 0 : (d.count / maxCount) * 100;
-            return (
-              <div
-                key={d.date}
-                title={`${fmtLabel(d.date)}: ${d.count} conversation${d.count !== 1 ? "s" : ""}`}
-                style={{
-                  flex: 1,
-                  minWidth: "2px",
-                  height: `${Math.max(heightPct, d.count > 0 ? 3 : 0)}%`,
-                  background: "linear-gradient(to top, #6d28d9, #8b5cf6)",
-                  borderRadius: "3px 3px 0 0",
-                  transition: "opacity 0.15s ease",
-                  cursor: "default",
-                }}
-              />
-            );
-          })}
-        </div>
-      </div>
 
-      {/* X-axis labels */}
-      <div
-        style={{
-          display: "flex",
-          gap: "2px",
-          padding: "5px 4px 0",
-        }}
-      >
-        {filled.map((d, i) => (
-          <div
-            key={d.date}
-            style={{
-              flex: 1,
-              minWidth: "2px",
-              fontSize: "10px",
-              color: "#9ca3af",
-              textAlign: "center",
-              overflow: "hidden",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {labelIndices.has(i) ? fmtLabel(d.date) : ""}
-          </div>
+        {/* Baseline */}
+        <line
+          x1={PAD_LEFT} y1={PAD_TOP + chartH}
+          x2={PAD_LEFT + chartW} y2={PAD_TOP + chartH}
+          stroke="#e5e7eb" strokeWidth="1"
+        />
+
+        {/* Area fill */}
+        <path d={areaPath} fill="url(#areaGrad)" />
+
+        {/* Line */}
+        <path d={linePath} fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+        {/* Data point dots */}
+        {points.map(([px, py], i) => (
+          <circle
+            key={i}
+            cx={px} cy={py} r="3"
+            fill="#fff" stroke="#6366f1" strokeWidth="2"
+            opacity={tooltip && filled[i].date === tooltip.date ? 0 : 0.7}
+          />
         ))}
-      </div>
 
-      {allZero && (
-        <div style={{ textAlign: "center", padding: "12px 0 4px", fontSize: "13px", color: "#9ca3af" }}>
-          No conversations in this period — share your store link to get started.
-        </div>
-      )}
+        {/* Hover active dot */}
+        {tooltip && (() => {
+          const idx = filled.findIndex((d) => d.date === tooltip.date);
+          const pt = idx >= 0 ? points[idx] : null;
+          if (!pt) return null;
+          return (
+            <circle
+              cx={pt[0]}
+              cy={tooltip.svgY}
+              r="5.5"
+              fill="#6366f1"
+              stroke="#fff"
+              strokeWidth="2"
+            />
+          );
+        })()}
+
+        {/* X-axis labels */}
+        {labelIndices.map((idx) => {
+          const [lx] = points[idx];
+          const d = new Date(filled[idx].date + "T00:00:00Z");
+          const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+          return (
+            <text
+              key={idx}
+              x={lx}
+              y={H - 4}
+              textAnchor="middle"
+              fontSize="10"
+              fill="#9ca3af"
+            >
+              {label}
+            </text>
+          );
+        })}
+      </svg>
+
+      {/* Hover tooltip */}
+      {tooltip && (() => {
+        const idx = filled.findIndex((d) => d.date === tooltip.date);
+        const pt = idx >= 0 ? points[idx] : null;
+        if (!pt) return null;
+        const leftPct = (pt[0] / W) * 100;
+        return (
+          <div style={{
+            position: "absolute",
+            top: "8px",
+            left: `${leftPct}%`,
+            transform: leftPct > 70 ? "translateX(-110%)" : "translateX(8px)",
+            background: "rgba(17,24,39,0.92)",
+            backdropFilter: "blur(8px)",
+            color: "#fff",
+            padding: "8px 12px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            fontWeight: 500,
+            pointerEvents: "none",
+            whiteSpace: "nowrap",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+          }}>
+            <div style={{ color: "#d1d5db", marginBottom: "2px" }}>
+              {new Date(tooltip.date + "T00:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}
+            </div>
+            <div style={{ fontSize: "16px", fontWeight: 700 }}>
+              {tooltip.count} conversation{tooltip.count !== 1 ? "s" : ""}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -397,16 +530,11 @@ export default function Index() {
     ? Math.round((stats.cartsRecoveredCount / stats.cartsCreatedCount) * 100)
     : 0;
 
-  const usagePercent = Math.round((usage.used / usage.limit) * 100);
-  const isAtCapacity = usage.used >= usage.limit;
-  const isNearCapacity = usage.used >= usage.limit * 0.8 && !isAtCapacity;
+  const usagePercent = usage.limit > 0 ? Math.round((usage.used / usage.limit) * 100) : 0;
+  const isAtCapacity = usage.limit > 0 && usage.used >= usage.limit;
+  const isNearCapacity = usage.limit > 0 && usage.used >= usage.limit * 0.8 && !isAtCapacity;
 
-  // ── Inline styles ─────────────────────────────────────────────────────────
-  const sectionDivider: React.CSSProperties = {
-    margin: "0 0 16px",
-    borderBottom: "1px solid #f3f4f6",
-    paddingBottom: "12px",
-  };
+  const daysNum = parseInt(days, 10) || 30;
 
   return (
     <s-page heading="Dashboard">
@@ -438,6 +566,30 @@ export default function Index() {
           {"."}
         </s-banner>
       )}
+
+      {/* ── Overview (hero KPIs) ── */}
+      <s-section heading="Overview">
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+          <HeroMetric
+            label="Revenue attributed"
+            value={revenue}
+            sub={`from ${stats.conversionsCount} orders`}
+            accent="#6366f1"
+          />
+          <HeroMetric
+            label="Conversations"
+            value={stats.totalConversations.toLocaleString()}
+            sub={`last ${days} days`}
+            accent="#8b5cf6"
+          />
+          <HeroMetric
+            label="Conversion rate"
+            value={`${conversionRatePct}%`}
+            sub={`${stats.conversionsCount} of ${stats.totalConversations} converted`}
+            accent="#06b6d4"
+          />
+        </div>
+      </s-section>
 
       {/* ── Needs attention ── */}
       {recentEscalations.length > 0 && (
@@ -581,93 +733,35 @@ export default function Index() {
 
       {/* ── Conversations chart ── */}
       <s-section heading="Conversations over time">
-        <div style={{ ...sectionDivider, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: "13px", color: "#6b7280" }}>
-            {stats.totalConversations} total in period
-          </span>
-          <s-select
-            label="Date range"
-            value={days}
-            onChange={(e: Event) => {
-              const next = new URLSearchParams(searchParams);
-              next.set("days", (e.target as HTMLSelectElement).value);
-              setSearchParams(next);
-            }}
-          >
-            {DAY_OPTIONS.map((opt) => (
-              <s-option key={opt.value} value={opt.value}>{opt.label}</s-option>
-            ))}
-          </s-select>
-        </div>
-        <ConversationsChart data={dailyData} days={days} />
+        <s-select
+          label="Date range"
+          value={days}
+          onChange={(e: Event) => {
+            const next = new URLSearchParams(searchParams);
+            next.set("days", (e.target as HTMLSelectElement).value);
+            setSearchParams(next);
+          }}
+        >
+          {DAY_OPTIONS.map((opt) => (
+            <s-option key={opt.value} value={opt.value}>{opt.label}</s-option>
+          ))}
+        </s-select>
+        <LineChart data={dailyData} days={daysNum} />
       </s-section>
 
       {/* ── Performance metrics ── */}
       <s-section heading="Performance">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
-          <Metric
-            label="Conversations"
-            value={stats.totalConversations.toLocaleString()}
-            sub={`in last ${days} days`}
-            accent="#7c3aed"
-            dimColor="#f5f3ff"
-            textColor="#5b21b6"
-          />
-          <Metric
-            label="Resolution rate"
-            value={`${resolutionRatePct}%`}
-            sub={`${escalationRatePct}% escalated`}
-            accent="#16a34a"
-            dimColor="#f0fdf4"
-            textColor="#15803d"
-          />
-          <Metric
-            label="Revenue attributed"
-            value={revenue}
-            sub={`${stats.conversionsCount} orders`}
-            accent="#2563eb"
-            dimColor="#eff6ff"
-            textColor="#1d4ed8"
-          />
-          <Metric
-            label="Conversion rate"
-            value={`${conversionRatePct}%`}
-            sub="chat to purchase"
-            accent="#0891b2"
-            dimColor="#ecfeff"
-            textColor="#0e7490"
-          />
-          <Metric
-            label="Avg order value"
-            value={aov}
-            sub="per converted chat"
-            accent="#d97706"
-            dimColor="#fffbeb"
-            textColor="#b45309"
-          />
-          <Metric
-            label="Cart recovery rate"
-            value={`${cartRecoveryRatePct}%`}
-            sub={`${stats.cartsRecoveredCount} of ${stats.cartsCreatedCount} carts`}
-            accent="#16a34a"
-            dimColor="#f0fdf4"
-            textColor="#15803d"
-          />
-          <Metric
-            label="Discounts used"
-            value={stats.discountsUsedCount.toLocaleString()}
-            sub="via chat conversations"
-            accent="#7c3aed"
-            dimColor="#f5f3ff"
-            textColor="#5b21b6"
-          />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
+          <Metric label="Resolution rate" value={`${resolutionRatePct}%`} accent="#16a34a" textColor="#15803d" />
+          <Metric label="Avg order value" value={aov} accent="#d97706" textColor="#b45309" />
+          <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} accent="#0891b2" textColor="#0e7490" />
+          <Metric label="Discounts used" value={String(stats.discountsUsedCount)} accent="#7c3aed" textColor="#6d28d9" />
           <Metric
             label="Monthly usage"
-            value={`${usage.used.toLocaleString()} / ${usage.limit.toLocaleString()}`}
-            sub={`${usagePercent}% of plan limit`}
-            accent={isAtCapacity ? "#dc2626" : isNearCapacity ? "#d97706" : "#6b7280"}
-            dimColor={isAtCapacity ? "#fef2f2" : isNearCapacity ? "#fffbeb" : "#f9fafb"}
-            textColor={isAtCapacity ? "#b91c1c" : isNearCapacity ? "#b45309" : "#374151"}
+            value={`${usage.used} / ${usage.limit > 0 ? usage.limit.toLocaleString() : "∞"}`}
+            sub={usage.limit > 0 ? `${usagePercent}% used` : "Unlimited"}
+            accent={usagePercent >= 100 ? "#dc2626" : usagePercent >= 80 ? "#d97706" : "#6366f1"}
+            textColor={usagePercent >= 100 ? "#dc2626" : usagePercent >= 80 ? "#d97706" : "#4f46e5"}
           />
         </div>
       </s-section>
