@@ -332,6 +332,12 @@ function buildSseStream(opts: {
         const effectiveCart = result.cart ?? preCartResult.cart;
         const effectiveCheckoutUrl = result.checkout_url ?? preCartResult.checkoutUrl;
 
+        // Compute effective cart value in cents — prefer live cart total, fall back to widget-reported value
+        const liveCartTotal = (effectiveCart as { cost?: { total_amount?: { amount?: string } } } | undefined)?.cost?.total_amount?.amount;
+        const effectiveCartValueCents = liveCartTotal
+          ? Math.round(parseFloat(liveCartTotal) * 100)
+          : cart_total_cents;
+
         // Contextual quick replies based on what happened this turn
         let quickReplies = result.quick_replies; // set when no tool was called (greeting/small talk)
         if (!quickReplies) {
@@ -403,6 +409,7 @@ function buildSseStream(opts: {
           escalateToHuman: result.escalate_to_human,
           agentTrace: result.agent_trace,
           routeReason: result.route_reason,
+          cartValueCents: effectiveCartValueCents,
         }).catch((err) => console.error("[conversation] persist failed:", err));
 
         // 9. Async memory update (fire-and-forget, never blocks response)

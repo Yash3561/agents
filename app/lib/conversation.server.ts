@@ -62,9 +62,11 @@ export async function persistConversationTurn(opts: {
   escalateToHuman?: boolean;
   agentTrace: string[];
   routeReason?: string;
+  cartValueCents?: number;
 }): Promise<void> {
-  const { shopDomain, sessionId, customerId, session, checkoutUrl, discountCode, escalateToHuman, agentTrace, routeReason } = opts;
+  const { shopDomain, sessionId, customerId, session, checkoutUrl, discountCode, escalateToHuman, agentTrace, routeReason, cartValueCents } = opts;
   const checkoutToken = extractCheckoutToken(checkoutUrl);
+  const cartValue = cartValueCents != null ? cartValueCents / 100 : undefined;
 
   await prisma.conversation.upsert({
     where: { shopDomain_sessionId: { shopDomain, sessionId } },
@@ -79,6 +81,7 @@ export async function persistConversationTurn(opts: {
           .find((m) => m.role === "user")?.content?.slice(0, 200) ?? null
       ),
       cartId: session.cart_id,
+      cartValue,
       checkoutToken,
       discountCode,
       escalated: !!escalateToHuman,
@@ -89,6 +92,7 @@ export async function persistConversationTurn(opts: {
       messages: session.conversation_history as unknown as Prisma.InputJsonValue,
       messageCount: session.conversation_history.length,
       cartId: session.cart_id,
+      ...(cartValue != null ? { cartValue } : {}),
       ...(checkoutToken ? { checkoutToken } : {}),
       ...(discountCode ? { discountCode } : {}),
       ...(escalateToHuman ? { escalated: true } : {}),
