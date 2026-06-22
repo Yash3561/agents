@@ -162,30 +162,48 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
-function Metric({ label, value, sub, color, icon }: {
-  label: string; value: string; sub?: string;
-  color: { bg: string; border: string; text: string };
-  icon: string;
-}) {
+// ─── Metric card ────────────────────────────────────────────────────────────
+
+interface MetricProps {
+  label: string;
+  value: string;
+  sub?: string;
+  accent: string;       // border-top colour
+  dimColor: string;     // background tint
+  textColor: string;    // value text colour
+}
+
+function Metric({ label, value, sub, accent, dimColor, textColor }: MetricProps) {
   return (
-    <div style={{
-      background: color.bg,
-      border: `1px solid ${color.border}`,
-      borderRadius: "12px",
-      padding: "16px 20px",
-      display: "flex",
-      flexDirection: "column",
-      gap: "6px",
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: "13px", color: "#6b7280", fontWeight: 500 }}>{label}</span>
-        <span style={{ fontSize: "20px" }}>{icon}</span>
+    <div
+      style={{
+        background: dimColor,
+        border: "1px solid rgba(0,0,0,0.07)",
+        borderTop: `3px solid ${accent}`,
+        borderRadius: "10px",
+        padding: "18px 20px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "4px",
+        minWidth: 0,
+      }}
+    >
+      <div style={{ fontSize: "12px", color: "#6b7280", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px" }}>
+        {label}
       </div>
-      <div style={{ fontSize: "28px", fontWeight: 700, color: color.text, lineHeight: 1.1 }}>{value}</div>
-      {sub && <div style={{ fontSize: "12px", color: "#9ca3af" }}>{sub}</div>}
+      <div style={{ fontSize: "26px", fontWeight: 700, color: textColor, lineHeight: 1.15, wordBreak: "break-word" }}>
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
+
+// ─── Date fill helper ────────────────────────────────────────────────────────
 
 function fillDates(
   data: Array<{ date: string; count: number }>,
@@ -201,6 +219,9 @@ function fillDates(
   return result;
 }
 
+// ─── CSS bar chart ────────────────────────────────────────────────────────────
+// No charting library — recharts uses eval() which Shopify's CSP blocks.
+
 function ConversationsChart({
   data,
   days,
@@ -211,8 +232,12 @@ function ConversationsChart({
   const daysNum = parseInt(days, 10) || 30;
   const filled = fillDates(data, daysNum);
   const maxCount = Math.max(...filled.map((d) => d.count), 1);
+  const allZero = filled.every((d) => d.count === 0);
 
-  // Show at most 7 x-axis labels to avoid crowding
+  // Y-axis guide lines at 25 / 50 / 75 / 100 %
+  const guides = [75, 50, 25];
+
+  // Show at most 7 x-axis date labels to avoid crowding
   const labelCount = Math.min(7, filled.length);
   const labelIndices = new Set(
     Array.from({ length: labelCount }, (_, i) =>
@@ -227,42 +252,61 @@ function ConversationsChart({
 
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      {/* Bars */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          gap: "2px",
-          height: "160px",
-          padding: "0 4px",
-          borderBottom: "1px solid #e1e1e1",
-        }}
-      >
-        {filled.map((d) => {
-          const heightPct = (d.count / maxCount) * 100;
-          return (
-            <div
-              key={d.date}
-              title={`${fmtLabel(d.date)}: ${d.count} conversation${d.count !== 1 ? "s" : ""}`}
-              style={{
-                flex: 1,
-                minWidth: "2px",
-                height: `${Math.max(heightPct, d.count > 0 ? 2 : 0)}%`,
-                background: "#7c3aed",
-                opacity: 0.75,
-                borderRadius: "2px 2px 0 0",
-                transition: "height 0.2s ease",
-              }}
-            />
-          );
-        })}
+      {/* Chart area with guide lines */}
+      <div style={{ position: "relative" }}>
+        {/* Horizontal guide lines */}
+        {!allZero && guides.map((pct) => (
+          <div
+            key={pct}
+            style={{
+              position: "absolute",
+              top: `${100 - pct}%`,
+              left: 0,
+              right: 0,
+              height: "1px",
+              background: "#f0f0f0",
+              pointerEvents: "none",
+            }}
+          />
+        ))}
+        {/* Bars */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: "2px",
+            height: "168px",
+            padding: "0 4px",
+            borderBottom: "2px solid #e5e7eb",
+          }}
+        >
+          {filled.map((d) => {
+            const heightPct = allZero ? 0 : (d.count / maxCount) * 100;
+            return (
+              <div
+                key={d.date}
+                title={`${fmtLabel(d.date)}: ${d.count} conversation${d.count !== 1 ? "s" : ""}`}
+                style={{
+                  flex: 1,
+                  minWidth: "2px",
+                  height: `${Math.max(heightPct, d.count > 0 ? 3 : 0)}%`,
+                  background: "linear-gradient(to top, #6d28d9, #8b5cf6)",
+                  borderRadius: "3px 3px 0 0",
+                  transition: "opacity 0.15s ease",
+                  cursor: "default",
+                }}
+              />
+            );
+          })}
+        </div>
       </div>
+
       {/* X-axis labels */}
       <div
         style={{
           display: "flex",
           gap: "2px",
-          padding: "4px 4px 0",
+          padding: "5px 4px 0",
         }}
       >
         {filled.map((d, i) => (
@@ -272,7 +316,7 @@ function ConversationsChart({
               flex: 1,
               minWidth: "2px",
               fontSize: "10px",
-              color: "#999",
+              color: "#9ca3af",
               textAlign: "center",
               overflow: "hidden",
               whiteSpace: "nowrap",
@@ -282,23 +326,60 @@ function ConversationsChart({
           </div>
         ))}
       </div>
+
+      {allZero && (
+        <div style={{ textAlign: "center", padding: "12px 0 4px", fontSize: "13px", color: "#9ca3af" }}>
+          No conversations in this period — share your store link to get started.
+        </div>
+      )}
     </div>
   );
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const DAY_OPTIONS = [
-  { value: "7", label: "7 days" },
-  { value: "14", label: "14 days" },
-  { value: "30", label: "30 days" },
-  { value: "90", label: "90 days" },
+  { value: "7", label: "Last 7 days" },
+  { value: "14", label: "Last 14 days" },
+  { value: "30", label: "Last 30 days" },
+  { value: "90", label: "Last 90 days" },
 ];
+
+const ROUTE_LABELS: Record<string, string> = {
+  shopping: "Product questions",
+  support: "Support & policies",
+  personalization: "Offers & discounts",
+  direct: "General chat",
+};
+
+const ROUTE_COLORS: Record<string, string> = {
+  shopping: "#2563eb",
+  support: "#7c3aed",
+  personalization: "#16a34a",
+  direct: "#6b7280",
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Index() {
   const loaderData = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const { hasPlan, stats, days, recentEscalations, usage, routingData, dailyData, shopDomain, conversionByRoute, topIntents, currencyCode } = loaderData;
+  const {
+    hasPlan,
+    stats,
+    days,
+    recentEscalations,
+    usage,
+    routingData,
+    dailyData,
+    shopDomain,
+    conversionByRoute,
+    topIntents,
+    currencyCode,
+  } = loaderData;
 
+  // ── Computed metrics ──────────────────────────────────────────────────────
   const escalationRatePct = stats.totalConversations
     ? Math.round((stats.escalatedCount / stats.totalConversations) * 100)
     : 0;
@@ -306,12 +387,12 @@ export default function Index() {
   const conversionRatePct = stats.totalConversations
     ? Math.round((stats.conversionsCount / stats.totalConversations) * 100)
     : 0;
-  const fmt = (cents: number) =>
+  const fmtCurrency = (cents: number) =>
     new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(cents / 100);
-  const revenue = fmt(stats.revenueCents);
+  const revenue = fmtCurrency(stats.revenueCents);
   const aov = stats.conversionsCount
-    ? fmt(stats.revenueCents / stats.conversionsCount)
-    : fmt(0);
+    ? fmtCurrency(stats.revenueCents / stats.conversionsCount)
+    : fmtCurrency(0);
   const cartRecoveryRatePct = stats.cartsCreatedCount
     ? Math.round((stats.cartsRecoveredCount / stats.cartsCreatedCount) * 100)
     : 0;
@@ -320,8 +401,16 @@ export default function Index() {
   const isAtCapacity = usage.used >= usage.limit;
   const isNearCapacity = usage.used >= usage.limit * 0.8 && !isAtCapacity;
 
+  // ── Inline styles ─────────────────────────────────────────────────────────
+  const sectionDivider: React.CSSProperties = {
+    margin: "0 0 16px",
+    borderBottom: "1px solid #f3f4f6",
+    paddingBottom: "12px",
+  };
+
   return (
     <s-page heading="Dashboard">
+      {/* ── Banners ── */}
       {!hasPlan && (
         <s-banner tone="info">
           {"Your chat widget is inactive. "}
@@ -350,86 +439,104 @@ export default function Index() {
         </s-banner>
       )}
 
+      {/* ── Needs attention ── */}
       {recentEscalations.length > 0 && (
         <s-section heading={`Needs attention (${recentEscalations.length})`}>
-          {recentEscalations.map((e) => (
-            <div
-              key={e.id}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "10px 12px",
-                borderBottom: "1px solid #e1e1e1",
-                borderLeft: "4px solid #d97706",
-              }}
-            >
-              <span style={{ fontSize: "13px", color: "#444" }}>
-                Session {e.sessionId.slice(0, 8)}
-              </span>
-              <span style={{ fontSize: "12px", color: "#888" }}>
-                {e.messageCount} msg{e.messageCount !== 1 ? "s" : ""} · {new Date(e.lastMessageAt).toLocaleDateString()}
-              </span>
-              <a
-                href={`/app/conversations/${e.id}`}
+          <div style={{ borderRadius: "8px", overflow: "hidden", border: "1px solid #fde68a" }}>
+            {recentEscalations.map((e, idx) => (
+              <div
+                key={e.id}
                 style={{
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  color: "#1a1a1a",
-                  textDecoration: "none",
-                  padding: "4px 10px",
-                  border: "1px solid #d1d1d1",
-                  borderRadius: "5px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "12px 16px",
+                  borderBottom: idx < recentEscalations.length - 1 ? "1px solid #fde68a" : "none",
+                  background: idx % 2 === 0 ? "#fffbeb" : "#fff",
+                  borderLeft: "4px solid #d97706",
                 }}
               >
-                Review
-              </a>
-            </div>
-          ))}
+                <div>
+                  <span style={{ fontSize: "13px", fontWeight: 600, color: "#1a1a1a" }}>
+                    Session {e.sessionId.slice(0, 8)}
+                  </span>
+                  <span style={{ fontSize: "12px", color: "#888", marginLeft: "10px" }}>
+                    {e.messageCount} msg{e.messageCount !== 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <span style={{ fontSize: "12px", color: "#9ca3af" }}>
+                    {new Date(e.lastMessageAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                  </span>
+                  <a
+                    href={`/app/conversations/${e.id}`}
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "#1a1a1a",
+                      textDecoration: "none",
+                      padding: "5px 12px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: "6px",
+                      background: "#fff",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Review
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
         </s-section>
       )}
 
+      {/* ── Get started (shown only when no data yet) ── */}
       {stats.totalConversations === 0 && (
         <s-section heading="Get started">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px", padding: "8px 0" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
             {[
               {
                 step: "1",
-                title: "Widget installed",
-                desc: "Add the NeonPing app embed in your theme editor.",
+                title: "Install widget",
+                desc: "Enable the NeonPing app embed in your theme editor to show the chat widget on your storefront.",
                 href: `https://admin.shopify.com/store/${shopDomain.replace(".myshopify.com", "")}/themes/current/editor?context=apps`,
                 cta: "Open Theme Editor",
+                accentColor: "#2563eb",
               },
               {
                 step: "2",
                 title: "Customize your bot",
-                desc: "Set greeting, color, and AI personality to match your brand.",
+                desc: "Set a greeting message, brand color, and AI tone that matches your store's voice.",
                 href: "/app/settings",
                 cta: "Edit Settings",
+                accentColor: "#7c3aed",
               },
               {
                 step: "3",
                 title: "Go live",
-                desc: "Share your store link — your first conversation will appear here.",
+                desc: "Share your store — your first conversation will appear here and start generating insights.",
                 href: null,
                 cta: null,
+                accentColor: "#16a34a",
               },
             ].map((item) => (
               <div
                 key={item.step}
                 style={{
                   background: "#fafafa",
-                  border: "1px solid #e1e1e1",
-                  borderRadius: "8px",
+                  border: "1px solid #e5e7eb",
+                  borderTop: `3px solid ${item.accentColor}`,
+                  borderRadius: "10px",
                   padding: "20px",
                 }}
               >
                 <div
                   style={{
-                    width: "28px",
-                    height: "28px",
+                    width: "30px",
+                    height: "30px",
                     borderRadius: "50%",
-                    background: "#1a1a1a",
+                    background: item.accentColor,
                     color: "#fff",
                     display: "flex",
                     alignItems: "center",
@@ -441,8 +548,10 @@ export default function Index() {
                 >
                   {item.step}
                 </div>
-                <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "6px" }}>{item.title}</div>
-                <div style={{ fontSize: "13px", color: "#666", marginBottom: item.cta ? "14px" : "0" }}>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#111827", marginBottom: "6px" }}>
+                  {item.title}
+                </div>
+                <div style={{ fontSize: "13px", color: "#6b7280", lineHeight: "1.5", marginBottom: item.cta ? "16px" : "0" }}>
                   {item.desc}
                 </div>
                 {item.cta && item.href && (
@@ -452,8 +561,8 @@ export default function Index() {
                     rel={item.href.startsWith("http") ? "noreferrer" : undefined}
                     style={{
                       display: "inline-block",
-                      padding: "6px 14px",
-                      background: "#1a1a1a",
+                      padding: "7px 16px",
+                      background: item.accentColor,
                       color: "#fff",
                       borderRadius: "6px",
                       textDecoration: "none",
@@ -470,122 +579,217 @@ export default function Index() {
         </s-section>
       )}
 
+      {/* ── Conversations chart ── */}
       <s-section heading="Conversations over time">
-        <s-select
-          label="Date range"
-          value={days}
-          onChange={(e: Event) => {
-            const next = new URLSearchParams(searchParams);
-            next.set("days", (e.target as HTMLSelectElement).value);
-            setSearchParams(next);
-          }}
-        >
-          {DAY_OPTIONS.map((opt) => (
-            <s-option key={opt.value} value={opt.value}>{opt.label}</s-option>
-          ))}
-        </s-select>
+        <div style={{ ...sectionDivider, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: "13px", color: "#6b7280" }}>
+            {stats.totalConversations} total in period
+          </span>
+          <s-select
+            label="Date range"
+            value={days}
+            onChange={(e: Event) => {
+              const next = new URLSearchParams(searchParams);
+              next.set("days", (e.target as HTMLSelectElement).value);
+              setSearchParams(next);
+            }}
+          >
+            {DAY_OPTIONS.map((opt) => (
+              <s-option key={opt.value} value={opt.value}>{opt.label}</s-option>
+            ))}
+          </s-select>
+        </div>
         <ConversationsChart data={dailyData} days={days} />
       </s-section>
 
+      {/* ── Performance metrics ── */}
       <s-section heading="Performance">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
-          <Metric label="Conversations" value={String(stats.totalConversations)} color={{ bg: "#f5f3ff", border: "#ddd6fe", text: "#6d28d9" }} icon="💬" />
-          <Metric label="Resolution rate" value={`${resolutionRatePct}%`} color={{ bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d" }} icon="📈" />
-          <Metric label="Revenue attributed" value={revenue} color={{ bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" }} icon="💰" />
-          <Metric label="Conversion rate" value={`${conversionRatePct}%`} color={{ bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d" }} icon="📈" />
-          <Metric label="Avg order value" value={aov} color={{ bg: "#fff7ed", border: "#fed7aa", text: "#c2410c" }} icon="🛒" />
-          <Metric label="Cart recovery rate" value={`${cartRecoveryRatePct}%`} color={{ bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d" }} icon="📈" />
-          <Metric label="Discounts used" value={String(stats.discountsUsedCount)} color={{ bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" }} icon="💰" />
+          <Metric
+            label="Conversations"
+            value={stats.totalConversations.toLocaleString()}
+            sub={`in last ${days} days`}
+            accent="#7c3aed"
+            dimColor="#f5f3ff"
+            textColor="#5b21b6"
+          />
+          <Metric
+            label="Resolution rate"
+            value={`${resolutionRatePct}%`}
+            sub={`${escalationRatePct}% escalated`}
+            accent="#16a34a"
+            dimColor="#f0fdf4"
+            textColor="#15803d"
+          />
+          <Metric
+            label="Revenue attributed"
+            value={revenue}
+            sub={`${stats.conversionsCount} orders`}
+            accent="#2563eb"
+            dimColor="#eff6ff"
+            textColor="#1d4ed8"
+          />
+          <Metric
+            label="Conversion rate"
+            value={`${conversionRatePct}%`}
+            sub="chat to purchase"
+            accent="#0891b2"
+            dimColor="#ecfeff"
+            textColor="#0e7490"
+          />
+          <Metric
+            label="Avg order value"
+            value={aov}
+            sub="per converted chat"
+            accent="#d97706"
+            dimColor="#fffbeb"
+            textColor="#b45309"
+          />
+          <Metric
+            label="Cart recovery rate"
+            value={`${cartRecoveryRatePct}%`}
+            sub={`${stats.cartsRecoveredCount} of ${stats.cartsCreatedCount} carts`}
+            accent="#16a34a"
+            dimColor="#f0fdf4"
+            textColor="#15803d"
+          />
+          <Metric
+            label="Discounts used"
+            value={stats.discountsUsedCount.toLocaleString()}
+            sub="via chat conversations"
+            accent="#7c3aed"
+            dimColor="#f5f3ff"
+            textColor="#5b21b6"
+          />
           <Metric
             label="Monthly usage"
-            value={`${usage.used} / ${usage.limit}`}
-            sub={`${usagePercent}% used`}
-            color={{ bg: "#f5f3ff", border: "#ddd6fe", text: "#6d28d9" }}
-            icon="💬"
+            value={`${usage.used.toLocaleString()} / ${usage.limit.toLocaleString()}`}
+            sub={`${usagePercent}% of plan limit`}
+            accent={isAtCapacity ? "#dc2626" : isNearCapacity ? "#d97706" : "#6b7280"}
+            dimColor={isAtCapacity ? "#fef2f2" : isNearCapacity ? "#fffbeb" : "#f9fafb"}
+            textColor={isAtCapacity ? "#b91c1c" : isNearCapacity ? "#b45309" : "#374151"}
           />
         </div>
       </s-section>
 
+      {/* ── What customers ask ── */}
       {(routingData.length > 0 || topIntents.length > 0) && (
         <s-section heading="What customers ask about">
-          {routingData.length > 0 && (
-            <div style={{ marginBottom: topIntents.length > 0 ? "20px" : "0" }}>
-              <div style={{ fontSize: "12px", color: "#888", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "10px" }}>
-                Conversation types
-              </div>
-              {(() => {
-                const ROUTE_LABELS: Record<string, string> = {
-                  shopping: "Product questions",
-                  support: "Support & policies",
-                  personalization: "Offers & discounts",
-                  direct: "General chat",
-                };
-                const routeColor: Record<string, string> = {
-                  shopping: "#2563eb",
-                  support: "#7c3aed",
-                  personalization: "#16a34a",
-                  direct: "#6b7280",
-                };
-                const total = routingData.reduce((s, r) => s + r.count, 0);
-                return routingData.map((r) => {
-                  const conv = conversionByRoute[r.route];
-                  const convPct = conv && conv.total > 0 ? Math.round((conv.converted / conv.total) * 100) : null;
-                  return (
-                    <div key={r.route} style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
-                      <span style={{ width: "160px", fontSize: "13px", color: "#444" }}>
-                        {ROUTE_LABELS[r.route] ?? r.route}
-                      </span>
-                      <div style={{ flex: 1, background: "#f0f0f0", borderRadius: "4px", height: "6px" }}>
-                        <div style={{ width: `${Math.round((r.count / total) * 100)}%`, background: routeColor[r.route] ?? "#d97706", height: "6px", borderRadius: "4px" }} />
+          <div style={{ display: "grid", gridTemplateColumns: routingData.length > 0 && topIntents.length > 0 ? "1fr 1fr" : "1fr", gap: "24px" }}>
+
+            {routingData.length > 0 && (
+              <div>
+                <div style={{ fontSize: "11px", color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "14px" }}>
+                  Conversation types
+                </div>
+                {(() => {
+                  const total = routingData.reduce((s, r) => s + r.count, 0);
+                  return routingData.map((r) => {
+                    const pct = total > 0 ? Math.round((r.count / total) * 100) : 0;
+                    const conv = conversionByRoute[r.route];
+                    const convPct = conv && conv.total > 0 ? Math.round((conv.converted / conv.total) * 100) : null;
+                    const color = ROUTE_COLORS[r.route] ?? "#9ca3af";
+                    return (
+                      <div key={r.route} style={{ marginBottom: "14px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
+                          <span style={{ fontSize: "13px", color: "#374151", fontWeight: 500 }}>
+                            {ROUTE_LABELS[r.route] ?? r.route}
+                          </span>
+                          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                            {convPct !== null && (
+                              <span style={{ fontSize: "11px", color: convPct > 0 ? "#16a34a" : "#9ca3af", fontWeight: 600 }}>
+                                {convPct}% converted
+                              </span>
+                            )}
+                            <span style={{ fontSize: "12px", color: "#6b7280", minWidth: "32px", textAlign: "right" }}>
+                              {pct}%
+                            </span>
+                          </div>
+                        </div>
+                        <div style={{ height: "6px", background: "#f3f4f6", borderRadius: "3px", overflow: "hidden" }}>
+                          <div
+                            style={{
+                              width: `${pct}%`,
+                              height: "100%",
+                              background: color,
+                              borderRadius: "3px",
+                              transition: "width 0.3s ease",
+                            }}
+                          />
+                        </div>
                       </div>
-                      <span style={{ width: "32px", textAlign: "right", fontSize: "12px", color: "#888" }}>
-                        {Math.round((r.count / total) * 100)}%
+                    );
+                  });
+                })()}
+              </div>
+            )}
+
+            {topIntents.length > 0 && (
+              <div>
+                <div style={{ fontSize: "11px", color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: "14px" }}>
+                  Top customer intents
+                </div>
+                {topIntents.map((intent, i) => {
+                  const maxIntentCount = topIntents[0]?.count ?? 1;
+                  const pct = Math.round((intent.count / maxIntentCount) * 100);
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
+                      <span style={{ width: "18px", fontSize: "11px", color: "#9ca3af", textAlign: "right", flexShrink: 0 }}>
+                        {i + 1}
                       </span>
-                      {convPct !== null && (
-                        <span style={{ width: "80px", fontSize: "11px", color: convPct > 0 ? "#2e7d32" : "#aaa" }}>
-                          {convPct > 0 ? `${convPct}% converted` : "0% converted"}
-                        </span>
-                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "3px" }}>
+                          <span style={{ fontSize: "13px", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "calc(100% - 40px)" }}>
+                            {intent.reason}
+                          </span>
+                          <span style={{ fontSize: "11px", color: "#9ca3af", flexShrink: 0, marginLeft: "8px" }}>
+                            {intent.count}x
+                          </span>
+                        </div>
+                        <div style={{ height: "4px", background: "#f3f4f6", borderRadius: "2px", overflow: "hidden" }}>
+                          <div style={{ width: `${pct}%`, height: "100%", background: "#7c3aed", borderRadius: "2px" }} />
+                        </div>
+                      </div>
                     </div>
                   );
-                });
-              })()}
-            </div>
-          )}
-
-          {topIntents.length > 0 && (
-            <div>
-              <div style={{ fontSize: "12px", color: "#888", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "10px" }}>
-                Top customer intents
+                })}
               </div>
-              {topIntents.map((intent, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
-                  <span style={{ width: "20px", fontSize: "12px", color: "#aaa", textAlign: "right" }}>{i + 1}</span>
-                  <span style={{ flex: 1, fontSize: "13px", color: "#333" }}>{intent.reason}</span>
-                  <span style={{ fontSize: "12px", color: "#888", background: "#f5f5f5", borderRadius: "4px", padding: "2px 8px" }}>
-                    {intent.count}×
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+            )}
+          </div>
         </s-section>
       )}
 
+      {/* ── Quick actions ── */}
       <s-section heading="Quick actions">
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-          <a href="/app/conversations" style={{ flex: "1 1 160px", textDecoration: "none", border: "1px solid #e5e7eb", borderTop: "3px solid #2563eb", borderRadius: "8px", padding: "16px", background: "#fff", display: "block", color: "#1a1a1a", fontWeight: 500, fontSize: "14px" }}>
-            View conversations
-          </a>
-          <a href="/app/settings" style={{ flex: "1 1 160px", textDecoration: "none", border: "1px solid #e5e7eb", borderTop: "3px solid #7c3aed", borderRadius: "8px", padding: "16px", background: "#fff", display: "block", color: "#1a1a1a", fontWeight: 500, fontSize: "14px" }}>
-            Widget settings
-          </a>
-          <a href="/app/ai-config" style={{ flex: "1 1 160px", textDecoration: "none", border: "1px solid #e5e7eb", borderTop: "3px solid #7c3aed", borderRadius: "8px", padding: "16px", background: "#fff", display: "block", color: "#1a1a1a", fontWeight: 500, fontSize: "14px" }}>
-            Knowledge base
-          </a>
-          <a href="/app/billing" style={{ flex: "1 1 160px", textDecoration: "none", border: "1px solid #e5e7eb", borderTop: "3px solid #16a34a", borderRadius: "8px", padding: "16px", background: "#fff", display: "block", color: "#1a1a1a", fontWeight: 500, fontSize: "14px" }}>
-            Billing
-          </a>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
+          {[
+            { href: "/app/conversations", label: "View conversations", desc: "Browse chat history", accent: "#2563eb" },
+            { href: "/app/settings", label: "Widget settings", desc: "Greeting, color, position", accent: "#7c3aed" },
+            { href: "/app/ai-config", label: "Knowledge base", desc: "FAQs and AI personality", accent: "#0891b2" },
+            { href: "/app/billing", label: "Billing & plan", desc: "Usage, limits, upgrade", accent: "#16a34a" },
+          ].map((action) => (
+            <a
+              key={action.href}
+              href={action.href}
+              style={{
+                textDecoration: "none",
+                display: "block",
+                padding: "18px 20px",
+                background: "#fff",
+                border: "1px solid #e5e7eb",
+                borderTop: `3px solid ${action.accent}`,
+                borderRadius: "10px",
+                transition: "box-shadow 0.15s ease",
+              }}
+            >
+              <div style={{ fontSize: "14px", fontWeight: 600, color: "#111827", marginBottom: "4px" }}>
+                {action.label}
+              </div>
+              <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                {action.desc}
+              </div>
+            </a>
+          ))}
         </div>
       </s-section>
     </s-page>
