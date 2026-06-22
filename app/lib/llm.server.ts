@@ -11,8 +11,7 @@
  * swap createOpenAICompatible for createAzure — zero changes in agents/routes.
  */
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { generateObject, generateText, streamText, stepCountIs } from "ai";
-import { z } from "zod";
+import { generateText, streamText, stepCountIs } from "ai";
 
 // ---------------------------------------------------------------------------
 // Provider — Azure AI Foundry /openai/v1 endpoint
@@ -34,27 +33,6 @@ export const deployments = {
   shopping: () => foundry(SPECIALIST_MODEL),
   summary:  () => foundry(SPECIALIST_MODEL),
 } as const;
-
-// ---------------------------------------------------------------------------
-// Structured output — Orchestrator routing decision
-// ---------------------------------------------------------------------------
-
-export async function generateStructured<SCHEMA extends z.ZodTypeAny>(opts: {
-  deployment: ReturnType<(typeof deployments)[keyof typeof deployments]>;
-  system: string;
-  prompt: string;
-  schema: SCHEMA;
-  maxOutputTokens?: number;
-}): Promise<z.infer<SCHEMA>> {
-  const result = await generateObject({
-    model: opts.deployment,
-    system: opts.system,
-    prompt: opts.prompt,
-    schema: opts.schema,
-    maxOutputTokens: opts.maxOutputTokens ?? 200,
-  });
-  return result.object as z.infer<SCHEMA>;
-}
 
 // ---------------------------------------------------------------------------
 // Tool-calling stream — Shopping / Support agents

@@ -89,7 +89,9 @@ DISCOUNT RULES:
 - If offer_discount returns { success: true, auto_applied: true }: the discount is ALREADY on the cart. Say "I've applied X off to your order!" — do not say "here's a code to use". Customer doesn't need to do anything.
 - If offer_discount returns { success: true, auto_applied: false } (no cart yet): say "Here's a code for you!" naturally — customer will use it at checkout.
 - Never repeat the code string in your reply text — the UI shows it from the tool result.`
-      : "";
+      : merchant.personalizationEnabled
+        ? `\n## DISCOUNTS\nNo promotional codes are active right now. If the customer asks about discounts, deals, or promo codes, say: "We don't have any promotional codes running at the moment — but I can help you find the perfect product!"`
+        : "";
 
   const discountGuidanceLine =
     merchant.personalizationEnabled && freshCodes.length > 0
@@ -491,7 +493,7 @@ export async function runUnifiedAgent(opts: {
   }
 
   // Merchant-configured quick replies for low-confidence / direct responses
-  const DEFAULT_QUICK_REPLIES = ["Browse products", "Check order status", "Return policy"];
+  const DEFAULT_QUICK_REPLIES = ["What do you sell?", "Track my order", "Return policy"];
   const merchantQuickReplies =
     merchant.quickReplies && merchant.quickReplies.length > 0
       ? merchant.quickReplies
