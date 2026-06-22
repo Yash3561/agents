@@ -15,6 +15,11 @@ export const PLAN_LIMITS: Record<string, number> = {
 };
 
 const usageKey = (shopDomain: string) => `usage:${shopDomain}`;
+// Tracks whether a given session has already been counted toward the plan limit.
+// TTL of 7 days covers even the longest multi-day shopping sessions.
+const sessionBilledKey = (shopDomain: string, sessionId: string) =>
+  `session_billed:${shopDomain}:${sessionId}`;
+const SESSION_BILLED_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
 const PRISMA_SYNC_INTERVAL = 10;
 
 export interface UsageCheck {
@@ -29,15 +34,19 @@ function is30DayCycleComplete(resetAt: Date, now: Date): boolean {
 
 /**
  * Checks the shop's conversation usage against its plan limit, and — if
- * allowed — increments the counter for this turn. Redis is the fast path
- * (avoids a Prisma write on every single chat message); the durable count
- * in Postgres is synced every PRISMA_SYNC_INTERVAL increments, and is the
- * source of truth Redis re-seeds from after a cache miss/restart.
+ * allowed and this is a NEW session — increments the counter once per
+ * conversation (not once per message).
  *
- * Fails open: if Redis is unavailable, falls back to a direct Prisma
- * increment so a Redis outage never blocks chat.
+ * sessionId dedup: a Redis key `session_billed:<shop>:<sessionId>` is set
+ * with a 7-day TTL the first time a session is counted. Subsequent messages
+ * in the same session skip the increment entirely. This ensures "500
+ * conversations/mo" means 500 distinct chat sessions, not 500 messages.
+ *
+ * Fails open: if Redis is unavailable, falls back to Prisma-only path which
+ * cannot deduplicate by session (counts per message) — acceptable degraded
+ * behavior during a Redis outage.
  */
-export async function checkAndIncrementUsage(shopDomain: string): Promise<UsageCheck> {
+export async function checkAndIncrementUsage(shopDomain: string, sessionId?: string): Promise<UsageCheck> {
   const merchant = await prisma.merchant.findUnique({ where: { shopDomain } });
   if (!merchant) {
     return { allowed: false, used: 0, limit: 0 };
@@ -57,9 +66,24 @@ export async function checkAndIncrementUsage(shopDomain: string): Promise<UsageC
 
   const key = usageKey(shopDomain);
   try {
-    // The live count must come from Redis, not the Prisma snapshot — Prisma
-    // only syncs every PRISMA_SYNC_INTERVAL increments, so checking against
-    // it would let a shop run up to that many requests past its real limit.
+    // Check if this session has already been counted toward the plan limit.
+    // If yes, allow the message through without incrementing.
+    if (sessionId) {
+      const billedKey = sessionBilledKey(shopDomain, sessionId);
+      const alreadyBilled = await redis.exists(billedKey);
+      if (alreadyBilled) {
+        // Session already counted — just return current usage without incrementing.
+        const exists = await redis.exists(key);
+        if (!exists) await redis.set(key, String(durableCount));
+        const liveCount = parseInt((await redis.get(key)) ?? String(durableCount), 10);
+        if (liveCount >= limit) {
+          return { allowed: false, used: liveCount, limit };
+        }
+        return { allowed: true, used: liveCount, limit };
+      }
+    }
+
+    // New session (or no sessionId) — check limit and increment.
     const exists = await redis.exists(key);
     if (!exists) await redis.set(key, String(durableCount));
     const liveCount = parseInt((await redis.get(key)) ?? String(durableCount), 10);
@@ -69,6 +93,12 @@ export async function checkAndIncrementUsage(shopDomain: string): Promise<UsageC
     }
 
     const newCount = await redis.incr(key);
+
+    // Mark this session as billed so subsequent messages don't increment.
+    if (sessionId) {
+      await redis.setex(sessionBilledKey(shopDomain, sessionId), SESSION_BILLED_TTL, "1").catch(() => null);
+    }
+
     if (newCount % PRISMA_SYNC_INTERVAL === 0) {
       await prisma.merchant
         .update({ where: { shopDomain }, data: { conversationCount: newCount } })
@@ -76,9 +106,8 @@ export async function checkAndIncrementUsage(shopDomain: string): Promise<UsageC
     }
     return { allowed: true, used: newCount, limit };
   } catch {
-    // Redis fully unavailable — fall back to the durable Prisma count for
-    // both the check and the increment, so a Redis outage never blocks chat
-    // but also never silently skips enforcement.
+    // Redis fully unavailable — fall back to Prisma. Cannot deduplicate by
+    // session without Redis, so this counts per message during an outage.
     if (durableCount >= limit) {
       return { allowed: false, used: durableCount, limit };
     }

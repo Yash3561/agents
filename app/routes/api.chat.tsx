@@ -121,8 +121,10 @@ export async function action({ request }: ActionFunctionArgs) {
     create: { shopDomain: shop },
   });
 
-  // Usage limit check — blocks before any LLM/MCP work if the shop is over its plan limit
-  const usage = await checkAndIncrementUsage(shop);
+  // Usage limit check — increments once per conversation session, not once per message.
+  // session_id dedup in billing.server.ts ensures "500 conversations/mo" means
+  // 500 distinct chat sessions, not 500 individual messages.
+  const usage = await checkAndIncrementUsage(shop, session_id);
   if (!usage.allowed) {
     const noPlan = usage.limit === 0;
     return new Response(
