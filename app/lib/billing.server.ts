@@ -23,11 +23,8 @@ export interface UsageCheck {
   limit: number;
 }
 
-function isNewBillingMonth(resetAt: Date, now: Date): boolean {
-  return (
-    now.getUTCFullYear() !== resetAt.getUTCFullYear() ||
-    now.getUTCMonth() !== resetAt.getUTCMonth()
-  );
+function is30DayCycleComplete(resetAt: Date, now: Date): boolean {
+  return now.getTime() - resetAt.getTime() >= 30 * 24 * 60 * 60 * 1000;
 }
 
 /**
@@ -50,7 +47,7 @@ export async function checkAndIncrementUsage(shopDomain: string): Promise<UsageC
   const now = new Date();
   let durableCount = merchant.conversationCount;
 
-  if (isNewBillingMonth(merchant.conversationResetAt, now)) {
+  if (is30DayCycleComplete(merchant.conversationResetAt, now)) {
     durableCount = 0;
     await prisma.merchant
       .update({ where: { shopDomain }, data: { conversationCount: 0, conversationResetAt: now } })

@@ -76,15 +76,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     select: { conversationResetAt: true },
   });
   const lastReset = merchant?.conversationResetAt ?? new Date();
-  // Next reset = 1st of the UTC month AFTER the last reset month
-  const nextReset = new Date(Date.UTC(
-    lastReset.getUTCMonth() === 11 ? lastReset.getUTCFullYear() + 1 : lastReset.getUTCFullYear(),
-    lastReset.getUTCMonth() === 11 ? 0 : lastReset.getUTCMonth() + 1,
-    1,
-  ));
+  // Next reset = exactly 30 days after last reset (matches EVERY_30_DAYS Shopify billing cycle).
+  // conversationResetAt is anchored to subscription activatedOn via the subscriptions webhook.
+  const nextReset = new Date(lastReset.getTime() + 30 * 24 * 60 * 60 * 1000);
   const now = new Date();
   const daysUntilReset = Math.ceil((nextReset.getTime() - now.getTime()) / 86400000);
-  const resetAtStr = nextReset.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+  const resetAtStr = nextReset.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
   return { usage, activeSubscription, resetAtStr, daysUntilReset };
 }

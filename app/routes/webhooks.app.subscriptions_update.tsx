@@ -76,10 +76,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       plan = "free";
     }
 
-    // Update the merchant's plan
+    // Update the merchant's plan.
+    // When a subscription becomes ACTIVE, anchor conversationResetAt to the
+    // Shopify activatedOn date so the 30-day usage cycle starts from payment,
+    // not from an arbitrary calendar boundary.
+    const updateData: Parameters<typeof db.merchant.update>[0]["data"] = { plan };
+    if (subscription.status === "ACTIVE" && subscription.activatedOn) {
+      updateData.conversationResetAt = new Date(subscription.activatedOn);
+    }
     await db.merchant.update({
       where: { shopDomain: shop },
-      data: { plan },
+      data: updateData,
     });
 
     console.log(`[billing] Updated merchant ${shop} to plan: ${plan}`);
