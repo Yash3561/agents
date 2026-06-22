@@ -1,13 +1,12 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "632dc62c255a91ee1508205a2b4b28a6"
+name = "NeonPing"
 application_url = "https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io"
 embedded = true
-name = "NeonPing"
 
-[access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_customers,write_customers,read_orders,read_discounts"
+[build]
+automatically_update_urls_on_dev = true
 
 [webhooks]
 api_version = "2026-07"
@@ -15,18 +14,6 @@ api_version = "2026-07"
   [[webhooks.subscriptions]]
   uri = "/webhooks/app/uninstalled"
   topics = [ "app/uninstalled" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/app/scopes_update"
-  topics = [ "app/scopes_update" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/orders/paid"
-  topics = [ "orders/paid" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/app/subscriptions_update"
-  topics = [ "app_subscriptions/update" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/customers/data_request"
@@ -40,8 +27,23 @@ api_version = "2026-07"
   uri = "/webhooks/shop/redact"
   compliance_topics = [ "shop/redact" ]
 
-[auth]
-redirect_urls = [ "https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io/auth/callback" ]
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/subscriptions_update"
+  topics = [ "app_subscriptions/update" ]
 
-[build]
-automatically_update_urls_on_dev = true
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/orders/paid"
+  topics = [ "orders/paid" ]
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers,read_discounts,read_orders,write_customers"
+
+[auth]
+redirect_urls = [
+  "https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io/auth/callback"
+]

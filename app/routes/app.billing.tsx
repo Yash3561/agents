@@ -87,10 +87,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const config = PLAN_CONFIG[plan as PlanKey];
   const isTest = process.env.BILLING_TEST_MODE === "true";
-  // Return to the Shopify admin embedded URL so the merchant lands back in the
-  // app fully authenticated — no domain prompt, no re-login required.
+  // Return to the billing page inside the embedded app so the merchant sees
+  // their updated plan immediately. Uses client_id as the app identifier —
+  // Shopify admin accepts both client_id and handle in this position.
   const shopHandle = session.shop.replace(".myshopify.com", "");
-  const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}`;
+  const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}/app/billing`;
 
   try {
     const response = await admin.graphql(
