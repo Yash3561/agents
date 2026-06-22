@@ -72,6 +72,7 @@ export async function getCustomerOrders(
 /**
  * Get account details including tags (used for VIP detection).
  * Requires a valid customer OAuth access token.
+ * Reserved for future VIP detection / account profile features — not yet wired into the unified agent.
  */
 export async function getAccountDetails(
   shopDomain: string,

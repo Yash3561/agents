@@ -27,17 +27,12 @@ const foundry = createOpenAICompatible({
   supportsStructuredOutputs: true,
 });
 
-// All 5 roles use gpt-4o-mini — differentiated by system prompt, not model.
-// Upgrade orchestrator to gpt-4o when routing quality issues are observed.
-const ORCHESTRATOR_MODEL = process.env.AZURE_ORCHESTRATOR_MODEL ?? "gpt-4o-mini";
-const SPECIALIST_MODEL   = process.env.AZURE_SPECIALIST_MODEL   ?? "gpt-4o-mini";
+// All unified agent calls use gpt-4o-mini — differentiated by system prompt, not model.
+const SPECIALIST_MODEL = process.env.AZURE_SPECIALIST_MODEL ?? "gpt-4o-mini";
 
 export const deployments = {
-  orchestrator: () => foundry(ORCHESTRATOR_MODEL),
-  shopping:     () => foundry(SPECIALIST_MODEL),
-  support:      () => foundry(SPECIALIST_MODEL),
-  personalize:  () => foundry(SPECIALIST_MODEL),
-  summary:      () => foundry(SPECIALIST_MODEL),
+  shopping: () => foundry(SPECIALIST_MODEL),
+  summary:  () => foundry(SPECIALIST_MODEL),
 } as const;
 
 // ---------------------------------------------------------------------------

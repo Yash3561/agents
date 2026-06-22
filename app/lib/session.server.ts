@@ -22,6 +22,7 @@ export interface DiscountNegotiationState {
 export interface ConversationSession {
   conversation_history: Message[];
   cart_id?: string;
+  /** set when cart converts to checkout — used by memory.server.ts to clear abandoned_cart signal */
   checkout_id?: string;
   checkout_token?: string;    // real Shopify cart/checkout token (parsed from checkout_url), used to match orders/paid webhooks
   discount_negotiation: DiscountNegotiationState;

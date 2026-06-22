@@ -219,7 +219,7 @@ function buildSseStream(opts: {
       };
 
       try {
-        // 1. Load session (resetTurn resets per-turn hop counters — kept for session shape compat)
+        // 1. Load session
         const session = await resetTurn(shop, session_id);
 
         // 1b. Pre-handle cart action deterministically — no LLM parsing of GIDs needed
@@ -282,7 +282,8 @@ function buildSseStream(opts: {
         });
 
         // 5. Stream the text response as deltas (word-level for widget UX)
-        const words = result.text.split(" ");
+        const replyText = result.text?.trim() || "I'm not sure how to help with that. Could you rephrase?";
+        const words = replyText.split(" ");
         for (let i = 0; i < words.length; i++) {
           const chunk = i === 0 ? words[i] : ` ${words[i]}`;
           send("delta", JSON.stringify({ text: chunk }));
@@ -301,13 +302,14 @@ function buildSseStream(opts: {
         if (result.quick_replies?.length) meta.quick_replies = result.quick_replies;
         if (result.escalate_to_human) meta.escalate_to_human = true;
         meta.agent_trace = result.agent_trace;
+        if (result.last_search_query) meta.last_search_query = result.last_search_query;
 
         send("meta", JSON.stringify(meta));
 
         // 7. Persist assistant reply + updated session
         await appendMessage(shop, session_id, {
           role: "assistant",
-          content: result.text,
+          content: replyText,
           timestamp: Date.now(),
         });
 
@@ -319,6 +321,9 @@ function buildSseStream(opts: {
         }
         if (effectiveCheckoutUrl && !result.escalate_to_human) {
           updatedSession.checkout_token = extractCheckoutToken(effectiveCheckoutUrl);
+          // Also set checkout_id so memory.server.ts can detect cart→checkout conversion
+          // and clear the abandoned_cart signal. It checks for presence, not a specific format.
+          updatedSession.checkout_id = effectiveCheckoutUrl;
         }
         if (result.discount_code) {
           const neg = updatedSession.discount_negotiation;

@@ -25,7 +25,7 @@ import type { ConversationSession } from "~/lib/session.server";
 import type { Merchant } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
-// Output type (same shape as OutboundMessage in orchestrator.server.ts)
+// Output type (same shape as the prior OutboundMessage type (orchestrator removed))
 // ---------------------------------------------------------------------------
 
 export interface UnifiedAgentOutput {
@@ -88,6 +88,11 @@ DISCOUNT RULES:
 - After offer_discount returns success, you may confirm naturally in your reply text (e.g. "Here's a code for you!") but do NOT repeat the code string in your reply text — the UI surfaces it from the tool result.`
       : "";
 
+  const discountGuidanceLine =
+    merchant.personalizationEnabled && freshCodes.length > 0
+      ? `\n- Discount/personalization: offer_discount (call this tool — do NOT mention codes in free text)`
+      : "";
+
   return `${shoppingPart}
 
 ---
@@ -102,7 +107,7 @@ You handle shopping, support, AND personalization yourself — pick the right to
 - Shopping: search_catalog, get_product, lookup_catalog, create_cart, get_cart, update_cart, get_checkout_url
 - Support: search_policies_and_faqs, get_order, get_customer_orders (READ-ONLY — never modify orders)
 - Greetings/small talk/off-topic: respond directly without calling any tool
-- If intent is unclear (confidence < 0.6): ask the customer to rephrase; offer quick options
+- If intent is unclear (confidence < 0.6): ask the customer to rephrase; offer quick options${discountGuidanceLine}
 ${discountSection}`;
 }
 
