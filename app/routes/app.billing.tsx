@@ -87,11 +87,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const config = PLAN_CONFIG[plan as PlanKey];
   const isTest = process.env.BILLING_TEST_MODE === "true";
-  // Return to the billing page inside the embedded app so the merchant sees
-  // their updated plan immediately. Uses client_id as the app identifier —
-  // Shopify admin accepts both client_id and handle in this position.
+  // Return to the app ROOT only — not a sub-path. Shopify stores this URL as
+  // the "Manage" link in its billing settings. Sub-paths like /app/billing cause
+  // a Shopify admin server-side 404 because embedded app deep links only work
+  // client-side via App Bridge. Merchant navigates to Billing via the nav after landing.
   const shopHandle = session.shop.replace(".myshopify.com", "");
-  const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}/app/billing`;
+  const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}`;
 
   try {
     const response = await admin.graphql(
