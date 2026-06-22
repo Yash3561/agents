@@ -26,10 +26,25 @@ interface ChatMessage {
   timestamp?: string;
 }
 
+const TOOL_LABELS: Record<string, string | null> = {
+  search_catalog: "🔍 Searched product catalog",
+  lookup_catalog: "🔍 Looked up product details",
+  get_product: "🔍 Fetched product info",
+  create_cart: "🛒 Created cart",
+  update_cart: "🛒 Updated cart",
+  get_cart: "🛒 Checked cart contents",
+  get_checkout_url: "✓ Generated checkout link",
+  offer_discount: "🏷 Offered discount code",
+  search_policies_and_faqs: "📋 Checked store policies",
+  get_order: "📦 Looked up order",
+  get_customer_orders: "📦 Fetched order history",
+  unified: null, // internal routing — skip
+};
+
 export default function ConversationDetail() {
   const { conversation } = useLoaderData<typeof loader>();
 
-  const trace = Array.isArray(conversation.agentTrace)
+  const agentTraceArr = Array.isArray(conversation.agentTrace)
     ? (conversation.agentTrace as string[])
     : [];
 
@@ -39,93 +54,199 @@ export default function ConversationDetail() {
 
   const storeHandle = conversation.shopDomain.replace(".myshopify.com", "");
 
+  // Funnel steps
+  const browsed = agentTraceArr.includes("search_catalog");
+  const inCart = !!conversation.cartId;
+  const purchased = !!conversation.orderId;
+
+  const funnelSteps = [
+    { label: "Started", done: true, detail: undefined as string | undefined },
+    { label: "Browsed", done: browsed, detail: undefined as string | undefined },
+    {
+      label: "Cart Added",
+      done: inCart,
+      detail: conversation.cartValue ? `$${conversation.cartValue.toFixed(2)}` : undefined,
+    },
+    {
+      label: "Purchased",
+      done: purchased,
+      detail:
+        conversation.orderRevenueCents
+          ? `$${(conversation.orderRevenueCents / 100).toFixed(2)}`
+          : undefined,
+    },
+  ];
+
+  // AI actions — filter out internal routing and unmapped steps
+  const aiActions = agentTraceArr
+    .map((step) => {
+      if (step in TOOL_LABELS) return TOOL_LABELS[step];
+      return null;
+    })
+    .filter((a): a is string => a !== null);
+
   return (
     <s-page heading="Conversation">
+      {/* Back link */}
       <div style={{ marginBottom: "16px" }}>
         <s-link href="/app/conversations">← Back to Conversations</s-link>
       </div>
 
+      {/* Topic / reason for contact */}
+      {conversation.firstUserMessage && (
+        <s-section heading="Reason for contact">
+          <s-text tone="neutral">
+            <span style={{ fontSize: "14px", fontStyle: "italic" }}>
+              "{conversation.firstUserMessage}"
+            </span>
+          </s-text>
+        </s-section>
+      )}
+
+      {/* Journey funnel */}
+      <s-section heading="Journey">
+        <div style={{ display: "flex", alignItems: "center", gap: "0", padding: "12px 0" }}>
+          {funnelSteps.map((step, i) => (
+            <div
+              key={step.label}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flex: i < funnelSteps.length - 1 ? 1 : "none",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  minWidth: "80px",
+                }}
+              >
+                <div
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "50%",
+                    background: step.done ? "#008060" : "#e0e0e0",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: step.done ? "#fff" : "#999",
+                    fontSize: "16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  {step.done ? "✓" : "○"}
+                </div>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    marginTop: "4px",
+                    color: step.done ? "#008060" : "#999",
+                  }}
+                >
+                  {step.label}
+                </div>
+                {step.detail && (
+                  <div style={{ fontSize: "11px", color: "#15803d", fontWeight: 500 }}>
+                    {step.detail}
+                  </div>
+                )}
+              </div>
+              {i < funnelSteps.length - 1 && (
+                <div
+                  style={{
+                    flex: 1,
+                    height: "2px",
+                    background: step.done ? "#008060" : "#e0e0e0",
+                    margin: "0 4px",
+                    marginBottom: "20px",
+                  }}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      </s-section>
+
       {/* Details */}
       <s-section heading="Details">
         <s-stack direction="block" gap="base">
-          <div>
-            <strong>Session ID:</strong>{" "}
-            <span style={{ fontFamily: "monospace" }}>
-              {conversation.sessionId.slice(0, 8)}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 1fr",
+              gap: "8px 16px",
+              fontSize: "14px",
+            }}
+          >
+            <span style={{ color: "#666" }}>Customer</span>
+            <span>
+              {conversation.customerId ? (
+                <a
+                  href={`https://admin.shopify.com/store/${storeHandle}/customers/${conversation.customerId.replace("gid://shopify/Customer/", "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#1a1a1a" }}
+                >
+                  View in Shopify
+                </a>
+              ) : (
+                "Anonymous"
+              )}
             </span>
-            <button
-              onClick={() => navigator.clipboard.writeText(conversation.sessionId)}
-              style={{ fontSize: "11px", padding: "2px 8px", border: "1px solid #d1d1d1", borderRadius: "4px", background: "#fff", cursor: "pointer", marginLeft: "8px" }}
-            >
-              Copy
-            </button>
-          </div>
-          <div>
-            <strong>Customer:</strong>{" "}
-            {conversation.customerId ? (
-              <a
-                href={`https://admin.shopify.com/store/${storeHandle}/customers/${conversation.customerId.replace("gid://shopify/Customer/", "")}`}
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: "#1a1a1a", fontSize: "13px" }}
-              >
-                View customer
-              </a>
-            ) : (
-              "Anonymous"
+            <span style={{ color: "#666" }}>Started</span>
+            <span>{new Date(conversation.startedAt).toLocaleString()}</span>
+            <span style={{ color: "#666" }}>Last active</span>
+            <span>{new Date(conversation.lastMessageAt).toLocaleString()}</span>
+            {conversation.discountCode && (
+              <>
+                <span style={{ color: "#666" }}>Discount used</span>
+                <span style={{ fontWeight: 600 }}>{conversation.discountCode}</span>
+              </>
+            )}
+            {conversation.orderId && (
+              <>
+                <span style={{ color: "#666" }}>Order</span>
+                <span>
+                  <a
+                    href={`https://admin.shopify.com/store/${storeHandle}/orders/${conversation.orderId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: "#1a1a1a" }}
+                  >
+                    {conversation.orderId}
+                  </a>
+                </span>
+              </>
+            )}
+            {conversation.escalated && (
+              <>
+                <span style={{ color: "#666" }}>Status</span>
+                <span>
+                  <s-badge tone="critical">Escalated</s-badge>
+                </span>
+              </>
             )}
           </div>
-          <div>
-            <strong>Cart value:</strong>{" "}
-            {conversation.cartValue != null
-              ? `$${conversation.cartValue.toFixed(2)}`
-              : "—"}
-          </div>
-          <div>
-            <strong>Revenue:</strong>{" "}
-            {conversation.orderRevenueCents != null
-              ? `$${(conversation.orderRevenueCents / 100).toFixed(2)}`
-              : "—"}
-          </div>
-          <div>
-            <strong>Discount code:</strong>{" "}
-            {conversation.discountCode ?? "—"}
-          </div>
-          {conversation.orderId && (
-            <div style={{ marginTop: "6px" }}>
-              <s-text tone="neutral">Order: </s-text>
-              <a
-                href={`https://admin.shopify.com/store/${storeHandle}/orders/${conversation.orderId}`}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: "13px", color: "#1a1a1a" }}
-              >
-                {conversation.orderId}
-              </a>
-            </div>
-          )}
-          <div>
-            <strong>Started:</strong>{" "}
-            {new Date(conversation.startedAt).toLocaleString()}
-          </div>
-          {conversation.escalated ? (
-            <div>
-              <s-badge tone="critical">Escalated</s-badge>
-            </div>
-          ) : null}
         </s-stack>
       </s-section>
 
-      {/* AI Routing */}
-      <s-section heading="AI Routing">
-        {trace.length === 0 ? (
-          <p>No routing data.</p>
+      {/* AI Actions */}
+      <s-section heading="AI Actions">
+        {aiActions.length === 0 ? (
+          <s-text tone="neutral">No tool actions recorded.</s-text>
         ) : (
-          <s-stack direction="inline" gap="base">
-            {trace.map((step, i) => (
-              <s-badge key={i} tone="info">
-                {String(step)}
-              </s-badge>
+          <s-stack direction="block" gap="base">
+            {aiActions.map((action, i) => (
+              <div
+                key={i}
+                style={{ fontSize: "13px", padding: "4px 0", borderBottom: "1px solid #f5f5f5" }}
+              >
+                {action}
+              </div>
             ))}
           </s-stack>
         )}
@@ -175,8 +296,18 @@ export default function ConversationDetail() {
                     {msg.content}
                   </div>
                   {msg.timestamp && (
-                    <div style={{ fontSize: "10px", color: "#aaa", marginTop: "3px", textAlign: isUser ? "right" : "left" }}>
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    <div
+                      style={{
+                        fontSize: "10px",
+                        color: "#aaa",
+                        marginTop: "3px",
+                        textAlign: isUser ? "right" : "left",
+                      }}
+                    >
+                      {new Date(msg.timestamp).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </div>
                   )}
                 </div>
