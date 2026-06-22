@@ -398,20 +398,43 @@ export async function runUnifiedAgent(opts: {
   // Run
   // ---------------------------------------------------------------------------
 
-  const stream = runAgentStream({
-    deployment: deployments.shopping(), // gpt-4o-mini, same model as specialists
-    system: systemPrompt,
-    messages,
-    tools,
-    maxOutputTokens: 600,
-    maxSteps: 6, // slightly more than shopping alone to allow support + tool combo
-  });
-
+  // Retry on 429 (Azure AI Foundry free-tier quota) with exponential backoff.
+  // Two retries covers transient bursts; third failure returns a clear user message.
   let text = "";
-  try {
-    text = await stream.text;
-  } catch {
-    text = "I'm having trouble with that right now. Please try again in a moment.";
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 1000 * attempt)); // 1s, 2s
+    }
+    try {
+      const stream = runAgentStream({
+        deployment: deployments.shopping(),
+        system: systemPrompt,
+        messages,
+        tools,
+        maxOutputTokens: 600,
+        maxSteps: 6,
+      });
+      text = await stream.text;
+      lastErr = undefined;
+      break;
+    } catch (err) {
+      lastErr = err;
+      const is429 =
+        String(err).includes("429") ||
+        String(err).toLowerCase().includes("rate") ||
+        (err as { statusCode?: number })?.statusCode === 429;
+      if (!is429) break; // non-429 errors don't benefit from retry
+    }
+  }
+  if (lastErr !== undefined) {
+    const is429 =
+      String(lastErr).includes("429") ||
+      String(lastErr).toLowerCase().includes("rate") ||
+      (lastErr as { statusCode?: number })?.statusCode === 429;
+    text = is429
+      ? "Our assistant is briefly busy — please send your message again in a moment."
+      : "I'm having trouble with that right now. Please try again in a moment.";
   }
 
   // Merchant-configured quick replies for low-confidence / direct responses

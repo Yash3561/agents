@@ -79,7 +79,7 @@ export async function getActiveDiscounts(
                 endsAt
                 codes(first: 1) { nodes { code } }
               }
-              ... on DiscountCodeBuyX {
+              ... on DiscountCodeBxgy {
                 title
                 status
                 endsAt
