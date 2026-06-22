@@ -69,11 +69,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     console.error("[billing] subscription check failed:", e);
   }
 
+  // Pull actual reset date from DB so the display matches billing.server.ts's
+  // UTC-month-boundary logic, not a hard-coded "1st of next calendar month".
+  const merchant = await db.merchant.findUnique({
+    where: { shopDomain: session.shop },
+    select: { conversationResetAt: true },
+  });
+  const lastReset = merchant?.conversationResetAt ?? new Date();
+  // Next reset = 1st of the UTC month AFTER the last reset month
+  const nextReset = new Date(Date.UTC(
+    lastReset.getUTCMonth() === 11 ? lastReset.getUTCFullYear() + 1 : lastReset.getUTCFullYear(),
+    lastReset.getUTCMonth() === 11 ? 0 : lastReset.getUTCMonth() + 1,
+    1,
+  ));
   const now = new Date();
-  const resetAt = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const resetAtStr = resetAt.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  const daysUntilReset = Math.ceil((nextReset.getTime() - now.getTime()) / 86400000);
+  const resetAtStr = nextReset.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
 
-  return { usage, activeSubscription, resetAtStr };
+  return { usage, activeSubscription, resetAtStr, daysUntilReset };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -306,7 +319,7 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
 }
 
 export default function BillingPage() {
-  const { usage, activeSubscription, resetAtStr } = useLoaderData<typeof loader>();
+  const { usage, activeSubscription, resetAtStr, daysUntilReset } = useLoaderData<typeof loader>();
 
   const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
   const hasActivePlan = PAID_PLANS.has(usage.plan);
@@ -354,7 +367,9 @@ export default function BillingPage() {
             </div>
             <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between" }}>
               <s-text tone="neutral">{usagePct}% used</s-text>
-              <s-text tone="neutral">Resets {resetAtStr}</s-text>
+              <s-text tone="neutral">
+                Resets {resetAtStr} ({daysUntilReset <= 1 ? "tomorrow" : `in ${daysUntilReset} days`})
+              </s-text>
             </div>
             {usagePct >= 80 && usagePct < 100 && (
               <div style={{ marginTop: "12px" }}>
