@@ -401,21 +401,6 @@ export default function BillingPage() {
         </div>
       </s-section>
 
-      <s-section heading="Manage subscription">
-        <s-text tone="neutral">
-          To cancel or change your billing, visit your Shopify subscription settings.
-        </s-text>
-        <div style={{ marginTop: "12px" }}>
-          <a
-            href="https://admin.shopify.com/settings/billing/subscriptions"
-            target="_blank"
-            rel="noreferrer"
-            style={{ fontSize: "13px", color: "#1a1a1a", fontWeight: 500 }}
-          >
-            Manage in Shopify Admin →
-          </a>
-        </div>
-      </s-section>
     </s-page>
   );
 }
