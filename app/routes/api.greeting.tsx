@@ -40,6 +40,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const headers = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" };
 
+  // customer_first_name is injected by Liquid ({{ customer.first_name }}) — no API call needed
+  const liquidFirstName = url.searchParams.get("first_name") || undefined;
+
   if (!shop || !customerId) {
     return new Response(JSON.stringify({ greeting: null }), { headers });
   }
@@ -48,7 +51,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const accessToken = await getStorefrontAccessToken(request, shop);
     const memory = await fetchCustomerMemory(shop, accessToken, customerId);
 
-    const firstName = memory.firstName;
+    // Liquid-sourced name is always reliable; fall back to memory API result
+    const firstName = liquidFirstName || memory.firstName;
 
     const abandonedGreeting = await findAbandonedCartGreeting(shop, customerId, firstName);
     if (abandonedGreeting) {

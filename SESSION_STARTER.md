@@ -35,7 +35,7 @@ Need real Shopify admin embedded session to test.
 NO tunnel needed — Azure is live and working.
 Go to: https://admin.shopify.com/store/neonping-dev/apps/d1ed7250a107b38802ff74de11f699f3
 If it won't load, hit the auth URL first:
-https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io/auth?shop=neonping-dev.myshopify.com
+https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io/auth?shop=neonping-dev-a509ojgs.myshopify.com
 ```
 
 **Then**: Update GitHub issues (#51, #49, #46) with live verification notes (either close with "verified" or note what broke)
@@ -94,7 +94,7 @@ Options:
 cd /Users/krkaushikkumar/Desktop/neonping
 
 # Start dev (tunnel URL will change each time)
-npm run dev -- --store neonping-dev.myshopify.com
+npm run dev -- --store neonping-dev-a509ojgs.myshopify.com
 
 # Install deps if needed
 npm install

@@ -30,6 +30,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(`/app/onboarding?${url.searchParams.toString()}`);
   }
 
+  const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
+  if (!PAID_PLANS.has(merchant.plan)) {
+    const url = new URL(request.url);
+    throw redirect(`/app/billing?${url.searchParams.toString()}`);
+  }
+
   const url = new URL(request.url);
   const days = url.searchParams.get("days") || "30";
   const daysNum = parseInt(days, 10) || 30;

@@ -85,7 +85,7 @@ export async function runOrchestrator(opts: {
       system: systemPrompt,
       prompt: userPrompt,
       schema: OrchestratorSchema,
-      maxOutputTokens: 500,
+      maxOutputTokens: 200,
     });
   } catch (err) {
     console.error("[orchestrator] generateStructured failed:", err);

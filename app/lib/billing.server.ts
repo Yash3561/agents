@@ -2,13 +2,13 @@ import prisma from "~/db.server";
 import { redis } from "~/redis.server";
 
 /**
- * Conversation-per-month limits per plan. Real plan assignment depends on
- * Shopify's Billing API (#27, not yet built) — until then every merchant
- * defaults to "free" via the Merchant model (enforced at spark limits).
- * This map and the limit enforcement below are real and active regardless;
- * only the mechanism that upgrades merchant.plan is missing.
+ * Conversation-per-month limits per plan.
+ * Merchants on "free" (no active subscription) get limit 0 — chat is blocked
+ * until they choose a paid plan via the billing page.
+ * Plan assignment is driven by the Shopify Billing API webhook handler
+ * (webhooks.app.subscriptions_update.tsx) and verified on every billing page load.
  */
-const PLAN_LIMITS: Record<string, number> = {
+export const PLAN_LIMITS: Record<string, number> = {
   spark: 500,
   pulse: 2500,
   surge: 10000,
@@ -43,10 +43,10 @@ function isNewBillingMonth(resetAt: Date, now: Date): boolean {
 export async function checkAndIncrementUsage(shopDomain: string): Promise<UsageCheck> {
   const merchant = await prisma.merchant.findUnique({ where: { shopDomain } });
   if (!merchant) {
-    return { allowed: true, used: 0, limit: PLAN_LIMITS.spark };
+    return { allowed: false, used: 0, limit: 0 };
   }
 
-  const limit = PLAN_LIMITS[merchant.plan] ?? PLAN_LIMITS.spark;
+  const limit = PLAN_LIMITS[merchant.plan] ?? 0;
   const now = new Date();
   let durableCount = merchant.conversationCount;
 
@@ -101,8 +101,8 @@ export async function getUsage(shopDomain: string): Promise<{ used: number; limi
     where: { shopDomain },
     select: { plan: true, conversationCount: true, conversationResetAt: true },
   });
-  if (!merchant) return { used: 0, limit: PLAN_LIMITS.spark, plan: "spark" };
-  const limit = PLAN_LIMITS[merchant.plan as keyof typeof PLAN_LIMITS] ?? PLAN_LIMITS.spark;
+  if (!merchant) return { used: 0, limit: 0, plan: "free" };
+  const limit = PLAN_LIMITS[merchant.plan as keyof typeof PLAN_LIMITS] ?? 0;
   try {
     const key = usageKey(shopDomain);
     const val = await redis.get(key);

@@ -8,7 +8,7 @@
   assign np_color    = block.settings.widget_color    | default: '#1a1a1a'
   assign np_position = block.settings.widget_position | default: 'bottom-right'
   assign np_greeting = block.settings.widget_greeting | default: 'Hi! How can I help you today?'
-  assign np_api_url  = block.settings.api_url         | default: ''
+  assign np_api_url  = block.settings.api_url         | default: 'https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io/api/chat'
 
   comment
     Shopify exposes the logged-in customer via the `customer` object.
@@ -17,11 +17,13 @@
     gracefully (support/personalization work, checkout stays anonymous).
   endcomment
 
-  assign np_customer_id    = ''
-  assign np_customer_token = ''
+  assign np_customer_id         = ''
+  assign np_customer_token      = ''
+  assign np_customer_first_name = ''
   if customer
-    assign np_customer_id    = customer.id    | prepend: 'gid://shopify/Customer/'
-    assign np_customer_token = customer.access_token | default: ''
+    assign np_customer_id         = customer.id | prepend: 'gid://shopify/Customer/'
+    assign np_customer_token      = customer.access_token | default: ''
+    assign np_customer_first_name = customer.first_name | default: ''
   endif
 
   comment
@@ -43,6 +45,7 @@
     error_message:        {{ 't.error_message' | t | json }},
     customer_id:          {{ np_customer_id | json }},
     customer_access_token: {{ np_customer_token | json }},
+    customer_first_name:  {{ np_customer_first_name | json }},
     cart_total_cents:     {{ np_cart_cents | json }}
   };
 </script>
@@ -58,8 +61,9 @@
     {
       "type": "text",
       "id": "api_url",
-      "label": "API URL",
-      "info": "Full URL of your NeonPing /api/chat endpoint, e.g. https://your-tunnel.trycloudflare.com/api/chat"
+      "label": "NeonPing API URL",
+      "default": "https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io/api/chat",
+      "info": "Pre-configured. Do not change unless instructed by NeonPing support."
     },
     {
       "type": "color",

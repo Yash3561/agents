@@ -1,52 +1,83 @@
+import { useEffect } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
-import { getUsage } from "../lib/billing.server";
+import { getUsage, PLAN_LIMITS } from "../lib/billing.server";
 import db from "../db.server";
 
 const VALID_PLANS = ["spark", "pulse", "surge"] as const;
 type PlanKey = (typeof VALID_PLANS)[number];
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { session, billing } = await authenticate.admin(request);
-  const usage = await getUsage(session.shop);
+const PLAN_CONFIG: Record<PlanKey, { name: string; amount: number; trialDays: number }> = {
+  spark: { name: "Spark", amount: 29, trialDays: 7 },
+  pulse: { name: "Pulse", amount: 79, trialDays: 7 },
+  surge: { name: "Surge", amount: 199, trialDays: 7 },
+};
 
-  const merchant = await db.merchant.findUnique({
-    where: { shopDomain: session.shop },
-    select: { conversationResetAt: true },
-  });
+export async function loader({ request }: LoaderFunctionArgs) {
+  const { session, admin } = await authenticate.admin(request);
+  const usage = await getUsage(session.shop);
 
   let activeSubscription: { id: string; name: string } | null = null;
   try {
-    const result = await billing.check({
-      plans: [...VALID_PLANS],
-      isTest: process.env.BILLING_TEST_MODE === "true",
-    });
-    if (result.hasActivePayment && result.appSubscriptions?.length > 0) {
-      const sub = result.appSubscriptions[0];
-      activeSubscription = { id: sub.id, name: sub.name };
-      const planName = sub.name.toLowerCase();
+    const result = await admin.graphql(`#graphql
+      {
+        currentAppInstallation {
+          activeSubscriptions {
+            id
+            name
+            status
+            test
+            lineItems {
+              plan {
+                pricingDetails {
+                  ... on AppRecurringPricing {
+                    price { amount }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `);
+    const data = await result.json() as {
+      data?: { currentAppInstallation?: { activeSubscriptions?: Array<{ id: string; name: string; status: string; test: boolean; lineItems: Array<{ plan: { pricingDetails: { amount?: string } } }> }> } }
+    };
+    const subs = data.data?.currentAppInstallation?.activeSubscriptions ?? [];
+    const activeSub = subs.find(s => s.status === "ACTIVE" || s.status === "PENDING");
+    if (activeSub) {
+      activeSubscription = { id: activeSub.id, name: activeSub.name };
+      const planName = activeSub.name.toLowerCase();
       if (VALID_PLANS.includes(planName as PlanKey) && planName !== usage.plan) {
         await db.merchant.update({
           where: { shopDomain: session.shop },
           data: { plan: planName },
         });
         usage.plan = planName;
+        usage.limit = PLAN_LIMITS[planName as PlanKey] ?? 0;
+      }
+    } else {
+      // No active subscription — if DB shows a paid plan, downgrade to free
+      if (VALID_PLANS.includes(usage.plan as PlanKey)) {
+        await db.merchant.update({ where: { shopDomain: session.shop }, data: { plan: "free" } });
+        usage.plan = "free";
+        usage.limit = 0;
       }
     }
   } catch (e) {
-    console.log("[billing] check failed:", e);
+    console.error("[billing] subscription check failed:", e);
   }
 
   const now = new Date();
   const resetAt = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const resetAtStr = resetAt.toLocaleDateString("en-US", { month: "long", day: "numeric" });
 
-  return { usage, activeSubscription, resetAt: merchant?.conversationResetAt ?? null, resetAtStr };
+  return { usage, activeSubscription, resetAtStr };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { billing } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
   const plan = String(formData.get("plan"));
 
@@ -54,23 +85,64 @@ export async function action({ request }: ActionFunctionArgs) {
     return { error: "Invalid plan" };
   }
 
-  try {
-    await billing.request({
-      plan: plan as PlanKey,
-      isTest: process.env.BILLING_TEST_MODE === "true",
-      returnUrl: `${process.env.SHOPIFY_APP_URL}/app/billing`,
-    });
-  } catch (e) {
-    // Re-throw 3xx redirects — that's the success path (Shopify payment page)
-    if (e instanceof Response && e.status >= 300 && e.status < 400) throw e;
-    // Return 401/403 as data so the UI shows a message instead of crashing
-    if (e instanceof Response && (e.status === 401 || e.status === 403)) {
-      return { error: "billing_unauthorized" };
-    }
-    throw e;
-  }
+  const config = PLAN_CONFIG[plan as PlanKey];
+  const isTest = process.env.BILLING_TEST_MODE === "true";
+  // Return to the Shopify admin embedded URL so the merchant lands back in the
+  // app fully authenticated — no domain prompt, no re-login required.
+  const shopHandle = session.shop.replace(".myshopify.com", "");
+  const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}`;
 
-  return null;
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      mutation AppSubscriptionCreate(
+        $name: String!, $returnUrl: URL!, $test: Boolean!,
+        $trialDays: Int, $price: Decimal!
+      ) {
+        appSubscriptionCreate(
+          name: $name returnUrl: $returnUrl test: $test trialDays: $trialDays
+          lineItems: [{ plan: { appRecurringPricingDetails: {
+            price: { amount: $price, currencyCode: USD }
+            interval: EVERY_30_DAYS
+          } } }]
+        ) {
+          userErrors { field message }
+          confirmationUrl
+          appSubscription { id status }
+        }
+      }`,
+      {
+        variables: {
+          name: config.name,
+          returnUrl,
+          test: isTest,
+          trialDays: config.trialDays,
+          price: String(config.amount),
+        },
+      },
+    );
+
+    const data = await response.json() as {
+      data?: { appSubscriptionCreate?: { userErrors: { message: string }[]; confirmationUrl?: string } };
+    };
+    const result = data.data?.appSubscriptionCreate;
+
+    if (result?.userErrors?.length) {
+      console.error("[billing] userErrors:", result.userErrors);
+      return { error: "billing_error", detail: result.userErrors[0].message };
+    }
+
+    if (!result?.confirmationUrl) {
+      console.error("[billing] no confirmationUrl:", JSON.stringify(data));
+      return { error: "billing_error", detail: "No confirmation URL returned" };
+    }
+
+    console.log("[billing] subscription created, redirecting to payment page");
+    return { redirectUrl: result.confirmationUrl };
+  } catch (e) {
+    console.error("[billing] unexpected error:", e);
+    return { error: "billing_error", detail: String(e) };
+  }
 }
 
 const ALL_FEATURES = [
@@ -130,6 +202,16 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
   const fetcher = useFetcher<typeof action>();
   const isSubmitting = fetcher.state === "submitting";
   const billingError = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
+  const redirectUrl = fetcher.data && "redirectUrl" in fetcher.data ? fetcher.data.redirectUrl : null;
+
+  // When billing.request() succeeds it throws a 3xx redirect that useFetcher
+  // won't follow automatically. We receive the URL as data and must navigate
+  // the top-level Shopify admin window (not just the embedded iframe).
+  useEffect(() => {
+    if (redirectUrl) {
+      window.open(redirectUrl, "_top");
+    }
+  }, [redirectUrl]);
 
   return (
     <div
@@ -177,16 +259,13 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
         ))}
       </ul>
       <div style={{ marginTop: "auto" }}>
-        {billingError === "billing_unauthorized" && (
+        {billingError && (
           <div style={{ marginBottom: "8px", padding: "8px 12px", background: "#fff0f0", border: "1px solid #fca5a5", borderRadius: "6px" }}>
             <s-text tone="critical">
-              Billing unavailable for this store. Please contact support or try from a store linked to your Partner account.
+              {"detail" in (fetcher.data ?? {})
+                ? `Billing error: ${(fetcher.data as { detail?: string }).detail}`
+                : "Something went wrong with billing. Please try again."}
             </s-text>
-          </div>
-        )}
-        {billingError && billingError !== "billing_unauthorized" && (
-          <div style={{ marginBottom: "8px", padding: "8px 12px", background: "#fff0f0", border: "1px solid #fca5a5", borderRadius: "6px" }}>
-            <s-text tone="critical">Something went wrong. Please try again.</s-text>
           </div>
         )}
         <fetcher.Form method="POST">
@@ -224,18 +303,16 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
 }
 
 export default function BillingPage() {
-  const { usage, activeSubscription, resetAt, resetAtStr } = useLoaderData<typeof loader>();
+  const { usage, activeSubscription, resetAtStr } = useLoaderData<typeof loader>();
 
+  const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
+  const hasActivePlan = PAID_PLANS.has(usage.plan);
   const usagePct =
     usage.limit > 0
       ? Math.min(100, Math.round((usage.used / usage.limit) * 100))
       : 0;
   const limitDisplay =
     usage.limit >= 999_000 ? "Unlimited" : usage.limit.toLocaleString();
-  const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
-  const planLabel = PAID_PLANS.has(usage.plan)
-    ? usage.plan.charAt(0).toUpperCase() + usage.plan.slice(1)
-    : "No active plan";
 
   // Inline progress bar since s-progress-bar is not in Polaris web types
   const barColor =
@@ -245,74 +322,64 @@ export default function BillingPage() {
 
   return (
     <s-page heading="Plan &amp; Billing">
-      <s-section heading="Current Usage">
-        <s-box padding="base" background="subdued" borderRadius="base">
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
-            <s-text>Current plan:</s-text>
-            <s-badge tone={PAID_PLANS.has(usage.plan) ? "success" : "neutral"}>
-              {planLabel}
-            </s-badge>
-            {activeSubscription && (
-              <s-badge tone="info">Active subscription</s-badge>
-            )}
-          </div>
-          <s-text>
-            {usage.used.toLocaleString()} / {limitDisplay} conversations used
-            this month
-          </s-text>
-          <div
-            style={{
-              marginTop: "8px",
-              height: "8px",
-              background: "#e1e3e5",
-              borderRadius: "4px",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                height: "100%",
-                width: `${usagePct}%`,
-                background: barColor,
-                borderRadius: "4px",
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-          <div style={{ marginTop: "4px" }}>
-            <s-text tone="neutral">{usagePct}% used</s-text>
-          </div>
-          {resetAt && (
-            <div style={{ marginTop: "4px" }}>
-              <s-text tone="neutral">Resets on {new Date(resetAt).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric" })}</s-text>
+      <s-section heading="Current Plan">
+        {!hasActivePlan ? (
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
+              <s-text>Current plan:</s-text>
+              <s-badge tone="neutral">No active plan</s-badge>
+              {activeSubscription && <s-badge tone="warning">Pending activation</s-badge>}
             </div>
-          )}
-        </s-box>
-
-        <div style={{ padding: "12px 0" }}>
-          <s-text>
-            <strong>This month's usage:</strong> {usage.used.toLocaleString()} / {usage.limit >= 999_000 ? "Unlimited" : usage.limit.toLocaleString()} conversations
-          </s-text>
-          <s-text tone="neutral">Resets {resetAtStr}</s-text>
-        </div>
-
-        {usagePct >= 80 && usagePct < 100 && (
-          <s-banner tone="warning">
-            {"You've used "}
-            {usagePct}
-            {"% of your monthly conversations. Upgrade now to avoid hitting your limit mid-month."}
-            {" "}
-            <a href="#plans" style={{ color: "inherit", fontWeight: 600 }}>View plans below</a>
-          </s-banner>
-        )}
-        {usagePct >= 100 && (
-          <s-banner tone="critical">
-            {"You've reached your conversation limit. New chats are paused until your plan resets or you upgrade."}
-          </s-banner>
+            <s-text tone="neutral">
+              Choose a plan below to activate your NeonPing chat widget. All plans include a 7-day free trial — no charge until the trial ends.
+            </s-text>
+          </s-box>
+        ) : (
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+              <s-text>Current plan:</s-text>
+              <s-badge tone="success">
+                {usage.plan.charAt(0).toUpperCase() + usage.plan.slice(1)}
+              </s-badge>
+              {activeSubscription && <s-badge tone="info">Active</s-badge>}
+            </div>
+            <s-text>
+              <strong>{usage.used.toLocaleString()}</strong> / {limitDisplay} conversations used this month
+            </s-text>
+            <div style={{ marginTop: "8px", height: "8px", background: "#e1e3e5", borderRadius: "4px", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${usagePct}%`, background: barColor, borderRadius: "4px", transition: "width 0.3s ease" }} />
+            </div>
+            <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between" }}>
+              <s-text tone="neutral">{usagePct}% used</s-text>
+              <s-text tone="neutral">Resets {resetAtStr}</s-text>
+            </div>
+            {usagePct >= 80 && usagePct < 100 && (
+              <div style={{ marginTop: "12px" }}>
+                <s-banner tone="warning">
+                  {`You've used ${usagePct}% of your monthly conversations. `}
+                  <a href="#plans" style={{ color: "inherit", fontWeight: 600 }}>Upgrade now</a>
+                  {" to avoid hitting your limit mid-month."}
+                </s-banner>
+              </div>
+            )}
+            {usagePct >= 100 && (
+              <div style={{ marginTop: "12px" }}>
+                <s-banner tone="critical">
+                  You've reached your conversation limit. New chats are paused until your plan resets or you upgrade.
+                </s-banner>
+              </div>
+            )}
+          </s-box>
         )}
       </s-section>
 
-      <s-section heading="Choose a Plan" id="plans">
+      {!hasActivePlan && (
+        <s-banner tone="info">
+          <strong>Almost there!</strong> Choose a plan to activate your NeonPing AI assistant. All plans include a 7-day free trial — cancel any time.
+        </s-banner>
+      )}
+
+      <s-section heading={hasActivePlan ? "Manage Plan" : "Choose a Plan"} id="plans">
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
           {PLANS.map((plan) => (
             <PlanCard

@@ -8,7 +8,7 @@
 # If BASE_URL is omitted, defaults to the production Azure URL.
 
 BASE_URL="${1:-https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io}"
-SHOP="neonping-dev.myshopify.com"
+SHOP="neonping-dev-a509ojgs.myshopify.com"
 TIMEOUT=30
 
 # ── colour helpers ────────────────────────────────────────────────────────────

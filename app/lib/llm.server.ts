@@ -56,7 +56,7 @@ export async function generateStructured<SCHEMA extends z.ZodTypeAny>(opts: {
     system: opts.system,
     prompt: opts.prompt,
     schema: opts.schema,
-    maxOutputTokens: opts.maxOutputTokens ?? 500,
+    maxOutputTokens: opts.maxOutputTokens ?? 200,
   });
   return result.object as z.infer<SCHEMA>;
 }

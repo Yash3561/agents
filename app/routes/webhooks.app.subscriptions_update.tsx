@@ -49,26 +49,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (subscription.status === "ACTIVE") {
       const subName = subscription.name.toLowerCase();
-      if (subName === "starter" || subName === "growth" || subName === "pro") {
+      if (subName === "spark" || subName === "pulse" || subName === "surge") {
         plan = subName;
       } else {
         // Fallback: try to extract from price
         const price = subscription.lineItems?.[0]?.plan?.pricingDetails?.price?.amount;
         if (price === 29 || price === 29.0) {
-          plan = "starter";
+          plan = "spark";
         } else if (price === 79 || price === 79.0) {
-          plan = "growth";
+          plan = "pulse";
         } else if (price === 199 || price === 199.0) {
-          plan = "pro";
+          plan = "surge";
         }
       }
     } else if (subscription.status === "DECLINED" || subscription.status === "EXPIRED" || subscription.status === "PAUSED") {
       // Merchant declined, let subscription expire, or paused — downgrade to free
       plan = "free";
     } else if (subscription.status === "PENDING") {
-      // Trial period — treat as the plan they're trialing, or as 'trial' if we can't determine
+      // Trial period — treat as the plan they're trialing
       const subName = subscription.name.toLowerCase();
-      if (subName === "starter" || subName === "growth" || subName === "pro") {
+      if (subName === "spark" || subName === "pulse" || subName === "surge") {
         plan = subName;
       }
     } else if (subscription.status === "FROZEN") {

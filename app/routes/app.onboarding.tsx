@@ -69,7 +69,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     },
   });
 
-  return redirect("/app");
+  const url = new URL(request.url);
+  return redirect(`/app/billing?${url.searchParams.toString()}`);
 };
 
 async function sendTestMessage(shop: string, appUrl: string): Promise<string> {
@@ -165,7 +166,7 @@ export default function Onboarding() {
     }
   };
 
-  const themeEditorUrl = `https://admin.shopify.com/store/${shop.replace(".myshopify.com", "")}/themes/current/editor?context=apps`;
+  const themeEditorUrl = `https://${shop}/admin/themes/current/editor?context=apps&template=index`;
 
   return (
     <s-page heading="Welcome to NeonPing">
@@ -283,8 +284,11 @@ export default function Onboarding() {
             and turning on the App Embed.
           </s-paragraph>
           <s-link href={themeEditorUrl} target="_blank">
-            Open Theme Editor - App Embeds
+            Open Theme Editor → Add Widget
           </s-link>
+          <s-text tone="neutral">
+            In the theme editor: click <strong>Add block</strong> → find <strong>NeonPing Chat Widget</strong> → click <strong>Save</strong>. That{"'"}s it — the widget is live on your store.
+          </s-text>
           <s-checkbox
             label="I've added the widget to my theme"
             checked={themeConfirmed}

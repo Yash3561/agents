@@ -9,7 +9,7 @@
 ### Continuation from Previous Session
 1. **Production URL**: https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io
 2. **Access merchant portal**: Go directly to `https://admin.shopify.com/store/neonping-dev/apps/d1ed7250a107b38802ff74de11f699f3` — NO tunnel needed, Azure is live
-3. **If portal won't load**: Hit `https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io/auth?shop=neonping-dev.myshopify.com` to force fresh OAuth
+3. **If portal won't load**: Hit `https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io/auth?shop=neonping-dev-a509ojgs.myshopify.com` to force fresh OAuth
 4. **Memory/context**: Read `/Users/krkaushikkumar/.claude/projects/-Users-krkaushikkumar-Desktop-neonping/memory/project_neonping.md` first
 
 ### GitHub Board
@@ -65,7 +65,7 @@ AI: Azure AI Foundry /openai/v1 (gpt-4o-mini for all agents, @ai-sdk/openai-comp
 DB: Neon PostgreSQL (Prisma ORM)
 Cache: Upstash Redis (rediss://)
 Hosting: Azure Container Apps (consumption-based, ~$5/mo for ACR registry)
-Dev store: neonping-dev.myshopify.com
+Dev store: neonping-dev-a509ojgs.myshopify.com
 Customer data namespace: neonping_chat (metafields)
 ```
 
@@ -123,7 +123,7 @@ All required vars should already be configured on the Azure Container App. If de
 
 ```bash
 cd /Users/krkaushikkumar/Desktop/neonping
-npm run dev -- --store neonping-dev.myshopify.com
+npm run dev -- --store neonping-dev-a509ojgs.myshopify.com
 ```
 
 **Note**: Tunnel URL changes on each restart. If embedded app login fails:
@@ -192,7 +192,7 @@ npm run dev -- --store neonping-dev.myshopify.com
 **Merchant portal shows blank page or "refused to connect"?**
 - The app runs on Azure — no tunnel needed
 - If the iframe is loading a dead Cloudflare URL: the partner dashboard cached the tunnel. Go to `partners.shopify.com` → Apps → NeonPing → Configuration and verify App URL is the Azure URL. Then uninstall/reinstall the app on the dev store.
-- If `accounts.shopify.com refused to connect` in iframe: OAuth is trying to load inside the iframe. Hit the auth URL directly (`https://[azure-url]/auth?shop=neonping-dev.myshopify.com`) to trigger a top-level OAuth flow.
+- If `accounts.shopify.com refused to connect` in iframe: OAuth is trying to load inside the iframe. Hit the auth URL directly (`https://[azure-url]/auth?shop=neonping-dev-a509ojgs.myshopify.com`) to trigger a top-level OAuth flow.
 - **Root cause of auth redirect loop** (already fixed in code): `app._index.tsx` was stripping Shopify query params (`host`, `embedded`, `id_token`) when redirecting to `/app/onboarding`. Fixed by using `url.searchParams.toString()` in the redirect. Don't revert this.
 
 **Docker build fails or Azure container crashes with "exec format error"?**

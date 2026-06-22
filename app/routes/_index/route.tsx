@@ -21,34 +21,30 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>NeonPing — AI Shopping Assistant</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Boost sales with live AI product recommendations. Always real-time, never stale.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
             <label className={styles.label}>
-              <span>Shop domain</span>
-              <input className={styles.input} type="text" name="shop" />
-              <span>e.g: my-shop-domain.myshopify.com</span>
+              <span>Your Shopify store domain</span>
+              <input className={styles.input} type="text" name="shop" placeholder="your-store.myshopify.com" />
             </label>
             <button className={styles.button} type="submit">
-              Log in
+              Install NeonPing
             </button>
           </Form>
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Live catalog, zero sync.</strong> NeonPing reads directly from Shopify — prices, inventory, and variants are always current. No stale data, ever.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>AI that closes sales.</strong> Personalized greetings, product recommendations, discount negotiation, and abandoned cart recovery — all handled automatically.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Revenue you can measure.</strong> Track conversations to conversions, AOV lift, and cart recovery rate right from your merchant dashboard.
           </li>
         </ul>
       </div>

@@ -13,5 +13,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await db.session.deleteMany({ where: { shop } });
   }
 
+  // Reset merchant state so reinstalling triggers fresh onboarding and a clean usage slate.
+  await db.merchant.updateMany({
+    where: { shopDomain: shop },
+    data: {
+      onboardedAt: null,
+      onboardingStep: 0,
+      plan: "free",
+      conversationCount: 0,
+      conversationResetAt: new Date(),
+    },
+  });
+
   return new Response();
 };

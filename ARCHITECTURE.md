@@ -447,7 +447,7 @@ graph TB
         DevLocalCode["Local Code<br/>(/Users/.../neonping)"]
         DevNpm["npm run dev<br/>--store neonping-dev"]
         DevTunnel["Shopify CLI Tunnel<br/>(changes each restart)"]
-        DevStore["Dev Store<br/>(neonping-dev.myshopify.com)"]
+        DevStore["Dev Store<br/>(neonping-dev-a509ojgs.myshopify.com)"]
         
         DevLocalCode --> DevNpm
         DevNpm --> DevTunnel
