@@ -528,9 +528,14 @@ export default function Index() {
   const aov = stats.conversionsCount
     ? fmtCurrency(stats.revenueCents / stats.conversionsCount)
     : fmtCurrency(0);
-  const cartRecoveryRatePct = stats.cartsCreatedCount
+  const cartConversionRatePct = stats.cartsCreatedCount
     ? Math.round((stats.cartsRecoveredCount / stats.cartsCreatedCount) * 100)
     : 0;
+
+  const revenuePerChat =
+    stats.totalConversations > 0 && stats.revenueCents > 0
+      ? fmtCurrency(stats.revenueCents / stats.totalConversations)
+      : "—";
 
   const usagePercent =
     usage.limit > 0 ? Math.round((usage.used / usage.limit) * 100) : 0;
@@ -564,7 +569,7 @@ export default function Index() {
         <s-banner tone="critical">
           {"You've reached your "}
           {usage.limit}
-          {" conversation limit this month. "}
+          {" conversation limit for this billing cycle. "}
           <a href="/app/billing">Upgrade your plan</a>
           {" to continue."}
         </s-banner>
@@ -575,7 +580,7 @@ export default function Index() {
           {usagePercent}
           {"% of your "}
           {usage.limit}
-          {" monthly conversations. "}
+          {" conversation limit this billing cycle. "}
           <a href="/app/billing">Upgrade soon</a>
           {"."}
         </s-banner>
@@ -704,21 +709,22 @@ export default function Index() {
             borderColor="#008060"
           />
           <Metric
-            label="Cart recovery rate"
-            value={`${cartRecoveryRatePct}%`}
-            sub={`${stats.cartsRecoveredCount} of ${stats.cartsCreatedCount} carts`}
+            label="Cart conversion rate"
+            value={`${cartConversionRatePct}%`}
+            sub={`${stats.cartsCreatedCount} cart sessions`}
             borderColor="#008060"
           />
           <Metric
-            label="Discounts used"
-            value={String(stats.discountsUsedCount)}
+            label="Revenue per chat"
+            value={revenuePerChat}
+            sub="avg per conversation"
             borderColor="#2c6ecb"
           />
           <Metric
-            label="Monthly usage"
+            label="Plan usage"
             value={`${usage.used} / ${usage.limit > 0 ? usage.limit.toLocaleString() : "∞"}`}
             sub={
-              usage.limit > 0 ? `${usagePercent}% used` : "Unlimited"
+              usage.limit > 0 ? `${usagePercent}% of billing cycle` : "Unlimited"
             }
             borderColor={usageBorderColor}
           />
