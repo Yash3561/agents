@@ -32,26 +32,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const [
     totalConversations,
-    escalatedCount,
     conversionsCount,
     discountsUsedCount,
     revenueAgg,
-    cartsCreatedCount,
-    cartsRecoveredCount,
     recentEscalations,
     usage,
   ] = await Promise.all([
     prisma.conversation.count({ where: { shopDomain: shop, startedAt: { gte: since } } }),
-    prisma.conversation.count({ where: { shopDomain: shop, escalated: true, startedAt: { gte: since } } }),
     prisma.conversation.count({ where: { shopDomain: shop, orderId: { not: null }, startedAt: { gte: since } } }),
     prisma.conversation.count({ where: { shopDomain: shop, discountCode: { not: null }, startedAt: { gte: since } } }),
     prisma.conversation.aggregate({
       where: { shopDomain: shop, orderId: { not: null }, startedAt: { gte: since } },
       _sum: { orderRevenueCents: true },
-    }),
-    prisma.conversation.count({ where: { shopDomain: shop, cartId: { not: null }, startedAt: { gte: since } } }),
-    prisma.conversation.count({
-      where: { shopDomain: shop, cartId: { not: null }, orderId: { not: null }, startedAt: { gte: since } },
     }),
     prisma.conversation.findMany({
       where: {
@@ -147,12 +139,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     currencyCode,
     stats: {
       totalConversations,
-      escalatedCount,
       conversionsCount,
       discountsUsedCount,
       revenueCents: revenueAgg._sum.orderRevenueCents ?? 0,
-      cartsCreatedCount,
-      cartsRecoveredCount,
     },
     recentEscalations,
     usage,
@@ -512,10 +501,6 @@ export default function Index() {
   } = loaderData;
 
   // ── Computed metrics ──────────────────────────────────────────────────────
-  const escalationRatePct = stats.totalConversations
-    ? Math.round((stats.escalatedCount / stats.totalConversations) * 100)
-    : 0;
-  const resolutionRatePct = 100 - escalationRatePct;
   const conversionRatePct = stats.totalConversations
     ? Math.round((stats.conversionsCount / stats.totalConversations) * 100)
     : 0;
@@ -528,9 +513,6 @@ export default function Index() {
   const aov = stats.conversionsCount
     ? fmtCurrency(stats.revenueCents / stats.conversionsCount)
     : fmtCurrency(0);
-  const cartConversionRatePct = stats.cartsCreatedCount
-    ? Math.round((stats.cartsRecoveredCount / stats.cartsCreatedCount) * 100)
-    : 0;
 
   const revenuePerChat =
     stats.totalConversations > 0 && stats.revenueCents > 0
@@ -546,12 +528,6 @@ export default function Index() {
     !isAtCapacity;
 
   const daysNum = parseInt(days, 10) || 30;
-
-  const usageBorderColor = isAtCapacity
-    ? "#d82c0d"
-    : isNearCapacity
-    ? "#ffc453"
-    : "#6d7175";
 
   return (
     <s-page heading="Dashboard">
@@ -670,13 +646,13 @@ export default function Index() {
         <LineChart data={dailyData} daysNum={daysNum} />
       </s-section>
 
-      {/* ── Performance (8 KPI grid) ── */}
+      {/* ── Performance (6 KPI grid) ── */}
       <s-section heading="Performance">
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: "12px",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: "14px",
           }}
         >
           <Metric
@@ -688,31 +664,20 @@ export default function Index() {
           <Metric
             label="Revenue attributed"
             value={revenue}
-            sub={`from ${stats.conversionsCount} orders`}
+            sub={`from ${stats.conversionsCount} order${stats.conversionsCount !== 1 ? "s" : ""}`}
             borderColor="#008060"
           />
           <Metric
             label="Conversion rate"
-            value={`${conversionRatePct}%`}
+            value={stats.totalConversations > 0 ? `${conversionRatePct}%` : "—"}
             sub={`${stats.conversionsCount} of ${stats.totalConversations} converted`}
             borderColor="#008060"
           />
           <Metric
             label="Avg order value"
-            value={aov}
+            value={stats.conversionsCount > 0 ? aov : "—"}
+            sub="per attributed order"
             borderColor="#2c6ecb"
-          />
-          <Metric
-            label="Resolution rate"
-            value={`${resolutionRatePct}%`}
-            sub={`${stats.escalatedCount} escalated`}
-            borderColor="#008060"
-          />
-          <Metric
-            label="Cart conversion rate"
-            value={`${cartConversionRatePct}%`}
-            sub={`${stats.cartsCreatedCount} cart sessions`}
-            borderColor="#008060"
           />
           <Metric
             label="Revenue per chat"
@@ -726,7 +691,7 @@ export default function Index() {
             sub={
               usage.limit > 0 ? `${usagePercent}% of billing cycle` : "Unlimited"
             }
-            borderColor={usageBorderColor}
+            borderColor={usagePercent >= 100 ? "#d82c0d" : usagePercent >= 80 ? "#ffc453" : "#008060"}
           />
         </div>
       </s-section>
