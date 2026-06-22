@@ -32,16 +32,22 @@ import type { ActionFunctionArgs } from "react-router";
 import prisma from "~/db.server";
 import { getSession, setSession, resetTurn, appendMessage } from "~/lib/session.server";
 import { fetchCustomerMemory, updateCustomerMemory } from "~/lib/agents/memory.server";
-import { runOrchestrator } from "~/lib/agents/orchestrator.server";
+import { runUnifiedAgent } from "~/lib/agents/unified.server";
 import { persistConversationTurn, extractCheckoutToken } from "~/lib/conversation.server";
 import { getStorefrontAccessToken } from "~/lib/auth.server";
 import { checkChatRateLimit, getClientIp } from "~/lib/rate-limit.server";
 import { checkAndIncrementUsage } from "~/lib/billing.server";
+import { updateCart, createCart } from "~/lib/mcp/cart.server";
 import type { Merchant } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+interface CartAction {
+  variantId: string;
+  quantity: number;
+}
 
 interface InboundMessage {
   session_id: string;
@@ -49,7 +55,9 @@ interface InboundMessage {
   message: string;
   customer_id?: string;
   customer_access_token?: string;
+  customer_first_name?: string;
   cart_total_cents?: number;
+  cartAction?: CartAction;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  const { session_id, shop, message, customer_id, customer_access_token, cart_total_cents } = body;
+  const { session_id, shop, message, customer_id, customer_access_token, customer_first_name, cart_total_cents, cartAction } = body;
 
   if (!session_id || !shop || !message?.trim()) {
     return new Response(JSON.stringify({ error: "missing_fields" }), {
@@ -116,8 +124,16 @@ export async function action({ request }: ActionFunctionArgs) {
   // Usage limit check — blocks before any LLM/MCP work if the shop is over its plan limit
   const usage = await checkAndIncrementUsage(shop);
   if (!usage.allowed) {
+    const noPlan = usage.limit === 0;
     return new Response(
-      JSON.stringify({ error: "usage_limit_exceeded", used: usage.used, limit: usage.limit }),
+      JSON.stringify({
+        error: noPlan ? "no_active_plan" : "usage_limit_exceeded",
+        message: noPlan
+          ? "A paid plan is required to use NeonPing. Please subscribe at your store admin."
+          : "Monthly conversation limit reached. Upgrade your plan to continue.",
+        used: usage.used,
+        limit: usage.limit,
+      }),
       { status: 402, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -131,7 +147,9 @@ export async function action({ request }: ActionFunctionArgs) {
     merchant,
     customer_id,
     customer_access_token,
+    customer_first_name,
     cart_total_cents,
+    cartAction,
   });
 
   return new Response(stream, {
@@ -156,6 +174,7 @@ export async function loader({ request }: ActionFunctionArgs) {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "86400",
       },
     });
   }
@@ -174,7 +193,9 @@ function buildSseStream(opts: {
   merchant: Merchant;
   customer_id?: string;
   customer_access_token?: string;
+  customer_first_name?: string;
   cart_total_cents?: number;
+  cartAction?: CartAction;
 }): ReadableStream<Uint8Array> {
   const {
     shop,
@@ -184,7 +205,9 @@ function buildSseStream(opts: {
     merchant,
     customer_id,
     customer_access_token,
+    customer_first_name,
     cart_total_cents,
+    cartAction,
   } = opts;
 
   const encoder = new TextEncoder();
@@ -196,25 +219,55 @@ function buildSseStream(opts: {
       };
 
       try {
-        // 1. Reset per-turn counters (hop_count, agent_calls)
+        // 1. Load session (resetTurn resets per-turn hop counters — kept for session shape compat)
         const session = await resetTurn(shop, session_id);
 
-        // 2. Append the user message to history
-        await appendMessage(shop, session_id, {
+        // 1b. Pre-handle cart action deterministically — no LLM parsing of GIDs needed
+        let preCartResult: { cart?: unknown; checkoutUrl?: string } = {};
+        if (cartAction) {
+          if (session.cart_id) {
+            try {
+              const updated = await updateCart(shop, session.cart_id, {
+                add: [{ product_variant_id: cartAction.variantId, quantity: cartAction.quantity }],
+              });
+              preCartResult = { cart: updated, checkoutUrl: updated.checkoutUrl };
+            } catch {
+              // fail silently — agent will handle naturally
+            }
+          } else {
+            try {
+              const newCart = await createCart(shop, [
+                { item: { id: cartAction.variantId }, quantity: cartAction.quantity },
+              ]);
+              preCartResult = { cart: newCart, checkoutUrl: newCart.checkoutUrl };
+              session.cart_id = newCart.id; // store for this turn
+            } catch {
+              // fail silently — agent will handle naturally
+            }
+          }
+        }
+        // Always pass a clean message — no GID prefix needed anymore
+        const agentMessage = message;
+
+        // 2 + 3. Append user message and fetch customer memory in parallel — they're independent
+        const appendP = appendMessage(shop, session_id, {
           role: "user",
           content: message,
           timestamp: Date.now(),
         });
+        const memoryP = customer_id
+          ? fetchCustomerMemory(shop, accessToken, customer_id)
+          : Promise.resolve<import("~/lib/agents/memory.server").CustomerMemory>({});
+        const [, memory] = await Promise.all([appendP, memoryP]);
+        // Liquid injects first_name directly — reliable fallback when memory fetch returns nothing
+        if (!memory.firstName && customer_first_name) {
+          memory.firstName = customer_first_name;
+        }
 
-        // 3. Fetch customer memory (graceful — returns {} on miss)
-        const memory = customer_id
-          ? await fetchCustomerMemory(shop, accessToken, customer_id)
-          : {};
-
-        // 4. Run the orchestrator (all agents behind this call)
-        const result = await runOrchestrator({
+        // 4. Run the unified agent (shopping + support + personalization in one LLM call)
+        const result = await runUnifiedAgent({
           shopDomain: shop,
-          currentMessage: message,
+          agentMessage,
           session,
           merchant,
           memory,
@@ -232,10 +285,14 @@ function buildSseStream(opts: {
         }
 
         // 6. Emit structured meta (products, cart, URLs, etc.)
+        // Merge preCartResult (from deterministic cart update) with agent result —
+        // agent result takes precedence if it also touched the cart (e.g. applied discount).
+        const effectiveCart = result.cart ?? preCartResult.cart;
+        const effectiveCheckoutUrl = result.checkout_url ?? preCartResult.checkoutUrl;
         const meta: Record<string, unknown> = {};
         if (result.products?.length) meta.products = result.products;
-        if (result.cart) meta.cart = result.cart;
-        if (result.checkout_url) meta.checkout_url = result.checkout_url;
+        if (effectiveCart) meta.cart = effectiveCart;
+        if (effectiveCheckoutUrl) meta.checkout_url = effectiveCheckoutUrl;
         if (result.discount_code) meta.discount_code = result.discount_code;
         if (result.quick_replies?.length) meta.quick_replies = result.quick_replies;
         if (result.escalate_to_human) meta.escalate_to_human = true;
@@ -250,15 +307,15 @@ function buildSseStream(opts: {
           timestamp: Date.now(),
         });
 
-        // Update session with any cart/checkout state the agent may have set
+        // Update session with any cart/checkout state from agent or pre-cart step
         const updatedSession = await getSession(shop, session_id);
-        if (result.cart) {
-          const cartId = (result.cart as { id?: string }).id;
+        if (effectiveCart) {
+          const cartId = (effectiveCart as { id?: string }).id;
           if (cartId) updatedSession.cart_id = cartId;
         }
-        if (result.checkout_url && !result.escalate_to_human) {
+        if (effectiveCheckoutUrl && !result.escalate_to_human) {
           updatedSession.checkout_id = session_id; // mark checkout initiated
-          updatedSession.checkout_token = extractCheckoutToken(result.checkout_url);
+          updatedSession.checkout_token = extractCheckoutToken(effectiveCheckoutUrl);
         }
         if (result.discount_code) {
           const neg = updatedSession.discount_negotiation;
@@ -269,7 +326,7 @@ function buildSseStream(opts: {
           updatedSession.discount_negotiation = neg;
         }
         // Also track if customer applied their own code via update_cart
-        const cartDiscounts = (result.cart as { discountCodes?: unknown[] } | undefined)?.discountCodes;
+        const cartDiscounts = (effectiveCart as { discountCodes?: unknown[] } | undefined)?.discountCodes;
         if (cartDiscounts && (cartDiscounts as unknown[]).length > 0) {
           const neg = updatedSession.discount_negotiation;
           neg.level = 3; // cap negotiation — they've used a code
@@ -283,7 +340,7 @@ function buildSseStream(opts: {
           sessionId: session_id,
           customerId: customer_id,
           session: updatedSession,
-          checkoutUrl: result.checkout_url,
+          checkoutUrl: effectiveCheckoutUrl,
           discountCode: result.discount_code,
           escalateToHuman: result.escalate_to_human,
           agentTrace: result.agent_trace,
@@ -293,8 +350,8 @@ function buildSseStream(opts: {
         // 9. Async memory update (fire-and-forget, never blocks response)
         if (customer_id) {
           const lastSearch = result.last_search_query;
-          const cartLines = result.cart
-            ? ((result.cart as { lines?: unknown[] }).lines ?? [])
+          const cartLines = effectiveCart
+            ? ((effectiveCart as { lines?: unknown[] }).lines ?? [])
             : undefined;
           void updateCustomerMemory(
             shop,
