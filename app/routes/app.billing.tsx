@@ -270,8 +270,9 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
           </div>
         )}
         <fetcher.Form method="POST">
-          <input type="hidden" name="plan" value={plan.key} />
+          <input type="hidden" id={`plan-input-${plan.key}`} name="plan" value={plan.key} />
           <button
+            id={`plan-submit-${plan.key}`}
             type="submit"
             disabled={isCurrent || isSubmitting}
             style={{

@@ -5,15 +5,6 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getUsage } from "../lib/billing.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -236,94 +227,78 @@ function ConversationsChart({
 }) {
   const daysNum = parseInt(days, 10) || 30;
   const filled = fillDates(data, daysNum);
+  const maxCount = Math.max(...filled.map((d) => d.count), 1);
 
-  // Format x-axis tick: show "Jun 15" style
-  const fmtTick = (iso: string) => {
+  // Show at most 7 x-axis labels to avoid crowding
+  const labelCount = Math.min(7, filled.length);
+  const labelIndices = new Set(
+    Array.from({ length: labelCount }, (_, i) =>
+      Math.round((i / Math.max(labelCount - 1, 1)) * (filled.length - 1))
+    )
+  );
+
+  const fmtLabel = (iso: string) => {
     const d = new Date(iso + "T00:00:00");
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
-  // How many ticks to show on x-axis (avoid crowding)
-  const tickCount = daysNum <= 7 ? daysNum : daysNum <= 14 ? 7 : daysNum <= 30 ? 6 : 7;
-  const tickIndices = Array.from({ length: tickCount }, (_, i) =>
-    Math.round((i / (tickCount - 1)) * (filled.length - 1))
-  );
-  const ticks = tickIndices.map((i) => filled[i]?.date).filter(Boolean) as string[];
-
-  // Custom tooltip
-  const CustomTooltip = ({
-    active,
-    payload,
-    label,
-  }: {
-    active?: boolean;
-    payload?: Array<{ value: number }>;
-    label?: string;
-  }) => {
-    if (!active || !payload?.length || !label) return null;
-    return (
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      {/* Bars */}
       <div
         style={{
-          background: "#fff",
-          border: "1px solid #e1e1e1",
-          borderRadius: "6px",
-          padding: "8px 12px",
-          fontSize: "13px",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+          display: "flex",
+          alignItems: "flex-end",
+          gap: "2px",
+          height: "160px",
+          padding: "0 4px",
+          borderBottom: "1px solid #e1e1e1",
         }}
       >
-        <div style={{ color: "#888", marginBottom: "2px" }}>{fmtTick(label)}</div>
-        <div style={{ color: "#1a1a1a", fontWeight: 600 }}>
-          {payload[0].value} conversation{payload[0].value !== 1 ? "s" : ""}
-        </div>
+        {filled.map((d) => {
+          const heightPct = (d.count / maxCount) * 100;
+          return (
+            <div
+              key={d.date}
+              title={`${fmtLabel(d.date)}: ${d.count} conversation${d.count !== 1 ? "s" : ""}`}
+              style={{
+                flex: 1,
+                minWidth: "2px",
+                height: `${Math.max(heightPct, d.count > 0 ? 2 : 0)}%`,
+                background: "#7c3aed",
+                opacity: 0.75,
+                borderRadius: "2px 2px 0 0",
+                transition: "height 0.2s ease",
+              }}
+            />
+          );
+        })}
       </div>
-    );
-  };
-
-  return (
-    <div style={{ width: "100%", height: 200 }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart
-          data={filled}
-          margin={{ top: 8, right: 8, left: -24, bottom: 0 }}
-        >
-          <defs>
-            <linearGradient id="convGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.12} />
-              <stop offset="95%" stopColor="#7c3aed" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-          <XAxis
-            dataKey="date"
-            ticks={ticks}
-            tickFormatter={fmtTick}
-            tick={{ fontSize: 11, fill: "#999" }}
-            axisLine={false}
-            tickLine={false}
-          />
-          <YAxis
-            allowDecimals={false}
-            tick={{ fontSize: 11, fill: "#999" }}
-            axisLine={false}
-            tickLine={false}
-          />
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-          <Tooltip content={<CustomTooltip />} cursor={{ stroke: "#7c3aed", strokeWidth: 1, strokeDasharray: "4 4" }} />
-          <Area
-            type="monotone"
-            dataKey="count"
-            stroke="#7c3aed"
-            strokeWidth={2}
-            fill="url(#convGradient)"
-            dot={false}
-            activeDot={{ r: 4, fill: "#7c3aed", strokeWidth: 0 }}
-            isAnimationActive={true}
-            animationDuration={400}
-            animationEasing="ease-out"
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+      {/* X-axis labels */}
+      <div
+        style={{
+          display: "flex",
+          gap: "2px",
+          padding: "4px 4px 0",
+        }}
+      >
+        {filled.map((d, i) => (
+          <div
+            key={d.date}
+            style={{
+              flex: 1,
+              minWidth: "2px",
+              fontSize: "10px",
+              color: "#999",
+              textAlign: "center",
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {labelIndices.has(i) ? fmtLabel(d.date) : ""}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
