@@ -15,11 +15,15 @@ ENV SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN
 
 COPY package.json package-lock.json* ./
 
-RUN HUSKY=0 npm ci --omit=dev && npm cache clean --force
+# Install all deps (including devDeps) so vite plugins are available at build time
+RUN HUSKY=0 npm ci
 
 COPY . .
 
 RUN npm run build
+
+# Prune devDeps after build — keeps final image lean
+RUN npm prune --omit=dev && npm cache clean --force
 
 # Remove source maps from final image — they were uploaded to Sentry during build
 RUN find ./build -name "*.map" -delete
