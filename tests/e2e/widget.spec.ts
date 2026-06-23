@@ -4,20 +4,27 @@ import { sendMessage } from "./helpers/sendMessage";
 const STORE_URL =
   process.env.SHOPIFY_STORE_URL ?? "https://neonping-dev-a509ojgs.myshopify.com";
 
+// Widget tests require the NeonPing Theme App Extension to be installed on the
+// dev store. Skip in CI where the extension may not be installed/enabled.
+const skipInCI = !!process.env.CI;
+
 test.describe("NeonPing Widget — Storefront", () => {
   test("widget launcher appears on storefront", async ({ page }) => {
+    test.skip(skipInCI, "Requires Theme App Extension installed on dev store");
     await page.goto(STORE_URL);
     const launcher = page.locator("#np-launcher");
     await expect(launcher).toBeVisible({ timeout: 15_000 });
   });
 
   test("widget opens and receives a response", async ({ page }) => {
+    test.skip(skipInCI, "Requires Theme App Extension installed on dev store");
     await page.goto(STORE_URL);
     const botReply = await sendMessage(page, "hello");
     expect(botReply.length).toBeGreaterThan(0);
   });
 
   test("product search shows product cards", async ({ page }) => {
+    test.skip(skipInCI, "Requires Theme App Extension installed on dev store");
     await page.goto(STORE_URL);
     await sendMessage(page, "show me resistance bands");
 
@@ -28,6 +35,7 @@ test.describe("NeonPing Widget — Storefront", () => {
   });
 
   test("widget is hidden on cart page", async ({ page }) => {
+    test.skip(skipInCI, "Requires Theme App Extension installed on dev store");
     await page.goto(`${STORE_URL}/cart`);
 
     // Give the widget JS time to run its page exclusion check
