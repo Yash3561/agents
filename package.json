@@ -24,7 +24,7 @@
     "test:e2e": "playwright test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepare": "husky"
+    "prepare": "node -e \"if (process.env.NODE_ENV !== 'production') require('child_process').execSync('husky', {stdio:'inherit'})\""
   },
   "lint-staged": {
     "*.{ts,tsx}": [
