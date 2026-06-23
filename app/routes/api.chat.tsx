@@ -38,6 +38,7 @@ import { getStorefrontAccessToken } from "~/lib/auth.server";
 import { checkChatRateLimit, getClientIp } from "~/lib/rate-limit.server";
 import { checkAndIncrementUsage } from "~/lib/billing.server";
 import { updateCart, createCart } from "~/lib/mcp/cart.server";
+import { captureException } from "~/lib/sentry.server";
 import type { Merchant } from "@prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -440,7 +441,10 @@ function buildSseStream(opts: {
           agentTrace: result.agent_trace,
           routeReason: result.route_reason,
           cartValueCents: effectiveCartValueCents,
-        }).catch((err) => console.error("[conversation] persist failed:", err));
+        }).catch((err) => {
+          console.error("[conversation] persist failed:", err);
+          captureException(err, { shop, session_id, context: "persist_conversation" });
+        });
 
         // 9. Async memory update (fire-and-forget, never blocks response)
         if (customer_id) {
@@ -460,6 +464,7 @@ function buildSseStream(opts: {
 
         send("done", "{}");
       } catch (err) {
+        captureException(err, { shop, session_id });
         const message =
           err instanceof Error ? err.message : "An unexpected error occurred";
         send("error", JSON.stringify({ code: "internal_error", message }));

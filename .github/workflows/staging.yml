@@ -28,6 +28,8 @@ jobs:
           IMAGE_TAG="v$(date +%Y%m%d)-${{ github.run_number }}"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           docker build --platform linux/amd64 \
+            --build-arg BUILD_VERSION=${IMAGE_TAG} \
+            --build-arg SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }} \
             -t caab3198e06dacr.azurecr.io/neonping:${IMAGE_TAG} .
           az acr login --name caab3198e06dacr
           docker push caab3198e06dacr.azurecr.io/neonping:${IMAGE_TAG}

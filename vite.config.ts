@@ -1,6 +1,7 @@
 import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 
 // Related: https://github.com/remix-run/remix/issues/2835#issuecomment-1144102176
 // Replace the HOST env var with SHOPIFY_APP_URL so that it doesn't break the Vite server.
@@ -51,9 +52,18 @@ export default defineConfig({
   plugins: [
     reactRouter(),
     tsconfigPaths(),
+    sentryVitePlugin({
+      org: "neonping",
+      project: "neonping",
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      telemetry: false,
+      // Only upload source maps during Docker/CI builds, not local dev
+      disable: !process.env.SENTRY_AUTH_TOKEN,
+    }),
   ],
   build: {
     assetsInlineLimit: 0,
+    sourcemap: true,
   },
   optimizeDeps: {
     include: ["@shopify/app-bridge-react"],
