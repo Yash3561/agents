@@ -15,8 +15,9 @@ ENV SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN
 
 COPY package.json package-lock.json* ./
 
-# Install all deps (including devDeps) so vite plugins are available at build time
-RUN HUSKY=0 npm ci
+# Install all deps (including devDeps) so vite plugins are available at build time.
+# NODE_ENV override is required — npm omits devDeps automatically when NODE_ENV=production.
+RUN HUSKY=0 NODE_ENV=development npm ci
 
 COPY . .
 
