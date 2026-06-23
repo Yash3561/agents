@@ -12,7 +12,7 @@ ENV BUILD_VERSION=$BUILD_VERSION
 
 COPY package.json package-lock.json* ./
 
-RUN npm ci --omit=dev && npm cache clean --force
+RUN HUSKY=0 npm ci --omit=dev && npm cache clean --force
 
 COPY . .
 
