@@ -137,6 +137,31 @@ export async function updateCustomerMemory(
 }
 
 // ---------------------------------------------------------------------------
+// Clear abandoned_cart signal after successful cart pre-population
+// ---------------------------------------------------------------------------
+
+/**
+ * Nulls out the abandoned_cart metafield so the recovery greeting
+ * doesn't fire again on the customer's next visit.
+ * Called fire-and-forget after pre-populating the cart from abandoned_cart.
+ */
+export async function clearAbandonedCart(
+  shopDomain: string,
+  accessToken: string,
+  customerId: string,
+): Promise<void> {
+  if (!customerId) return;
+  try {
+    const current = await fetchCustomerMemory(shopDomain, accessToken, customerId);
+    if (!current.abandoned_cart) return; // nothing to clear
+    const updated: CustomerMemory = { ...current, abandoned_cart: undefined };
+    await writeMemory(shopDomain, accessToken, customerId, updated);
+  } catch {
+    // Best-effort
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GDPR: wipe all neonping_chat metafields for a customer
 // ---------------------------------------------------------------------------
 

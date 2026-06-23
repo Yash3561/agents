@@ -31,7 +31,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "~/db.server";
 import { getSession, setSession, resetTurn, appendMessage } from "~/lib/session.server";
-import { fetchCustomerMemory, updateCustomerMemory } from "~/lib/agents/memory.server";
+import { fetchCustomerMemory, updateCustomerMemory, clearAbandonedCart } from "~/lib/agents/memory.server";
 import { runUnifiedAgent } from "~/lib/agents/unified.server";
 import { persistConversationTurn, extractCheckoutToken } from "~/lib/conversation.server";
 import { getStorefrontAccessToken } from "~/lib/auth.server";
@@ -274,6 +274,36 @@ function buildSseStream(opts: {
         // Liquid injects first_name directly — reliable fallback when memory fetch returns nothing
         if (!memory.firstName && customer_first_name) {
           memory.firstName = customer_first_name;
+        }
+
+        // Pre-populate cart from abandoned_cart so the agent has a live cart_id
+        // before it runs and can skip the re-search/re-add cycle entirely.
+        if (
+          customer_id &&
+          !session.cart_id &&
+          memory.abandoned_cart?.items?.length
+        ) {
+          try {
+            const abandonedItems = memory.abandoned_cart.items as Array<{
+              merchandise?: { id?: string };
+            }>;
+            const lineItems = abandonedItems
+              .filter((line) => line.merchandise?.id)
+              .map((line) => ({
+                item: { id: line.merchandise!.id! },
+                quantity: 1,
+              }));
+
+            if (lineItems.length > 0) {
+              const restoredCart = await createCart(shop, lineItems);
+              session.cart_id = restoredCart.id;
+              await setSession(shop, session_id, session);
+              // Clear signal so recovery greeting doesn't fire on the next visit
+              void clearAbandonedCart(shop, accessToken, customer_id).catch(() => null);
+            }
+          } catch {
+            // Cart pre-population is best-effort — agent can still recover manually
+          }
         }
 
         const t1 = Date.now();

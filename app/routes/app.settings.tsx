@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData, useRouteError } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -35,6 +36,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { merchant };
 };
 
+const VALID_POSITIONS = new Set(["bottom-right", "bottom-left"]);
+const VALID_VOICES = new Set(["friendly and helpful", "professional and concise", "playful and fun", "premium and polished"]);
+const VALID_PAGES = new Set(["checkout", "cart", "account", "blog"]);
+const HEX_RE = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
@@ -42,24 +48,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const personalizationEnabled = formData.get("personalizationEnabled") === "true";
   const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
   const proactiveEngagementEnabled = formData.get("proactiveEngagementEnabled") === "true";
-  const excludedPages = formData.getAll("excludedPages") as string[];
-  const botName = String(formData.get("botName") ?? "").trim() || "NeonPing";
+  const excludedPages = (formData.getAll("excludedPages") as string[]).filter((p) => VALID_PAGES.has(p));
+  const botName = String(formData.get("botName") ?? "").trim().slice(0, 30) || "NeonPing";
 
-  const merchant = await prisma.merchant.update({
-    where: { shopDomain: session.shop },
-    data: {
-      widgetGreeting: String(formData.get("widgetGreeting") ?? ""),
-      botName,
-      widgetColor: String(formData.get("widgetColor") ?? "#1a1a1a"),
-      widgetPosition: String(formData.get("widgetPosition") ?? "bottom-right"),
-      brandVoice: String(formData.get("brandVoice") ?? "friendly and helpful"),
-      supportEmail: String(formData.get("supportEmail") ?? "") || null,
-      personalizationEnabled,
-      escalationEmailEnabled,
-      proactiveEngagementEnabled,
-      excludedPages,
-    },
-  });
+  const rawColor = String(formData.get("widgetColor") ?? "").trim();
+  const widgetColor = HEX_RE.test(rawColor) ? rawColor : "#1a1a1a";
+
+  const rawPosition = String(formData.get("widgetPosition") ?? "");
+  const widgetPosition = VALID_POSITIONS.has(rawPosition) ? rawPosition : "bottom-right";
+
+  const rawVoice = String(formData.get("brandVoice") ?? "");
+  const brandVoice = VALID_VOICES.has(rawVoice) ? rawVoice : "friendly and helpful";
+
+  let merchant;
+  try {
+    merchant = await prisma.merchant.update({
+      where: { shopDomain: session.shop },
+      data: {
+        widgetGreeting: String(formData.get("widgetGreeting") ?? "").slice(0, 500),
+        botName,
+        widgetColor,
+        widgetPosition,
+        brandVoice,
+        supportEmail: String(formData.get("supportEmail") ?? "").trim() || null,
+        personalizationEnabled,
+        escalationEmailEnabled,
+        proactiveEngagementEnabled,
+        excludedPages,
+      },
+    });
+  } catch {
+    return { error: "Failed to save settings. Please try again." };
+  }
 
   return { merchant, saved: true };
 };
@@ -187,6 +207,9 @@ export default function Settings() {
   useEffect(() => {
     if (fetcher.data?.saved) {
       shopify.toast.show("Settings saved");
+    }
+    if ((fetcher.data as { error?: string } | undefined)?.error) {
+      shopify.toast.show((fetcher.data as { error: string }).error, { isError: true });
     }
   }, [fetcher.data, shopify]);
 
@@ -381,3 +404,11 @@ export default function Settings() {
     </s-page>
   );
 }
+
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
+
+export const headers: HeadersFunction = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};

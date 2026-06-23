@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData, useRouteError } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { Prisma } from "@prisma/client";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendTestMessage } from "../lib/test-chat";
@@ -70,8 +71,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "test-chat") {
-    const message = String(formData.get("testMessage") || "Hello");
     const apiBase = process.env.SHOPIFY_APP_URL ?? "";
+    if (!apiBase) {
+      return { error: "Test chat is unavailable: SHOPIFY_APP_URL is not configured. Contact support." };
+    }
+    const message = String(formData.get("testMessage") || "Hello");
     const result = await sendTestMessage(session.shop, message, apiBase);
     return { testResponse: result.text };
   }
@@ -152,6 +156,8 @@ export default function AiConfig() {
 
   const testResponse =
     (testFetcher.data as { testResponse?: string } | undefined)?.testResponse;
+  const testError =
+    (testFetcher.data as { error?: string } | undefined)?.error;
   const testLoading = testFetcher.state !== "idle";
 
   // --- Quick replies state ---
@@ -268,6 +274,11 @@ export default function AiConfig() {
             </s-stack>
           </s-box>
         ) : null}
+        {testError && !testLoading ? (
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-text tone="critical">{testError}</s-text>
+          </s-box>
+        ) : null}
       </s-section>
 
       {/* ------------------------------------------------------------------ */}
@@ -323,3 +334,11 @@ export default function AiConfig() {
     </s-page>
   );
 }
+
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
+
+export const headers: HeadersFunction = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};

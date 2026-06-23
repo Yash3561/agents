@@ -1,6 +1,7 @@
 import { useEffect } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useFetcher } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useFetcher, useRouteError } from "react-router";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getUsage, PLAN_LIMITS } from "../lib/billing.server";
 import db from "../db.server";
@@ -365,7 +366,7 @@ export default function BillingPage() {
             <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between" }}>
               <s-text tone="neutral">{usagePct}% used</s-text>
               <s-text tone="neutral">
-                Resets {resetAtStr} ({daysUntilReset <= 1 ? "tomorrow" : `in ${daysUntilReset} days`})
+                Resets {resetAtStr} ({daysUntilReset <= 0 ? "soon" : daysUntilReset === 1 ? "tomorrow" : `in ${daysUntilReset} days`})
               </s-text>
             </div>
             {usagePct >= 80 && usagePct < 100 && (
@@ -416,3 +417,11 @@ export default function BillingPage() {
     </s-page>
   );
 }
+
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
+
+export const headers: HeadersFunction = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};

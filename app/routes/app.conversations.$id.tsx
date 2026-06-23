@@ -1,7 +1,9 @@
-import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useLoaderData, useRouteError } from "react-router";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { adminGraphql } from "../lib/mcp/admin.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -17,7 +19,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response("Not Found", { status: 404 });
   }
 
-  return { conversation };
+  let currencyCode = "USD";
+  try {
+    const shopData = await adminGraphql<{ shop: { currencyCode: string } }>(
+      session.shop,
+      session.accessToken ?? "",
+      `{ shop { currencyCode } }`,
+    );
+    currencyCode = shopData.shop?.currencyCode ?? "USD";
+  } catch {
+    // fall back to USD
+  }
+
+  return { conversation, currencyCode };
 }
 
 interface ChatMessage {
@@ -42,7 +56,11 @@ const TOOL_LABELS: Record<string, string | null> = {
 };
 
 export default function ConversationDetail() {
-  const { conversation } = useLoaderData<typeof loader>();
+  const { conversation, currencyCode } = useLoaderData<typeof loader>();
+
+  function fmtMoney(dollars: number) {
+    return new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(dollars);
+  }
 
   const agentTraceArr = Array.isArray(conversation.agentTrace)
     ? (conversation.agentTrace as string[])
@@ -65,15 +83,14 @@ export default function ConversationDetail() {
     {
       label: "Cart Added",
       done: inCart,
-      detail: conversation.cartValue ? `$${conversation.cartValue.toFixed(2)}` : undefined,
+      detail: conversation.cartValue ? fmtMoney(conversation.cartValue) : undefined,
     },
     {
       label: "Purchased",
       done: purchased,
-      detail:
-        conversation.orderRevenueCents
-          ? `$${(conversation.orderRevenueCents / 100).toFixed(2)}`
-          : undefined,
+      detail: conversation.orderRevenueCents
+        ? fmtMoney(conversation.orderRevenueCents / 100)
+        : undefined,
     },
   ];
 
@@ -319,3 +336,11 @@ export default function ConversationDetail() {
     </s-page>
   );
 }
+
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
+
+export const headers: HeadersFunction = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};

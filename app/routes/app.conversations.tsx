@@ -314,7 +314,11 @@ export default function Conversations() {
 
         {/* Table */}
         {conversations.length === 0 ? (
-          <s-paragraph>No conversations found.</s-paragraph>
+          <s-paragraph>
+            {totalCount === 0
+              ? "No conversations yet. Share your store link to get your first chat."
+              : "No conversations match the current filters. Try clearing the search or changing the filters above."}
+          </s-paragraph>
         ) : (
           <s-table variant="auto">
             <s-table-header-row>

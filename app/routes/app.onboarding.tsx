@@ -1,6 +1,8 @@
-import { useState } from "react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { redirect, useFetcher, useLoaderData } from "react-router";
+import { useState, useEffect } from "react";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { redirect, useFetcher, useLoaderData, useRouteError } from "react-router";
+import { useAppBridge } from "@shopify/app-bridge-react";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -44,30 +46,56 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { shop, merchant, appUrl: process.env.SHOPIFY_APP_URL ?? "" };
 };
 
+const VALID_VOICES_ONBOARDING = new Set([
+  "friendly and helpful",
+  "professional and concise",
+  "playful and fun",
+  "premium and polished",
+]);
+const HEX_RE_ONBOARDING = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
 
   if (formData.get("intent") === "save-step") {
-    await prisma.merchant.update({
-      where: { shopDomain: session.shop },
-      data: { onboardingStep: Number(formData.get("step")) || 1 },
-    });
+    try {
+      await prisma.merchant.update({
+        where: { shopDomain: session.shop },
+        data: { onboardingStep: Number(formData.get("step")) || 1 },
+      });
+    } catch {
+      return { error: "Failed to save settings. Please try again." };
+    }
     return { ok: true };
   }
 
-  await prisma.merchant.update({
-    where: { shopDomain: session.shop },
-    data: {
-      widgetColor: String(formData.get("widgetColor") ?? "#1a1a1a"),
-      widgetGreeting: String(formData.get("widgetGreeting") ?? ""),
-      botName: String(formData.get("botName") ?? "").trim() || "NeonPing",
-      brandVoice: String(formData.get("brandVoice") ?? "friendly and helpful"),
-      personalizationEnabled: formData.get("personalizationEnabled") === "true",
-      onboardedAt: new Date(),
-      onboardingStep: 4,
-    },
-  });
+  // Final submit — validate widget config fields
+  const rawColor = String(formData.get("widgetColor") ?? "").trim();
+  const widgetColor = HEX_RE_ONBOARDING.test(rawColor) ? rawColor : "#1a1a1a";
+
+  const rawVoice = String(formData.get("brandVoice") ?? "");
+  const brandVoice = VALID_VOICES_ONBOARDING.has(rawVoice) ? rawVoice : "friendly and helpful";
+
+  const botName = String(formData.get("botName") ?? "").trim().slice(0, 30) || "NeonPing";
+  const widgetGreeting = String(formData.get("widgetGreeting") ?? "").slice(0, 500);
+
+  try {
+    await prisma.merchant.update({
+      where: { shopDomain: session.shop },
+      data: {
+        widgetColor,
+        widgetGreeting,
+        botName,
+        brandVoice,
+        personalizationEnabled: formData.get("personalizationEnabled") === "true",
+        onboardedAt: new Date(),
+        onboardingStep: 4,
+      },
+    });
+  } catch {
+    return { error: "Failed to save settings. Please try again." };
+  }
 
   const url = new URL(request.url);
   return redirect(`/app/billing?${url.searchParams.toString()}`);
@@ -120,6 +148,7 @@ function WidgetPreview({ color, greeting, botName }: { color: string; greeting: 
 export default function Onboarding() {
   const { shop, merchant, appUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  const shopify = useAppBridge();
 
   const [step, setStep] = useState(merchant.onboardingStep || 1);
   const [botName, setBotName] = useState(merchant.botName || "");
@@ -132,6 +161,13 @@ export default function Onboarding() {
   const [themeConfirmed, setThemeConfirmed] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testLoading, setTestLoading] = useState(false);
+
+  useEffect(() => {
+    const data = fetcher.data as { error?: string } | undefined;
+    if (fetcher.state === "idle" && data?.error) {
+      shopify.toast.show(data.error, { isError: true });
+    }
+  }, [fetcher.state, fetcher.data, shopify]);
 
   const selectedPreset = VOICE_PRESETS.find((p) => p.value === brandVoice);
 
@@ -166,7 +202,8 @@ export default function Onboarding() {
     }
   };
 
-  const themeEditorUrl = `https://${shop}/admin/themes/current/editor?context=apps&template=index`;
+  const storeHandle = shop.replace(".myshopify.com", "");
+  const themeEditorUrl = `https://admin.shopify.com/store/${storeHandle}/themes`;
 
   return (
     <s-page heading="Welcome to NeonPing">
@@ -322,3 +359,11 @@ export default function Onboarding() {
     </s-page>
   );
 }
+
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
+
+export const headers: HeadersFunction = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};
