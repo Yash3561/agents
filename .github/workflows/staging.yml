@@ -47,6 +47,16 @@ jobs:
           STAGING_URL="https://neonping-staging.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io"
           bash scripts/smoke-tests.sh $STAGING_URL
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps and Playwright browsers
+        run: |
+          HUSKY=0 npm ci
+          npx playwright install --with-deps chromium
+
       - name: E2E tests on staging
         run: npm run test:e2e
         env:
