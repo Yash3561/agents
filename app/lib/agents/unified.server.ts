@@ -196,12 +196,12 @@ export async function runUnifiedAgent(opts: {
     // -- Shopping tools --
     search_catalog: tool({
       description:
-        "Search the merchant catalog. Always pass intent (the customer's real underlying need) alongside query, and maxPriceCents whenever a budget was mentioned.",
+        "Search the merchant catalog. Always pass intent (the customer's real underlying need) alongside query, and maxPriceCents whenever a budget was mentioned. For gift queries (customer says 'gift', 'present', 'for my [person]', 'for him/her/them/someone'), the intent field MUST capture: (1) that it is a gift, (2) who it is for (e.g. 'gift for mom', 'gift for dad who runs', 'gift for boyfriend'), (3) any occasion if mentioned (birthday, anniversary, Mother's Day), and (4) relevant use-case or interest tags (e.g. 'spa', 'fitness', 'outdoors', 'beginner'). The query should use the recipient's interest/use-case as keywords, not the word 'gift' itself (e.g. query='face mask skincare' intent='gift for mom self-care spa' — Shopify search matches product tags, not intent strings). Example: customer says 'something for my dad who loves running under $50' → query='running', intent='gift for dad fitness active', maxPriceCents=5000.",
       inputSchema: z.object({
         query: z.string(),
         maxPriceCents: z.number().optional(),
         currency: z.string().optional(),
-        intent: z.string().optional(),
+        intent: z.string().optional().describe("The customer's real underlying need. For gift queries include: 'gift for [recipient]', occasion if known, and use-case/interest tags. For non-gift queries include budget signals, skill level, use case, or other context that changes which products rank best."),
         maxResults: z.number().min(1).max(3).optional(),
       }),
       execute: async (input) => {
