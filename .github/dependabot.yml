@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "main"
+    # Group all non-security updates into a single PR to reduce noise
+    groups:
+      all-non-security:
+        dependency-type: "all"
+        update-types:
+          - "minor"
+          - "patch"
+    # Security updates are NOT grouped — each gets its own PR for easy review
+    # (Dependabot automatically creates individual PRs for security updates
+    #  regardless of grouping config)
+    ignore:
+      # Never auto-bump major versions — too risky to auto-merge
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    open-pull-requests-limit: 10
