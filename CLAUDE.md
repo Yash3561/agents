@@ -1,6 +1,6 @@
 # NeonPing — Context & Continuation Guide
 
-**Last updated**: 2026-06-17  
+**Last updated**: 2026-06-24  
 **Status**: ✅ Live on Azure Container Apps, merchant portal fully working, ready for feature work  
 **Model default**: Sonnet 4.6
 
@@ -22,7 +22,7 @@
 ## Current State (as of 2026-06-16)
 
 ### ✅ Built & Verified (Live or Code-Reviewed)
-- **Merchant portal on Azure**: Fully working — no tunnel needed. Auth redirect bug fixed (`app._index.tsx` now passes Shopify query params when redirecting to onboarding). Docker image must be built with `--platform linux/amd64`. Current live image tag: `v3`.
+- **Merchant portal on Azure**: Fully working — no tunnel needed. Auth redirect bug fixed (`app._index.tsx` now passes Shopify query params when redirecting to onboarding). Docker image must be built with `--platform linux/amd64`. Current live image tag: `v20260624-18`.
 - **Core MCP/agents**: Orchestrator → Shopping/Support/Personalization/Memory agents (all gpt-4o-mini on Azure AI Foundry)
 - **Storefront widget**: Fully functional, <10KB bundle, live proactive engagement (exit-intent desktop + 30s time-on-page mobile), with suppression flag fix
 - **Revenue attribution**: Conversation persistence, orders/paid webhook tracking
@@ -35,6 +35,7 @@
 - **Merchant Dashboard**: AOV + cart-recovery-rate KPIs computed and displayed
 - **Onboarding wizard**: 4-step setup flow
 - **GDPR webhooks**: `customers/data_request`, `customers/redact`, `shop/redact` — compliance_topics TOML field used correctly (bug fixed in e087e1a)
+- **Webhook failure rate fixed**: Was 97.7% failure. Root causes fixed in 6deb7e6: wrong topic string in `subscriptions_update` handler (checked "app/subscriptions/update" but Shopify lib normalizes to "APP_SUBSCRIPTIONS_UPDATE"), invalid api_version "2026-07" in TOML (changed to "2026-04"), missing try/catch in 4 handlers. All 7 endpoints now return 200 OK.
 - **Privacy/ToS pages**: Draft content with legal disclaimer, contactable via kaushik@neonping.com
 - **Billing core**: `checkAndIncrementUsage()` with live Redis limit checks (stale-count bug found and fixed)
 
