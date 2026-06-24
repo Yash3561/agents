@@ -15,8 +15,11 @@ jobs:
   analyze:
     name: Analyze (javascript-typescript)
     runs-on: ubuntu-latest
-    # This job is informational only — it does NOT block PR merges.
-    # Results are uploaded to the GitHub Security tab for review.
+    # This job is informational only — it does NOT block PR merges or pushes.
+    # Results are uploaded to the GitHub Security tab when Advanced Security is enabled.
+    # continue-on-error: true ensures the workflow does not fail if SARIF upload is
+    # blocked by a missing GitHub Advanced Security licence.
+    continue-on-error: true
     permissions:
       actions: read
       contents: read

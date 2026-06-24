@@ -11,6 +11,14 @@ BASE_URL="${1:-https://neonping.politeocean-a6f0ef16.southcentralus.azurecontain
 SHOP="neonping-dev-a509ojgs.myshopify.com"
 TIMEOUT=30
 
+# Smoke-test bypass header — CI sets SMOKE_TEST_SECRET via GitHub Actions secret.
+# When set, /api/chat skips billing checks so the test shop (which has no paid plan
+# in the staging DB) can still exercise the SSE streaming path.
+SMOKE_HEADER=""
+if [ -n "${SMOKE_TEST_SECRET:-}" ]; then
+  SMOKE_HEADER="X-Smoke-Test: ${SMOKE_TEST_SECRET}"
+fi
+
 # ── colour helpers ────────────────────────────────────────────────────────────
 GREEN="\033[0;32m"
 RED="\033[0;31m"
@@ -40,9 +48,14 @@ http_body() {
 sse_output() {
   local url="$1"
   local body="$2"
+  local extra_header_args=()
+  if [ -n "$SMOKE_HEADER" ]; then
+    extra_header_args=(-H "$SMOKE_HEADER")
+  fi
   curl -s --no-buffer --max-time "$TIMEOUT" \
     -X POST "$url" \
     -H "Content-Type: application/json" \
+    "${extra_header_args[@]}" \
     -d "$body" 2>/dev/null || true
 }
 

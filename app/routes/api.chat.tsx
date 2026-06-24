@@ -122,23 +122,34 @@ export async function action({ request }: ActionFunctionArgs) {
     create: { shopDomain: shop },
   });
 
+  // Smoke-test bypass: CI passes X-Smoke-Test matching SMOKE_TEST_SECRET to skip
+  // billing (the test shop has no paid plan in the staging DB). Only active when
+  // the env var is set — no-ops in production if SMOKE_TEST_SECRET is not configured.
+  const smokeSecret = process.env.SMOKE_TEST_SECRET;
+  const isSmokeTest =
+    smokeSecret &&
+    smokeSecret.length > 0 &&
+    request.headers.get("X-Smoke-Test") === smokeSecret;
+
   // Usage limit check — increments once per conversation session, not once per message.
   // session_id dedup in billing.server.ts ensures "500 conversations/mo" means
   // 500 distinct chat sessions, not 500 individual messages.
-  const usage = await checkAndIncrementUsage(shop, session_id);
-  if (!usage.allowed) {
-    const noPlan = usage.limit === 0;
-    return new Response(
-      JSON.stringify({
-        error: noPlan ? "no_active_plan" : "usage_limit_exceeded",
-        message: noPlan
-          ? "A paid plan is required to use NeonPing. Please subscribe at your store admin."
-          : "Monthly conversation limit reached. Upgrade your plan to continue.",
-        used: usage.used,
-        limit: usage.limit,
-      }),
-      { status: 402, headers: { "Content-Type": "application/json" } },
-    );
+  if (!isSmokeTest) {
+    const usage = await checkAndIncrementUsage(shop, session_id);
+    if (!usage.allowed) {
+      const noPlan = usage.limit === 0;
+      return new Response(
+        JSON.stringify({
+          error: noPlan ? "no_active_plan" : "usage_limit_exceeded",
+          message: noPlan
+            ? "A paid plan is required to use NeonPing. Please subscribe at your store admin."
+            : "Monthly conversation limit reached. Upgrade your plan to continue.",
+          used: usage.used,
+          limit: usage.limit,
+        }),
+        { status: 402, headers: { "Content-Type": "application/json" } },
+      );
+    }
   }
 
   // Build the SSE stream
