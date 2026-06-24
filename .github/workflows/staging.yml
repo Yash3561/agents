@@ -94,6 +94,9 @@ jobs:
             --resource-group neonping-rg \
             --image caab3198e06dacr.azurecr.io/neonping:${{ needs.build-and-deploy-staging.outputs.image_tag }}
 
+      - name: Wait for production container to start
+        run: sleep 30
+
       - name: Smoke tests on production
         env:
           SMOKE_TEST_SECRET: ${{ secrets.SMOKE_TEST_SECRET }}
