@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { redis } from "~/redis.server";
 
 interface AppSubscription {
   id: string;
@@ -79,12 +80,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Update the merchant's plan.
-    // When a subscription becomes ACTIVE, anchor conversationResetAt to the
-    // Shopify activatedOn date so the 30-day usage cycle starts from payment,
-    // not from an arbitrary calendar boundary.
+    // On every ACTIVE transition (upgrade, downgrade, or renewal), reset the
+    // conversation counter to 0 and stamp conversationResetAt to now. A plan
+    // change = a new billing cycle, so merchants get a fresh start immediately.
+    // This prevents a downgraded merchant from being over-limit on day 1, and
+    // gives upgraded merchants the full quota they just paid for.
+    const now = new Date();
     const updateData: Parameters<typeof db.merchant.update>[0]["data"] = { plan };
-    if (subscription.status === "ACTIVE" && subscription.activatedOn) {
-      updateData.conversationResetAt = new Date(subscription.activatedOn);
+    if (subscription.status === "ACTIVE") {
+      updateData.conversationCount = 0;
+      updateData.conversationResetAt = now;
+      // Also clear the Redis fast-path counter so it stays in sync with Prisma.
+      await redis.set(`usage:${shop}`, "0").catch(() => null);
     }
     await db.merchant.update({
       where: { shopDomain: shop },
