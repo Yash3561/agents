@@ -12,6 +12,8 @@ ENV BUILD_VERSION=$BUILD_VERSION
 
 ARG SENTRY_AUTH_TOKEN
 ENV SENTRY_AUTH_TOKEN=$SENTRY_AUTH_TOKEN
+# SENTRY_RELEASE is read by sentryVitePlugin during `npm run build` to tag source maps
+ENV SENTRY_RELEASE=$BUILD_VERSION
 
 COPY package.json package-lock.json* ./
 

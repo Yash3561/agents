@@ -59,7 +59,12 @@ export default defineConfig({
       telemetry: false,
       // Only upload source maps during Docker/CI builds, not local dev
       disable: !process.env.SENTRY_AUTH_TOKEN,
-      // Don't fail the build if source map upload fails (e.g. invalid project slug)
+      // Explicitly set the release name from BUILD_VERSION (passed as SENTRY_RELEASE in Dockerfile)
+      // Without this, the plugin falls back to git-based detection which fails in Docker builds
+      release: {
+        name: process.env.SENTRY_RELEASE || process.env.BUILD_VERSION,
+      },
+      // Don't fail the build if source map upload fails (e.g. transient network error)
       errorHandler: (err) => {
         console.warn("[sentry-vite-plugin] Source map upload failed (non-fatal):", err.message);
       },
