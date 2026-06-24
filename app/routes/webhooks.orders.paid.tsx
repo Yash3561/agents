@@ -13,32 +13,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
-  const cartToken = (payload.cart_token ?? payload.checkout_token) as
-    | string
-    | undefined;
-  const totalPrice = payload.total_price as string | undefined;
-  const orderId = payload.id != null ? String(payload.id) : undefined;
+  try {
+    const cartToken = (payload.cart_token ?? payload.checkout_token) as
+      | string
+      | undefined;
+    const totalPrice = payload.total_price as string | undefined;
+    const orderId = payload.id != null ? String(payload.id) : undefined;
 
-  if (!cartToken || !orderId) {
-    return new Response();
+    if (!cartToken || !orderId) {
+      return new Response();
+    }
+
+    const conversation = await db.conversation.findFirst({
+      where: { shopDomain: shop, checkoutToken: cartToken },
+    });
+
+    if (!conversation) {
+      // No matching conversation — order wasn't facilitated through the widget.
+      return new Response();
+    }
+
+    await db.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        orderId,
+        orderRevenueCents: totalPrice ? Math.round(parseFloat(totalPrice) * 100) : undefined,
+      },
+    });
+  } catch (err) {
+    console.error(`[orders/paid] Error processing webhook for ${shop}:`, err);
+    // Still return 200 so Shopify doesn't retry — the order data isn't critical
+    // enough to cause repeated webhook failures that inflate the error rate.
   }
-
-  const conversation = await db.conversation.findFirst({
-    where: { shopDomain: shop, checkoutToken: cartToken },
-  });
-
-  if (!conversation) {
-    // No matching conversation — order wasn't facilitated through the widget.
-    return new Response();
-  }
-
-  await db.conversation.update({
-    where: { id: conversation.id },
-    data: {
-      orderId,
-      orderRevenueCents: totalPrice ? Math.round(parseFloat(totalPrice) * 100) : undefined,
-    },
-  });
 
   return new Response();
 };

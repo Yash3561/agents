@@ -7,23 +7,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
-  // Webhook requests can trigger multiple times and after an app has already been uninstalled.
-  // If this webhook already ran, the session may have been deleted previously.
-  if (session) {
-    await db.session.deleteMany({ where: { shop } });
-  }
+  try {
+    // Webhook requests can trigger multiple times and after an app has already been uninstalled.
+    // If this webhook already ran, the session may have been deleted previously.
+    if (session) {
+      await db.session.deleteMany({ where: { shop } });
+    }
 
-  // Reset merchant state so reinstalling triggers fresh onboarding and a clean usage slate.
-  await db.merchant.updateMany({
-    where: { shopDomain: shop },
-    data: {
-      onboardedAt: null,
-      onboardingStep: 0,
-      plan: "free",
-      conversationCount: 0,
-      conversationResetAt: new Date(),
-    },
-  });
+    // Reset merchant state so reinstalling triggers fresh onboarding and a clean usage slate.
+    await db.merchant.updateMany({
+      where: { shopDomain: shop },
+      data: {
+        onboardedAt: null,
+        onboardingStep: 0,
+        plan: "free",
+        conversationCount: 0,
+        conversationResetAt: new Date(),
+      },
+    });
+  } catch (err) {
+    console.error(`[app/uninstalled] Error processing webhook for ${shop}:`, err);
+  }
 
   return new Response();
 };

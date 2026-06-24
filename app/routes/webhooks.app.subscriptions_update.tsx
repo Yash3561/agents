@@ -31,7 +31,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
-  if (topic !== "app/subscriptions/update") {
+  // authenticate.webhook() normalizes the topic to UPPER_SNAKE_CASE via topicForStorage()
+  // e.g., "app_subscriptions/update" → "APP_SUBSCRIPTIONS_UPDATE"
+  if (topic !== "APP_SUBSCRIPTIONS_UPDATE") {
     console.warn(`Unexpected webhook topic: ${topic}`);
     return new Response(JSON.stringify({ error: "unexpected_topic" }), {
       status: 400,
