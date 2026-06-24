@@ -39,6 +39,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 const VALID_POSITIONS = new Set(["bottom-right", "bottom-left"]);
 const VALID_VOICES = new Set(["friendly and helpful", "professional and concise", "playful and fun", "premium and polished"]);
 const VALID_PAGES = new Set(["checkout", "cart", "account", "blog"]);
+const HARDCODED_PAGES = ["checkout", "cart", "account", "blog"];
+// Validates a custom URL path: must start with / and only contain safe chars
+const CUSTOM_PATH_RE = /^\/[a-zA-Z0-9\-_/.*]*$/;
 const HEX_RE = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -48,7 +51,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const personalizationEnabled = formData.get("personalizationEnabled") === "true";
   const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
   const proactiveEngagementEnabled = formData.get("proactiveEngagementEnabled") === "true";
-  const excludedPages = (formData.getAll("excludedPages") as string[]).filter((p) => VALID_PAGES.has(p));
+  const hardcodedExcluded = (formData.getAll("excludedPages") as string[]).filter((p) => VALID_PAGES.has(p));
+  const customPaths = (formData.getAll("customExcludedPaths") as string[]).filter(
+    (p) => CUSTOM_PATH_RE.test(p) && p.length <= 200,
+  );
+  const excludedPages = [...hardcodedExcluded, ...customPaths];
   const botName = String(formData.get("botName") ?? "").trim().slice(0, 30) || "NeonPing";
 
   const rawColor = String(formData.get("widgetColor") ?? "").trim();
@@ -203,6 +210,31 @@ export default function Settings() {
   const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
   const [proactiveEngagementEnabled, setProactiveEngagementEnabled] = useState(merchant.proactiveEngagementEnabled);
   const [excludedPages, setExcludedPages] = useState(merchant.excludedPages ?? []);
+  const [customPathInput, setCustomPathInput] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const customPathFieldRef = useRef<any>(null);
+
+  const addCustomPath = () => {
+    const path = customPathInput.trim();
+    if (path && CUSTOM_PATH_RE.test(path) && !excludedPages.includes(path)) {
+      setExcludedPages((prev) => [...prev, path]);
+    }
+    setCustomPathInput("");
+  };
+
+  useEffect(() => {
+    const el = customPathFieldRef.current;
+    if (!el) return;
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addCustomPath();
+      }
+    };
+    el.addEventListener("keydown", handleKeyDown);
+    return () => el.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customPathInput, excludedPages]);
 
   useEffect(() => {
     if (fetcher.data?.saved) {
@@ -225,7 +257,8 @@ export default function Settings() {
     formData.append("personalizationEnabled", String(personalizationEnabled));
     formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
     formData.append("proactiveEngagementEnabled", String(proactiveEngagementEnabled));
-    excludedPages.forEach((page) => formData.append("excludedPages", page));
+    excludedPages.filter((p) => HARDCODED_PAGES.includes(p)).forEach((page) => formData.append("excludedPages", page));
+    excludedPages.filter((p) => !HARDCODED_PAGES.includes(p)).forEach((path) => formData.append("customExcludedPaths", path));
     fetcher.submit(formData, { method: "POST" });
   };
 
@@ -343,7 +376,7 @@ export default function Settings() {
               onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
             ></s-switch>
             <p style={{ color: "#b45309", fontSize: "12px", marginTop: "8px" }}>
-              ⚠️ Email notifications are coming soon — no emails are currently sent. We'll notify you when this is live.
+              ⚠️ Email notifications are coming soon — no emails are currently sent. We&apos;ll notify you when this is live.
             </p>
           </div>
           <div style={{ marginBottom: "16px" }}>
@@ -394,6 +427,77 @@ export default function Settings() {
               ></s-checkbox>
             </div>
           ))}
+          <div style={{ marginTop: "20px", borderTop: "1px solid #e1e1e1", paddingTop: "16px" }}>
+            <p style={{ margin: "0 0 8px", fontSize: "13px", fontWeight: 600, color: "#333" }}>
+              Custom URL exclusions
+            </p>
+            <p style={{ margin: "0 0 12px", fontSize: "12px", color: "#666" }}>
+              Enter URL paths to hide the widget on specific pages. Use <code>*</code> as a wildcard (e.g. <code>/blogs/*</code> hides all blog posts, <code>/pages/sale</code> hides one page).
+            </p>
+            <div style={{ display: "flex", gap: "8px", alignItems: "flex-end", marginBottom: "12px" }}>
+              <div style={{ flex: 1 }}>
+                <s-text-field
+                  ref={customPathFieldRef}
+                  label="Add URL path"
+                  value={customPathInput}
+                  placeholder="/pages/wholesale"
+                  help-text='Must start with /. Use * for wildcards (e.g. /collections/*).'
+                  onInput={(e: Event) => setCustomPathInput((e.target as HTMLInputElement).value)}
+                ></s-text-field>
+              </div>
+              <div style={{ paddingBottom: "22px" }}>
+                <s-button
+                  variant="secondary"
+                  onClick={(e: Event) => {
+                    e.preventDefault();
+                    addCustomPath();
+                  }}
+                >
+                  Add
+                </s-button>
+              </div>
+            </div>
+            {excludedPages.filter((p) => !HARDCODED_PAGES.includes(p)).length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {excludedPages.filter((p) => !HARDCODED_PAGES.includes(p)).map((path) => (
+                  <div
+                    key={path}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      background: "#f0f0f3",
+                      border: "1px solid #d5d5d5",
+                      borderRadius: "16px",
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      fontFamily: "monospace",
+                      color: "#333",
+                    }}
+                  >
+                    <span>{path}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${path}`}
+                      onClick={() => setExcludedPages(excludedPages.filter((p) => p !== path))}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                        lineHeight: 1,
+                        color: "#666",
+                        fontSize: "14px",
+                        fontWeight: 700,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </s-section>
         <div style={{ padding: "16px 0" }}>
           <s-button type="submit" variant="primary" disabled={fetcher.state === "submitting"}>
