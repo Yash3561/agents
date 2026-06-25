@@ -3,7 +3,8 @@ import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "re
 import { useLoaderData, useFetcher, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { getUsage, PLAN_LIMITS, PLAN_CONFIG } from "../lib/billing.server";
+import { getUsage } from "../lib/billing.server";
+import { PLAN_LIMITS, PLAN_CONFIG } from "../lib/plans";
 import db from "../db.server";
 
 const VALID_PLANS = ["spark", "pulse", "surge"] as const;

@@ -5,7 +5,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { PLAN_CONFIG } from "../lib/billing.server";
+import { PLAN_CONFIG } from "../lib/plans";
 import { sendTestMessage } from "../lib/test-chat";
 
 const VOICE_PRESETS = [

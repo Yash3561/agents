@@ -1,25 +1,7 @@
 import prisma from "~/db.server";
 import { redis } from "~/redis.server";
-
-/** Shared plan metadata used by billing and onboarding routes. */
-export const PLAN_CONFIG: Record<string, { name: string; amount: number; trialDays: number }> = {
-  spark: { name: "Spark", amount: 29, trialDays: 7 },
-  pulse: { name: "Pulse", amount: 79, trialDays: 7 },
-  surge: { name: "Surge", amount: 199, trialDays: 7 },
-};
-
-/**
- * Conversation-per-month limits per plan.
- * Merchants on "free" (no active subscription) get limit 0 — chat is blocked
- * until they choose a paid plan via the billing page.
- * Plan assignment is driven by the Shopify Billing API webhook handler
- * (webhooks.app.subscriptions_update.tsx) and verified on every billing page load.
- */
-export const PLAN_LIMITS: Record<string, number> = {
-  spark: 500,
-  pulse: 2500,
-  surge: 10000,
-};
+import { PLAN_LIMITS } from "~/lib/plans";
+export { PLAN_CONFIG, PLAN_LIMITS } from "~/lib/plans";
 
 const usageKey = (shopDomain: string) => `usage:${shopDomain}`;
 // Tracks whether a given session has already been counted toward the plan limit.
