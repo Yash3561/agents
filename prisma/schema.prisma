@@ -52,6 +52,8 @@ model Conversation {
   orderRevenueCents Int?              // written by orders/paid webhook
   agentTrace        Json?
   routeReason       String?
+  customerEmail     String?
+  resolvedAt        DateTime?
   startedAt         DateTime @default(now())
   lastMessageAt     DateTime @updatedAt
   firstUserMessage  String?

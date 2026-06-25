@@ -32,6 +32,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       botName: merchant.botName,
       excludedPages: merchant.excludedPages,
       proactiveEngagement: merchant.proactiveEngagementEnabled,
+      supportEmail: merchant.supportEmail ?? undefined,
+      whatsappNumber: merchant.whatsappNumber ?? undefined,
     }),
     { headers },
   );

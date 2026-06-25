@@ -20,7 +20,8 @@ const OUTCOME_OPTIONS = [
   { value: "all", label: "All" },
   { value: "purchased", label: "Purchased" },
   { value: "in_cart", label: "In Cart" },
-  { value: "escalated", label: "Escalated" },
+  { value: "escalated_open", label: "Escalated (Open)" },
+  { value: "escalated", label: "Escalated (All)" },
   { value: "active", label: "Live" },
   { value: "ended", label: "Ended" },
 ] as const;
@@ -96,6 +97,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const outcomeFilter =
     outcome === "purchased" ? { orderId: { not: null } }
     : outcome === "escalated" ? { escalated: true }
+    : outcome === "escalated_open" ? { escalated: true, resolved: false }
     : outcome === "in_cart" ? { cartId: { not: null }, orderId: null }
     : outcome === "active" ? { lastMessageAt: { gte: tenMinutesAgo } }
     : outcome === "ended" ? { cartId: null, orderId: null, escalated: false, lastMessageAt: { lt: tenMinutesAgo } }
@@ -332,19 +334,22 @@ export default function Conversations() {
               {conversations.map((c) => {
                 const outcomeKey = computeOutcome(c);
                 const badge = OUTCOME_BADGE[outcomeKey];
+                const isOpenEscalation = c.escalated && !c.resolved;
                 return (
                   <s-table-row key={c.id}>
                     <s-table-cell>
-                      <Link
-                        to={`/app/conversations/${c.id}`}
-                        style={{ color: "#1a1a1a", textDecoration: "none", fontWeight: 500 }}
-                      >
-                        {c.customerId ? (
-                          <span>Customer</span>
-                        ) : (
-                          <s-text tone="neutral">Anonymous</s-text>
-                        )}
-                      </Link>
+                      <div style={isOpenEscalation ? { borderLeft: "3px solid #dc2626", paddingLeft: "8px", background: "#fff5f5", borderRadius: "2px" } : {}}>
+                        <Link
+                          to={`/app/conversations/${c.id}`}
+                          style={{ color: "#1a1a1a", textDecoration: "none", fontWeight: 500 }}
+                        >
+                          {c.customerId ? (
+                            <span>Customer</span>
+                          ) : (
+                            <s-text tone="neutral">Anonymous</s-text>
+                          )}
+                        </Link>
+                      </div>
                     </s-table-cell>
                     <s-table-cell>
                       {c.firstUserMessage ? (
