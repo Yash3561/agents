@@ -5,6 +5,8 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { PLAN_CONFIG } from "../lib/billing.server";
+import { sendTestMessage } from "../lib/test-chat";
 
 const VOICE_PRESETS = [
   {
@@ -31,12 +33,6 @@ const VOICE_PRESETS = [
 
 const VALID_PLANS_ONBOARDING = ["spark", "pulse", "surge"] as const;
 type OnboardingPlanKey = (typeof VALID_PLANS_ONBOARDING)[number];
-
-const PLAN_CONFIG_ONBOARDING: Record<OnboardingPlanKey, { name: string; amount: number; trialDays: number }> = {
-  spark: { name: "Spark", amount: 29, trialDays: 7 },
-  pulse: { name: "Pulse", amount: 79, trialDays: 7 },
-  surge: { name: "Surge", amount: 199, trialDays: 7 },
-};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -85,7 +81,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: "Invalid plan selected." };
     }
 
-    const config = PLAN_CONFIG_ONBOARDING[plan as OnboardingPlanKey];
+    const config = PLAN_CONFIG[plan as OnboardingPlanKey];
     const isTest = process.env.BILLING_TEST_MODE === "true";
     const shopHandle = session.shop.replace(".myshopify.com", "");
     // Return merchant to Step 4 (Go Live) after Shopify billing confirmation
@@ -190,34 +186,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const url = new URL(request.url);
   return redirect(`/app?${url.searchParams.toString()}`);
 };
-
-async function sendTestMessage(shop: string, appUrl: string): Promise<string> {
-  const res = await fetch(`${appUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      session_id: `onboarding-test-${Date.now()}`,
-      shop,
-      message: "hello",
-    }),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-  const raw = await res.text();
-  let text = "";
-  for (const block of raw.split("\n\n")) {
-    const dataLine = block.split("\n").find((l) => l.startsWith("data:"));
-    const eventLine = block.split("\n").find((l) => l.startsWith("event:"));
-    if (eventLine?.slice(6).trim() === "delta" && dataLine) {
-      try {
-        text += JSON.parse(dataLine.slice(5).trim()).text;
-      } catch {
-        // skip malformed chunk
-      }
-    }
-  }
-  return text || "(no response text)";
-}
 
 function WidgetPreview({ color, greeting, botName }: { color: string; greeting: string; botName?: string }) {
   return (
@@ -452,8 +420,8 @@ export default function Onboarding() {
     setTestLoading(true);
     setTestResult(null);
     try {
-      const text = await sendTestMessage(shop, appUrl);
-      setTestResult(text);
+      const { text } = await sendTestMessage(shop, "hello", appUrl);
+      setTestResult(text || "(no response text)");
     } catch {
       setTestResult("Something went wrong reaching the assistant. Try again.");
     } finally {

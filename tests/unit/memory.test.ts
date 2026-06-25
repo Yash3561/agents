@@ -39,7 +39,6 @@ describe("CustomerMemory type shape", () => {
         timestamp: new Date().toISOString(),
       },
       firstName: "Alice",
-      phone: "+1555555555",
     };
 
     expect(memory.recent_products).toHaveLength(2);

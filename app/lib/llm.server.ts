@@ -31,7 +31,6 @@ const SPECIALIST_MODEL = process.env.AZURE_SPECIALIST_MODEL ?? "gpt-4o-mini";
 
 export const deployments = {
   shopping: () => foundry(SPECIALIST_MODEL),
-  summary:  () => foundry(SPECIALIST_MODEL),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -62,7 +61,7 @@ export function runAgentStream(opts: {
 
 export async function generateSummary(system: string, prompt: string): Promise<string> {
   const result = await generateText({
-    model: deployments.summary(),
+    model: deployments.shopping(),
     system,
     prompt,
     maxOutputTokens: 200,

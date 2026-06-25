@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
+import { computeOutcome } from "../lib/conversation.server";
 import { useRef } from "react";
 
 const PAGE_SIZE = 50;
@@ -31,19 +32,6 @@ const CUSTOMER_OPTIONS = [
   { value: "loggedin", label: "Logged-in" },
   { value: "anonymous", label: "Anonymous" },
 ] as const;
-
-function computeOutcome(c: {
-  orderId: string | null;
-  escalated: boolean;
-  cartId: string | null;
-  lastMessageAt: string | Date;
-}): "converted" | "in_cart" | "escalated" | "active" | "ended" {
-  if (c.orderId) return "converted";
-  if (c.escalated) return "escalated";
-  if (new Date(c.lastMessageAt) > new Date(Date.now() - 10 * 60 * 1000)) return "active";
-  if (c.cartId) return "in_cart";
-  return "ended";
-}
 
 type BadgeTone = "success" | "critical" | "info" | "neutral" | "caution" | "warning" | "auto";
 
@@ -332,7 +320,7 @@ export default function Conversations() {
             </s-table-header-row>
             <s-table-body>
               {conversations.map((c) => {
-                const outcomeKey = computeOutcome(c);
+                const outcomeKey = computeOutcome(c as Parameters<typeof computeOutcome>[0]);
                 const badge = OUTCOME_BADGE[outcomeKey];
                 const isOpenEscalation = c.escalated && !c.resolved;
                 return (

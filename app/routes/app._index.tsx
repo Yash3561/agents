@@ -4,7 +4,7 @@ import { redirect, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getUsage } from "../lib/billing.server";
+import { getUsage, PLAN_LIMITS } from "../lib/billing.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -22,8 +22,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(`/app/onboarding?${url.searchParams.toString()}`);
   }
 
-  const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
-  const hasPlan = PAID_PLANS.has(merchant.plan);
+  const hasPlan = merchant.plan in PLAN_LIMITS;
 
   const url = new URL(request.url);
   const days = url.searchParams.get("days") || "30";

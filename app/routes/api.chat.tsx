@@ -30,7 +30,7 @@
 
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "~/db.server";
-import { getSession, setSession, resetTurn, appendMessage } from "~/lib/session.server";
+import { getSession, setSession, appendMessage } from "~/lib/session.server";
 import { fetchCustomerMemory, updateCustomerMemory } from "~/lib/agents/memory.server";
 import { runUnifiedAgent } from "~/lib/agents/unified.server";
 import { persistConversationTurn, extractCheckoutToken } from "~/lib/conversation.server";
@@ -237,7 +237,7 @@ function buildSseStream(opts: {
         const t0 = Date.now();
 
         // 1. Load session
-        const session = await resetTurn(shop, session_id);
+        const session = await getSession(shop, session_id);
 
         // 1b. Pre-handle cart action deterministically — no LLM parsing of GIDs needed
         let preCartResult: { cart?: unknown; checkoutUrl?: string } = {};

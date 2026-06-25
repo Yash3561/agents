@@ -1,6 +1,13 @@
 import prisma from "~/db.server";
 import { redis } from "~/redis.server";
 
+/** Shared plan metadata used by billing and onboarding routes. */
+export const PLAN_CONFIG: Record<string, { name: string; amount: number; trialDays: number }> = {
+  spark: { name: "Spark", amount: 29, trialDays: 7 },
+  pulse: { name: "Pulse", amount: 79, trialDays: 7 },
+  surge: { name: "Surge", amount: 199, trialDays: 7 },
+};
+
 /**
  * Conversation-per-month limits per plan.
  * Merchants on "free" (no active subscription) get limit 0 — chat is blocked
@@ -28,10 +35,6 @@ export interface UsageCheck {
   limit: number;
 }
 
-function is30DayCycleComplete(resetAt: Date, now: Date): boolean {
-  return now.getTime() - resetAt.getTime() >= 30 * 24 * 60 * 60 * 1000;
-}
-
 /**
  * Checks the shop's conversation usage against its plan limit, and — if
  * allowed and this is a NEW session — increments the counter once per
@@ -56,7 +59,7 @@ export async function checkAndIncrementUsage(shopDomain: string, sessionId?: str
   const now = new Date();
   let durableCount = merchant.conversationCount;
 
-  if (is30DayCycleComplete(merchant.conversationResetAt, now)) {
+  if (now.getTime() - merchant.conversationResetAt.getTime() >= 30 * 24 * 60 * 60 * 1000) {
     durableCount = 0;
     await prisma.merchant
       .update({ where: { shopDomain }, data: { conversationCount: 0, conversationResetAt: now } })

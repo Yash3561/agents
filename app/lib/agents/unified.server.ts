@@ -16,7 +16,6 @@ import {
 import { assertCartNotEmpty } from "~/lib/guardrails.server";
 import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.server";
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
-import { checkoutFromCart } from "~/lib/mcp/checkout.server";
 import { searchPoliciesAndFaqs } from "~/lib/mcp/policy.server";
 import { getOrder } from "~/lib/mcp/order.server";
 import { getCustomerOrders } from "~/lib/mcp/customer-accounts.server";
@@ -322,10 +321,10 @@ export async function runUnifiedAgent(opts: {
         onToolStart?.("get_checkout_url");
         toolsCalled.push("get_checkout_url");
         const cartData = await getCart(shopDomain, input.cartId);
-        const checkout = checkoutFromCart(cartData);
-        checkoutUrl = checkout.continue_url;
+        const url = cartData.checkoutUrl ?? cartData.continue_url ?? "";
+        checkoutUrl = url;
         cart = cartData;
-        return checkout;
+        return { continue_url: url, requires_escalation: !url };
       },
     }),
 

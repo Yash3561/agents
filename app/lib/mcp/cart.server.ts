@@ -130,8 +130,3 @@ export async function updateCart(
   return normalizeCart(result.structuredContent);
 }
 
-/** Convenience: get total amount in cents from a Cart's cost. */
-export function getCartTotal(cart: Cart): number {
-  const amount = cart.cost?.total_amount?.amount ?? "0";
-  return Math.round(parseFloat(amount) * 100);
-}

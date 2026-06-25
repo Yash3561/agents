@@ -16,7 +16,6 @@ export interface CustomerMemory {
   summary?: string;                        // 2-sentence compressed history
   abandoned_cart?: { items: unknown[]; total: number; timestamp: string };
   firstName?: string;           // customer's first name from Shopify profile
-  phone?: string;               // customer's phone number from Shopify profile
 }
 
 // ---------------------------------------------------------------------------
@@ -38,7 +37,6 @@ export async function fetchCustomerMemory(
     const data = await adminGraphql<{
       customer: {
         firstName: string | null;
-        phone: string | null;
         metafields: { edges: Array<{ node: { key: string; value: string } }> };
       };
     }>(
@@ -47,7 +45,6 @@ export async function fetchCustomerMemory(
       `query GetMemory($id: ID!, $ns: String!) {
         customer(id: $id) {
           firstName
-          phone
           metafields(namespace: $ns, first: 10) {
             edges { node { key value } }
           }
@@ -72,7 +69,6 @@ export async function fetchCustomerMemory(
     }
 
     if (data.customer?.firstName) memory.firstName = data.customer.firstName;
-    if (data.customer?.phone) memory.phone = data.customer.phone;
 
     return memory;
   } catch {
@@ -95,7 +91,6 @@ export async function updateCustomerMemory(
   session: ConversationSession,
   lastSearchQuery?: string,
   cartLines?: unknown[],
-  cartAbandoned?: boolean,
 ): Promise<void> {
   if (!customerId) return;
 
@@ -109,13 +104,7 @@ export async function updateCustomerMemory(
       updated.recent_products = extractRecentProducts(cartLines, current.recent_products);
     }
 
-    if (cartAbandoned && session.cart_id) {
-      updated.abandoned_cart = {
-        items: cartLines ?? [],
-        total: 0,
-        timestamp: new Date().toISOString(),
-      };
-    } else if (!cartAbandoned && session.checkout_id) {
+    if (session.checkout_id) {
       // Cart converted to checkout — clear abandoned signal
       updated.abandoned_cart = undefined;
     }

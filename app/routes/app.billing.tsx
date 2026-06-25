@@ -3,17 +3,11 @@ import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "re
 import { useLoaderData, useFetcher, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { getUsage, PLAN_LIMITS } from "../lib/billing.server";
+import { getUsage, PLAN_LIMITS, PLAN_CONFIG } from "../lib/billing.server";
 import db from "../db.server";
 
 const VALID_PLANS = ["spark", "pulse", "surge"] as const;
 type PlanKey = (typeof VALID_PLANS)[number];
-
-const PLAN_CONFIG: Record<PlanKey, { name: string; amount: number; trialDays: number }> = {
-  spark: { name: "Spark", amount: 29, trialDays: 7 },
-  pulse: { name: "Pulse", amount: 79, trialDays: 7 },
-  surge: { name: "Surge", amount: 199, trialDays: 7 },
-};
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
@@ -319,8 +313,7 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
 export default function BillingPage() {
   const { usage, activeSubscription, resetAtStr, daysUntilReset } = useLoaderData<typeof loader>();
 
-  const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
-  const hasActivePlan = PAID_PLANS.has(usage.plan);
+  const hasActivePlan = usage.plan in PLAN_LIMITS;
   const usagePct =
     usage.limit > 0
       ? Math.min(100, Math.round((usage.used / usage.limit) * 100))
@@ -381,7 +374,7 @@ export default function BillingPage() {
             {usagePct >= 100 && (
               <div style={{ marginTop: "12px" }}>
                 <s-banner tone="critical">
-                  You've reached your conversation limit. New chats are paused until your plan resets or you upgrade.
+                  You&apos;ve reached your conversation limit. New chats are paused until your plan resets or you upgrade.
                 </s-banner>
               </div>
             )}

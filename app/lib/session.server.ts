@@ -71,14 +71,6 @@ export async function setSession(
     .catch(() => null);
 }
 
-/** Load session at the start of each new turn. */
-export async function resetTurn(
-  shopDomain: string,
-  sessionId: string,
-): Promise<ConversationSession> {
-  return getSession(shopDomain, sessionId);
-}
-
 /** Append a message to conversation history and persist. */
 export async function appendMessage(
   shopDomain: string,
@@ -90,10 +82,3 @@ export async function appendMessage(
   await setSession(shopDomain, sessionId, session);
 }
 
-/** Delete session (on explicit end-of-conversation). */
-export async function expireSession(
-  shopDomain: string,
-  sessionId: string,
-): Promise<void> {
-  await redis.del(KEY(shopDomain, sessionId)).catch(() => null);
-}

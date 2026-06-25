@@ -38,7 +38,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 const VALID_POSITIONS = new Set(["bottom-right", "bottom-left"]);
 const VALID_VOICES = new Set(["friendly and helpful", "professional and concise", "playful and fun", "premium and polished"]);
-const VALID_PAGES = new Set(["checkout", "cart", "account", "blog"]);
 const HARDCODED_PAGES = ["checkout", "cart", "account", "blog"];
 // Validates a custom URL path: must start with / and only contain safe chars
 const CUSTOM_PATH_RE = /^\/[a-zA-Z0-9\-_/.*]*$/;
@@ -51,7 +50,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const personalizationEnabled = formData.get("personalizationEnabled") === "true";
   const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
   const proactiveEngagementEnabled = formData.get("proactiveEngagementEnabled") === "true";
-  const hardcodedExcluded = (formData.getAll("excludedPages") as string[]).filter((p) => VALID_PAGES.has(p));
+  const hardcodedExcluded = (formData.getAll("excludedPages") as string[]).filter((p) => HARDCODED_PAGES.includes(p));
   const customPaths = (formData.getAll("customExcludedPaths") as string[]).filter(
     (p) => CUSTOM_PATH_RE.test(p) && p.length <= 200,
   );
