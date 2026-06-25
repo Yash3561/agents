@@ -4,8 +4,16 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
-import { computeOutcome } from "../lib/conversation.server";
 import { useRef } from "react";
+
+// ponytail: inlined from conversation.server to keep this module client-safe
+function computeOutcome(c: { orderId: string | null; escalated: boolean; cartId: string | null; lastMessageAt: Date }): "converted" | "in_cart" | "escalated" | "active" | "ended" {
+  if (c.orderId) return "converted";
+  if (c.escalated) return "escalated";
+  if (new Date(c.lastMessageAt) > new Date(Date.now() - 10 * 60 * 1000)) return "active";
+  if (c.cartId) return "in_cart";
+  return "ended";
+}
 
 const PAGE_SIZE = 50;
 
