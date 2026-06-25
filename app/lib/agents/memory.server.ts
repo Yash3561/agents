@@ -137,6 +137,45 @@ export async function updateCustomerMemory(
 }
 
 // ---------------------------------------------------------------------------
+// Write abandoned_cart signal from checkout webhooks
+// ---------------------------------------------------------------------------
+
+/**
+ * Persists the abandoned cart signal to the customer metafield.
+ * Called from checkouts/create and checkouts/update webhooks.
+ * items should use merchandise GID format (gid://shopify/ProductVariant/<id>).
+ */
+export async function writeAbandonedCart(
+  shopDomain: string,
+  accessToken: string,
+  customerId: string,
+  items: Array<{ variantId: string; title: string; quantity: number; priceCents: number }>,
+  totalCents: number,
+): Promise<void> {
+  if (!customerId || !items.length) return;
+  try {
+    const current = await fetchCustomerMemory(shopDomain, accessToken, customerId);
+    const updated: CustomerMemory = {
+      ...current,
+      abandoned_cart: {
+        items: items.map((item) => ({
+          merchandise: {
+            id: `gid://shopify/ProductVariant/${item.variantId}`,
+            title: item.title,
+          },
+          quantity: item.quantity,
+        })),
+        total: totalCents,
+        timestamp: new Date().toISOString(),
+      },
+    };
+    await writeMemory(shopDomain, accessToken, customerId, updated);
+  } catch {
+    // Best-effort — never throw to caller
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Clear abandoned_cart signal after successful cart pre-population
 // ---------------------------------------------------------------------------
 

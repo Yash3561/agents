@@ -1,5 +1,5 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useRouteError } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { Form, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
@@ -32,6 +32,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   return { conversation, currencyCode };
+}
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  const { session } = await authenticate.admin(request);
+  const id = params.id;
+  if (!id) throw new Response("Not Found", { status: 404 });
+
+  const conversation = await db.conversation.findUnique({ where: { id } });
+  if (!conversation || conversation.shopDomain !== session.shop) {
+    throw new Response("Not Found", { status: 404 });
+  }
+
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "resolve") {
+    await db.conversation.update({
+      where: { id },
+      data: { resolved: true, resolvedAt: new Date(), escalated: false },
+    });
+  }
+
+  return null;
 }
 
 interface ChatMessage {
@@ -109,12 +132,67 @@ export default function ConversationDetail() {
         <s-link href="/app/conversations">← Back to Conversations</s-link>
       </div>
 
+      {/* Escalation banner */}
+      {conversation.escalated && (
+        <s-section>
+          <div
+            style={{
+              background: "#fff5f5",
+              border: "1px solid #fca5a5",
+              borderRadius: "8px",
+              padding: "16px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <s-badge tone="critical">Escalated</s-badge>
+              <span style={{ fontSize: "14px", fontWeight: 600, color: "#dc2626" }}>
+                This conversation was escalated to your support team
+              </span>
+            </div>
+            {(conversation as { customerEmail?: string | null }).customerEmail && (
+              <div style={{ fontSize: "14px" }}>
+                <span style={{ color: "#666" }}>Customer email: </span>
+                <a
+                  href={`mailto:${(conversation as { customerEmail?: string | null }).customerEmail}`}
+                  style={{ color: "#1a1a1a", fontWeight: 600 }}
+                >
+                  {(conversation as { customerEmail?: string | null }).customerEmail}
+                </a>
+              </div>
+            )}
+            {conversation.resolved ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <s-badge tone="info">Resolved</s-badge>
+                {(conversation as { resolvedAt?: Date | string | null }).resolvedAt && (
+                  <span style={{ fontSize: "13px", color: "#555" }}>
+                    Resolved at{" "}
+                    {new Date(
+                      (conversation as { resolvedAt?: Date | string | null }).resolvedAt as string | Date,
+                    ).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <Form method="post">
+                <input type="hidden" name="intent" value="resolve" />
+                <s-button type="submit" tone="neutral">
+                  Mark as Resolved
+                </s-button>
+              </Form>
+            )}
+          </div>
+        </s-section>
+      )}
+
       {/* Topic / reason for contact */}
       {conversation.firstUserMessage && (
         <s-section heading="Reason for contact">
           <s-text tone="neutral">
             <span style={{ fontSize: "14px", fontStyle: "italic" }}>
-              "{conversation.firstUserMessage}"
+              &quot;{conversation.firstUserMessage}&quot;
             </span>
           </s-text>
         </s-section>
