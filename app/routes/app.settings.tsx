@@ -77,6 +77,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         widgetPosition,
         brandVoice,
         supportEmail: String(formData.get("supportEmail") ?? "").trim() || null,
+        whatsappNumber: String(formData.get("whatsappNumber") ?? "").trim() || null,
         personalizationEnabled,
         escalationEmailEnabled,
         proactiveEngagementEnabled,
@@ -205,6 +206,7 @@ export default function Settings() {
   const [widgetPosition, setWidgetPosition] = useState(merchant.widgetPosition);
   const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
   const [supportEmail, setSupportEmail] = useState(merchant.supportEmail ?? "");
+  const [whatsappNumber, setWhatsappNumber] = useState(merchant.whatsappNumber ?? "");
   const [personalizationEnabled, setPersonalizationEnabled] = useState(merchant.personalizationEnabled);
   const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
   const [proactiveEngagementEnabled, setProactiveEngagementEnabled] = useState(merchant.proactiveEngagementEnabled);
@@ -253,6 +255,7 @@ export default function Settings() {
     formData.append("widgetPosition", widgetPosition);
     formData.append("brandVoice", brandVoice);
     formData.append("supportEmail", supportEmail);
+    formData.append("whatsappNumber", whatsappNumber);
     formData.append("personalizationEnabled", String(personalizationEnabled));
     formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
     formData.append("proactiveEngagementEnabled", String(proactiveEngagementEnabled));
@@ -397,6 +400,15 @@ export default function Settings() {
               onInput={(e: Event) => setSupportEmail((e.target as HTMLInputElement).value)}
               help-text="Where escalated conversations and support alerts are sent."
             ></s-email-field>
+          </div>
+          <div style={{ marginBottom: "16px" }}>
+            <s-text-field
+              label="WhatsApp number"
+              name="whatsappNumber"
+              value={whatsappNumber}
+              onInput={(e: Event) => setWhatsappNumber((e.target as HTMLInputElement).value)}
+              help-text="Customers can tap to reach you on WhatsApp when they need human help. Include country code, e.g. +1234567890"
+            ></s-text-field>
           </div>
         </s-section>
         <s-section heading="👁️ Widget Visibility">
