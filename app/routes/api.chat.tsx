@@ -31,7 +31,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import prisma from "~/db.server";
 import { getSession, setSession, resetTurn, appendMessage } from "~/lib/session.server";
-import { fetchCustomerMemory, updateCustomerMemory, clearAbandonedCart } from "~/lib/agents/memory.server";
+import { fetchCustomerMemory, updateCustomerMemory } from "~/lib/agents/memory.server";
 import { runUnifiedAgent } from "~/lib/agents/unified.server";
 import { persistConversationTurn, extractCheckoutToken } from "~/lib/conversation.server";
 import { getStorefrontAccessToken } from "~/lib/auth.server";
@@ -310,8 +310,9 @@ function buildSseStream(opts: {
               const restoredCart = await createCart(shop, lineItems);
               session.cart_id = restoredCart.id;
               await setSession(shop, session_id, session);
-              // Clear signal so recovery greeting doesn't fire on the next visit
-              void clearAbandonedCart(shop, accessToken, customer_id).catch(() => null);
+              // Note: abandoned_cart metafield is cleared only in webhooks.orders.paid.tsx
+              // once the order is confirmed — not here, so the signal persists if the
+              // customer opens the widget but doesn't complete the purchase.
             }
           } catch {
             // Cart pre-population is best-effort — agent can still recover manually
