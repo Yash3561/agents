@@ -29,6 +29,15 @@ const VOICE_PRESETS = [
   },
 ];
 
+const VALID_PLANS_ONBOARDING = ["spark", "pulse", "surge"] as const;
+type OnboardingPlanKey = (typeof VALID_PLANS_ONBOARDING)[number];
+
+const PLAN_CONFIG_ONBOARDING: Record<OnboardingPlanKey, { name: string; amount: number; trialDays: number }> = {
+  spark: { name: "Spark", amount: 29, trialDays: 7 },
+  pulse: { name: "Pulse", amount: 79, trialDays: 7 },
+  surge: { name: "Surge", amount: 199, trialDays: 7 },
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
@@ -55,7 +64,7 @@ const VALID_VOICES_ONBOARDING = new Set([
 const HEX_RE_ONBOARDING = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const formData = await request.formData();
 
   if (formData.get("intent") === "save-step") {
@@ -68,6 +77,88 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { error: "Failed to save settings. Please try again." };
     }
     return { ok: true };
+  }
+
+  if (formData.get("intent") === "subscribe") {
+    const plan = String(formData.get("plan"));
+    if (!VALID_PLANS_ONBOARDING.includes(plan as OnboardingPlanKey)) {
+      return { error: "Invalid plan selected." };
+    }
+
+    const config = PLAN_CONFIG_ONBOARDING[plan as OnboardingPlanKey];
+    const isTest = process.env.BILLING_TEST_MODE === "true";
+    const shopHandle = session.shop.replace(".myshopify.com", "");
+    // Return merchant to Step 4 (Go Live) after Shopify billing confirmation
+    const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}?step=4`;
+
+    try {
+      const response = await admin.graphql(
+        `#graphql
+        mutation AppSubscriptionCreate(
+          $name: String!, $returnUrl: URL!, $test: Boolean!,
+          $trialDays: Int, $price: Decimal!
+        ) {
+          appSubscriptionCreate(
+            name: $name returnUrl: $returnUrl test: $test trialDays: $trialDays
+            lineItems: [{ plan: { appRecurringPricingDetails: {
+              price: { amount: $price, currencyCode: USD }
+              interval: EVERY_30_DAYS
+            } } }]
+          ) {
+            userErrors { field message }
+            confirmationUrl
+            appSubscription { id status }
+          }
+        }`,
+        {
+          variables: {
+            name: config.name,
+            returnUrl,
+            test: isTest,
+            trialDays: config.trialDays,
+            price: String(config.amount),
+          },
+        },
+      );
+
+      const data = await response.json() as {
+        data?: { appSubscriptionCreate?: { userErrors: { message: string }[]; confirmationUrl?: string } };
+      };
+      const result = data.data?.appSubscriptionCreate;
+
+      if (result?.userErrors?.length) {
+        console.error("[onboarding/billing] userErrors:", result.userErrors);
+        return { error: result.userErrors[0].message };
+      }
+
+      if (!result?.confirmationUrl) {
+        console.error("[onboarding/billing] no confirmationUrl:", JSON.stringify(data));
+        return { error: "No confirmation URL returned. Please try again." };
+      }
+
+      // Save step progress so merchant resumes at step 4 if they return later
+      await prisma.merchant.update({
+        where: { shopDomain: session.shop },
+        data: { onboardingStep: 4 },
+      }).catch(() => null);
+
+      return { redirectUrl: result.confirmationUrl };
+    } catch (e) {
+      console.error("[onboarding/billing] unexpected error:", e);
+      return { error: "Something went wrong with billing. Please try again." };
+    }
+  }
+
+  if (formData.get("intent") === "skip-plan") {
+    try {
+      await prisma.merchant.update({
+        where: { shopDomain: session.shop },
+        data: { onboardingStep: 4 },
+      });
+    } catch {
+      return { error: "Failed to save progress. Please try again." };
+    }
+    return { ok: true, skippedPlan: true };
   }
 
   // Final submit — validate widget config fields
@@ -88,7 +179,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         widgetGreeting,
         botName,
         brandVoice,
-        personalizationEnabled: formData.get("personalizationEnabled") === "true",
         onboardedAt: new Date(),
         onboardingStep: 4,
       },
@@ -98,7 +188,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const url = new URL(request.url);
-  return redirect(`/app/billing?${url.searchParams.toString()}`);
+  return redirect(`/app?${url.searchParams.toString()}`);
 };
 
 async function sendTestMessage(shop: string, appUrl: string): Promise<string> {
@@ -129,7 +219,6 @@ async function sendTestMessage(shop: string, appUrl: string): Promise<string> {
   return text || "(no response text)";
 }
 
-// Fix G — WidgetPreview now accepts botName prop
 function WidgetPreview({ color, greeting, botName }: { color: string; greeting: string; botName?: string }) {
   return (
     <div style={{ position: "relative", height: 200, background: "#f0f0f3", borderRadius: 12, border: "1px solid #e1e1e1", overflow: "hidden", marginTop: "16px" }}>
@@ -145,6 +234,149 @@ function WidgetPreview({ color, greeting, botName }: { color: string; greeting: 
   );
 }
 
+// ─── Plan data for Step 3 ────────────────────────────────────────────────────
+
+const ONBOARDING_PLANS: Array<{
+  key: OnboardingPlanKey;
+  name: string;
+  price: string;
+  priceNumber: number;
+  conversations: string;
+  tagline: string;
+  recommended?: boolean;
+}> = [
+  {
+    key: "spark",
+    name: "Spark",
+    price: "$29",
+    priceNumber: 29,
+    conversations: "500 conversations / mo",
+    tagline: "Perfect for getting started",
+  },
+  {
+    key: "pulse",
+    name: "Pulse",
+    price: "$79",
+    priceNumber: 79,
+    conversations: "2,500 conversations / mo",
+    tagline: "Best for growing stores",
+    recommended: true,
+  },
+  {
+    key: "surge",
+    name: "Surge",
+    price: "$199",
+    priceNumber: 199,
+    conversations: "10,000 conversations / mo",
+    tagline: "For high-volume stores",
+  },
+];
+
+const PLAN_FEATURES = [
+  "AI shopping assistant on your storefront",
+  "Abandoned cart recovery",
+  "Personalized customer greetings",
+  "Live catalog search (always real-time)",
+  "Revenue attribution dashboard",
+  "GDPR compliant",
+];
+
+const planAccentColor: Record<OnboardingPlanKey, string> = {
+  spark: "#2563eb",
+  pulse: "#7c3aed",
+  surge: "#d97706",
+};
+
+interface OnboardingPlanCardProps {
+  plan: (typeof ONBOARDING_PLANS)[number];
+  onChoose: (key: OnboardingPlanKey) => void;
+  isLoading: boolean;
+  choosingPlan: string | null;
+}
+
+function OnboardingPlanCard({ plan, onChoose, isLoading, choosingPlan }: OnboardingPlanCardProps) {
+  const isThisLoading = isLoading && choosingPlan === plan.key;
+  return (
+    <div
+      style={{
+        flex: "1 1 220px",
+        border: plan.recommended ? "2px solid #7c3aed" : "1px solid #e1e3e5",
+        borderRadius: "12px",
+        padding: "20px",
+        background: plan.recommended ? "#faf5ff" : "#ffffff",
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        position: "relative",
+      }}
+    >
+      {plan.recommended && (
+        <div
+          style={{
+            position: "absolute",
+            top: "-12px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#7c3aed",
+            color: "#fff",
+            fontSize: "11px",
+            fontWeight: 700,
+            padding: "3px 12px",
+            borderRadius: "12px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          RECOMMENDED
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <span style={{ fontSize: "20px", color: planAccentColor[plan.key] }}>●</span>
+        <span style={{ fontSize: "18px", fontWeight: 700, color: "#202223" }}>{plan.name}</span>
+      </div>
+      <div>
+        <span style={{ fontSize: "32px", fontWeight: 800, color: "#202223" }}>{plan.price}</span>
+        <span style={{ fontSize: "14px", color: "#6d7175" }}> / month</span>
+      </div>
+      <div style={{ fontSize: "13px", color: "#6d7175", fontStyle: "italic" }}>{plan.tagline}</div>
+      <div style={{ fontSize: "13px", fontWeight: 600, color: planAccentColor[plan.key] }}>
+        {plan.conversations}
+      </div>
+      <ul style={{ margin: "4px 0 0", paddingLeft: "18px", color: "#202223", fontSize: "13px" }}>
+        {PLAN_FEATURES.map((f) => (
+          <li key={f} style={{ marginBottom: "4px" }}>{f}</li>
+        ))}
+      </ul>
+      <div style={{ marginTop: "auto", paddingTop: "12px" }}>
+        <button
+          type="button"
+          onClick={() => onChoose(plan.key)}
+          disabled={isLoading}
+          style={{
+            width: "100%",
+            padding: "11px 16px",
+            background: plan.recommended ? "#7c3aed" : "#1a1a1a",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "8px",
+            cursor: isLoading ? "default" : "pointer",
+            fontWeight: 700,
+            fontSize: "14px",
+            opacity: isLoading ? 0.65 : 1,
+            transition: "opacity 0.15s",
+          }}
+        >
+          {isThisLoading ? "Loading..." : "Start 7-Day Free Trial"}
+        </button>
+        <div style={{ textAlign: "center", marginTop: "6px", fontSize: "11px", color: "#6d7175" }}>
+          No charge today
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ──────────────────────────────────────────────────────────
+
 export default function Onboarding() {
   const { shop, merchant, appUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
@@ -155,17 +387,35 @@ export default function Onboarding() {
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
   const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
-  const [personalizationEnabled, setPersonalizationEnabled] = useState(
-    merchant.personalizationEnabled,
-  );
   const [themeConfirmed, setThemeConfirmed] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testLoading, setTestLoading] = useState(false);
+  const [choosingPlan, setChoosingPlan] = useState<string | null>(null);
+  const [billingError, setBillingError] = useState<string | null>(null);
 
+  const isActivePlan = VALID_PLANS_ONBOARDING.includes(merchant.plan as OnboardingPlanKey);
+
+  // Handle fetcher responses
   useEffect(() => {
-    const data = fetcher.data as { error?: string } | undefined;
-    if (fetcher.state === "idle" && data?.error) {
+    const data = fetcher.data as Record<string, unknown> | undefined;
+    if (fetcher.state !== "idle" || !data) return;
+
+    if ("error" in data && typeof data.error === "string") {
+      setBillingError(data.error);
       shopify.toast.show(data.error, { isError: true });
+      setChoosingPlan(null);
+      return;
+    }
+
+    if ("redirectUrl" in data && typeof data.redirectUrl === "string") {
+      // Navigate Shopify admin top frame to billing confirmation page
+      window.open(data.redirectUrl, "_top");
+      return;
+    }
+
+    if ("skippedPlan" in data && data.skippedPlan === true) {
+      setStep(4);
+      return;
     }
   }, [fetcher.state, fetcher.data, shopify]);
 
@@ -176,6 +426,16 @@ export default function Onboarding() {
     fetcher.submit({ intent: "save-step", step: String(nextStep) }, { method: "POST" });
   };
 
+  const choosePlan = (planKey: OnboardingPlanKey) => {
+    setBillingError(null);
+    setChoosingPlan(planKey);
+    fetcher.submit({ intent: "subscribe", plan: planKey }, { method: "POST" });
+  };
+
+  const skipPlan = () => {
+    fetcher.submit({ intent: "skip-plan" }, { method: "POST" });
+  };
+
   const finish = () => {
     fetcher.submit(
       {
@@ -183,7 +443,6 @@ export default function Onboarding() {
         widgetColor,
         widgetGreeting,
         brandVoice,
-        personalizationEnabled: String(personalizationEnabled),
       },
       { method: "POST" },
     );
@@ -204,10 +463,11 @@ export default function Onboarding() {
 
   const storeHandle = shop.replace(".myshopify.com", "");
   const themeEditorUrl = `https://admin.shopify.com/store/${storeHandle}/themes`;
+  const isBillingLoading = fetcher.state !== "idle" && choosingPlan !== null;
 
   return (
     <s-page heading="Welcome to NeonPing">
-      {/* Fix H — Visual step progress bar */}
+      {/* Visual step progress bar */}
       <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "24px", padding: "0 4px" }}>
         {[1, 2, 3, 4].map((s) => (
           <div key={s} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -234,7 +494,6 @@ export default function Onboarding() {
 
       {step === 1 && (
         <s-section heading="Step 1 of 4 — Brand setup">
-          {/* Fix G — Bot name field */}
           <s-text-field
             label="Bot name"
             value={botName}
@@ -279,7 +538,7 @@ export default function Onboarding() {
           {selectedPreset ? (
             <s-paragraph>
               <s-text tone="neutral">Preview: </s-text>
-              <s-text>"{selectedPreset.preview}"</s-text>
+              <s-text>{'"'}{selectedPreset.preview}{'"'}</s-text>
             </s-paragraph>
           ) : null}
           <s-stack direction="inline" gap="base">
@@ -294,28 +553,118 @@ export default function Onboarding() {
       )}
 
       {step === 3 && (
-        <s-section heading="Step 3 of 4 — Discount rules">
-          <s-switch
-            label="Enable personalized discounts"
-            checked={personalizationEnabled}
-            onChange={(e: Event) =>
-              setPersonalizationEnabled((e.target as HTMLInputElement).checked)
-            }
-            help-text="When enabled, NeonPing shares active discount codes from your Shopify Discounts tab when customers ask, or to recover abandoned carts."
-          ></s-switch>
-          <s-stack direction="inline" gap="base">
-            <s-button onClick={() => goToStep(2)} variant="tertiary">
-              Back
-            </s-button>
-            <s-button onClick={() => goToStep(4)} variant="primary">
-              Next
-            </s-button>
-          </s-stack>
+        <s-section heading="Step 3 of 4 — Choose Your Plan">
+          {isActivePlan ? (
+            /* Merchant already subscribed — show confirmation state */
+            <div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "16px 20px",
+                  background: "#f0faf6",
+                  border: "1px solid #008060",
+                  borderRadius: "10px",
+                  marginBottom: "20px",
+                }}
+              >
+                <span style={{ fontSize: "20px", color: "#008060" }}>✓</span>
+                <div>
+                  <div style={{ fontWeight: 700, color: "#202223" }}>
+                    You{"'"}re on the {merchant.plan.charAt(0).toUpperCase() + merchant.plan.slice(1)} plan
+                  </div>
+                  <div style={{ fontSize: "13px", color: "#6d7175" }}>Your plan is active and ready to go.</div>
+                </div>
+              </div>
+              <s-stack direction="inline" gap="base">
+                <s-button onClick={() => goToStep(2)} variant="tertiary">
+                  Back
+                </s-button>
+                <s-button onClick={() => goToStep(4)} variant="primary">
+                  Continue to Go Live →
+                </s-button>
+              </s-stack>
+            </div>
+          ) : (
+            /* Show plan selection cards */
+            <div>
+              <div style={{ marginBottom: "8px" }}>
+                <s-text tone="neutral">
+                  All plans include a 7-day free trial — no charge today. Cancel any time.
+                </s-text>
+              </div>
+
+              {billingError && (
+                <div style={{ marginBottom: "16px", padding: "12px 16px", background: "#fff0f0", border: "1px solid #fca5a5", borderRadius: "8px" }}>
+                  <s-text tone="critical">{billingError}</s-text>
+                </div>
+              )}
+
+              {/* Plan cards */}
+              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", paddingTop: "16px" }}>
+                {ONBOARDING_PLANS.map((plan) => (
+                  <OnboardingPlanCard
+                    key={plan.key}
+                    plan={plan}
+                    onChoose={choosePlan}
+                    isLoading={isBillingLoading}
+                    choosingPlan={choosingPlan}
+                  />
+                ))}
+              </div>
+
+              <div style={{ marginTop: "24px" }}>
+                <s-stack direction="inline" gap="base">
+                  <s-button onClick={() => goToStep(2)} variant="tertiary">
+                    Back
+                  </s-button>
+                </s-stack>
+              </div>
+
+              {/* Subtle skip link */}
+              <div style={{ marginTop: "16px", textAlign: "center" }}>
+                <button
+                  type="button"
+                  onClick={skipPlan}
+                  disabled={fetcher.state !== "idle"}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#6d7175",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                  }}
+                >
+                  Skip for now
+                </button>
+              </div>
+            </div>
+          )}
         </s-section>
       )}
 
       {step === 4 && (
         <s-section heading="Step 4 of 4 — Go live">
+          {/* Warning banner if no active plan */}
+          {!isActivePlan && (
+            <div style={{ marginBottom: "16px", padding: "12px 16px", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "8px", display: "flex", alignItems: "flex-start", gap: "10px" }}>
+              <span style={{ fontSize: "16px" }}>⚠</span>
+              <div>
+                <span style={{ fontWeight: 600, color: "#92400e" }}>No active plan </span>
+                <span style={{ color: "#78350f" }}>— customers won{"'"}t be able to chat until you subscribe. </span>
+                <button
+                  type="button"
+                  onClick={() => goToStep(3)}
+                  style={{ background: "none", border: "none", color: "#92400e", fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: "inherit" }}
+                >
+                  Choose a plan →
+                </button>
+              </div>
+            </div>
+          )}
+
           <s-paragraph>
             Enable the NeonPing chat widget on your storefront by opening your theme editor
             and turning on the App Embed.
@@ -351,7 +700,7 @@ export default function Onboarding() {
           </s-stack>
           {!themeConfirmed && (
             <p style={{ fontSize: "12px", color: "#b45309", marginTop: "8px" }}>
-              ⚠️ Please confirm you've added the widget to your theme before finishing.
+              ⚠️ Please confirm you{"'"}ve added the widget to your theme before finishing.
             </p>
           )}
         </s-section>
