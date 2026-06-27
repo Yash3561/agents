@@ -99,7 +99,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const shopifyAccessToken = shopifySession?.accessToken ?? "";
 
     // 8. Look up Shopify customer by phone for unified persona
-    const shopifyCustomer = await lookupCustomerByPhone(shopDomain, shopifyAccessToken, from).catch(() => null);
+    const shopifyCustomer = await lookupCustomerByPhone(shopDomain, shopifyAccessToken, from);
 
     // 9. Run WhatsApp agent (no streaming — memory handled internally)
     const result = await runWhatsAppAgent({

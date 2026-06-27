@@ -92,7 +92,7 @@ export async function lookupCustomerByPhone(
       shopDomain,
       accessToken,
       `query($q: String!) { customers(query: $q, first: 1) { edges { node { id firstName } } } }`,
-      { q: `phone:"${phone}"` },
+      { q: `phone:"${phone.replace(/"/g, "")}"` },
     );
     return data.customers?.edges?.[0]?.node ?? null;
   } catch {
