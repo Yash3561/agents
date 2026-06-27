@@ -5,10 +5,17 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
-import { verifyWebhookSignature, decryptToken, sendTextMessage } from "~/lib/whatsapp.server";
+import {
+  verifyWebhookSignature,
+  decryptToken,
+  sendTextMessage,
+  sendReplyButtons,
+  sendCarousel,
+} from "~/lib/whatsapp.server";
 import { getSession, setSession, appendMessage } from "~/lib/session.server";
 import { runWhatsAppAgent } from "~/lib/agents/whatsapp.server";
 import { lookupCustomerByPhone } from "~/lib/mcp/admin.server";
+import { createCart } from "~/lib/mcp/cart.server";
 
 // ---------------------------------------------------------------------------
 // GET — Meta verification handshake
@@ -65,7 +72,12 @@ export async function action({ request }: ActionFunctionArgs) {
     const from = msg.from as string;
     const messageId = msg.id as string;
     const textBody = (msg.text as Record<string, string> | undefined)?.body;
-    if (!textBody) return new Response("OK", { status: 200 }); // non-text (image/voice/etc.)
+    const interactive = msg.interactive as Record<string, unknown> | undefined;
+    const buttonReplyPayload =
+      interactive?.type === "button_reply"
+        ? (interactive.button_reply as Record<string, string> | undefined)?.id
+        : undefined;
+    if (!textBody && !buttonReplyPayload) return new Response("OK", { status: 200 }); // non-text (image/voice/etc.)
 
     const metadata = value.metadata as Record<string, string> | undefined;
     const phoneNumberId = metadata?.phone_number_id;
@@ -80,6 +92,23 @@ export async function action({ request }: ActionFunctionArgs) {
     const accessToken = decryptToken(merchant.waAccessToken);
     const shopDomain = merchant.shopDomain;
     const sessionId = `whatsapp_${from}`;
+
+    // Handle carousel button taps — no agent needed
+    if (buttonReplyPayload) {
+      if (buttonReplyPayload.startsWith("add_cart|")) {
+        const variantId = buttonReplyPayload.slice("add_cart|".length);
+        try {
+          const cart = await createCart(shopDomain, [{ item: { id: variantId }, quantity: 1 }]);
+          await sendTextMessage(phoneNumberId, accessToken, from, `Added! Complete your order: ${cart.checkoutUrl}`);
+        } catch {
+          await sendTextMessage(phoneNumberId, accessToken, from, "Couldn't add to cart. Visit the store to complete your purchase.").catch(() => null);
+        }
+      } else if (buttonReplyPayload.startsWith("view|")) {
+        await sendTextMessage(phoneNumberId, accessToken, from, buttonReplyPayload.slice("view|".length)).catch(() => null);
+      }
+      return new Response("OK", { status: 200 });
+    }
+    if (!textBody) return new Response("OK", { status: 200 });
 
     // 5. Load session from Redis
     const session = await getSession(shopDomain, sessionId);
@@ -116,6 +145,30 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // 10. Send reply
     await sendTextMessage(phoneNumberId, accessToken, from, replyText);
+
+    // Send product carousel if agent found products (fire-and-forget — text already sent)
+    const products = result.products;
+    if (products && products.length >= 2) {
+      const cards = products.slice(0, 3).map((p) => ({
+        imageUrl: p.image_url,
+        body: `${p.title}${p.price_min ? ` — ${p.currency ? p.currency + " " : ""}${p.price_min}` : ""}`,
+        addCartPayload: `add_cart|${p.variants?.[0]?.id ?? p.id}`,
+        viewPayload: `view|https://${shopDomain}${p.url ?? ""}`,
+      }));
+      await sendCarousel(phoneNumberId, accessToken, from, cards).catch(() => null);
+    } else if (products && products.length === 1) {
+      const p = products[0];
+      await sendReplyButtons(
+        phoneNumberId,
+        accessToken,
+        from,
+        `${p.title}${p.price_min ? ` — ${p.price_min}` : ""}`,
+        [
+          { id: `add_cart|${p.variants?.[0]?.id ?? p.id}`, title: "Add to Cart" },
+          { id: `view|https://${shopDomain}${p.url ?? ""}`, title: "View Product" },
+        ],
+      ).catch(() => null);
+    }
 
     // 11. Append assistant reply and persist session
     await appendMessage(shopDomain, sessionId, {

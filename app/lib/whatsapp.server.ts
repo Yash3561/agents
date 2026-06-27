@@ -106,3 +106,38 @@ export async function sendReplyButtons(
     throw new Error(`Meta sendReplyButtons failed: ${res.status} ${err}`);
   }
 }
+
+export async function sendCarousel(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  cards: Array<{ imageUrl?: string; body: string; addCartPayload: string; viewPayload: string }>,
+): Promise<void> {
+  const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "carousel",
+        cards: cards.map((c) => ({
+          ...(c.imageUrl ? { header: { type: "image", image: { link: c.imageUrl } } } : {}),
+          body: { text: c.body },
+          buttons: [
+            { type: "reply", reply: { id: c.addCartPayload, title: "Add to Cart" } },
+            { type: "reply", reply: { id: c.viewPayload, title: "View Product" } },
+          ],
+        })),
+      },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Meta sendCarousel failed: ${res.status} ${err}`);
+  }
+}

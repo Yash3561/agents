@@ -10,6 +10,7 @@ import { tool, generateText, stepCountIs } from "ai";
 import { z } from "zod";
 import { deployments } from "~/lib/llm.server";
 import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.server";
+import type { CatalogProduct } from "~/lib/mcp/catalog.server";
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
 import { searchPoliciesAndFaqs } from "~/lib/mcp/policy.server";
 import { getOrder } from "~/lib/mcp/order.server";
@@ -30,7 +31,7 @@ import type { Merchant } from "@prisma/client";
 
 export interface WhatsAppAgentOutput {
   text: string;
-  products?: unknown[];
+  products?: CatalogProduct[];
   checkout_url?: string;
   discount_code?: string;
   last_search_query?: string;
@@ -98,7 +99,7 @@ export async function runWhatsAppAgent(opts: {
   const { shopDomain, customerPhone, customerId, agentMessage, session, merchant, accessToken } = opts;
 
   const toolsCalled: string[] = [];
-  let products: unknown[] | undefined;
+  let products: CatalogProduct[] | undefined;
   let checkoutUrl: string | undefined;
   let discountCode: string | undefined;
   let lastSearchQuery: string | undefined;
