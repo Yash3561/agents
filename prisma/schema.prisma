@@ -28,6 +28,11 @@ model Merchant {
   customFaqs          Json           @default("[]")
   quickReplies        String[]       @default([])
   whatsappNumber      String?
+  wabaId              String?
+  waPhoneNumberId     String?
+  waAccessToken       String?
+  waPhone             String?
+  waConnectedAt       DateTime?
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
   conversations       Conversation[]

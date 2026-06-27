@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData, useRouteError } from "react-router";
+import { useFetcher, useLoaderData, useRouteError, useSearchParams } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -33,7 +33,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     update: {},
     create: { shopDomain: session.shop },
   });
-  return { merchant };
+  return { merchant, waAppId: process.env.WHATSAPP_APP_ID ?? "" };
 };
 
 const VALID_POSITIONS = new Set(["bottom-right", "bottom-left"]);
@@ -195,10 +195,11 @@ function WidgetPreview({
 }
 
 export default function Settings() {
-  const { merchant } = useLoaderData<typeof loader>();
+  const { merchant, waAppId } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const formRef = useRef<HTMLFormElement>(null);
+  const [searchParams] = useSearchParams();
 
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
   const [botName, setBotName] = useState(merchant.botName || "NeonPing");
@@ -245,6 +246,21 @@ export default function Settings() {
       shopify.toast.show((fetcher.data as { error: string }).error, { isError: true });
     }
   }, [fetcher.data, shopify]);
+
+  // Load FB SDK for Meta Embedded Signup
+  useEffect(() => {
+    type WinWithFB = { FB?: { init: (opts: object) => void } };
+    const win = window as unknown as WinWithFB;
+    if (!waAppId || win.FB) return;
+    const script = document.createElement("script");
+    script.src = "https://connect.facebook.net/en_US/sdk.js";
+    script.async = true;
+    script.defer = true;
+    document.body.appendChild(script);
+    script.onload = () => {
+      (window as unknown as WinWithFB).FB?.init({ appId: waAppId, version: "v19.0" });
+    };
+  }, [waAppId]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -410,6 +426,83 @@ export default function Settings() {
               help-text="Customers can tap to reach you on WhatsApp when they need human help. Include country code, e.g. +1234567890"
             ></s-text-field>
           </div>
+        </s-section>
+        <s-section heading="💬 WhatsApp Business">
+          {searchParams.get("whatsapp") === "connected" && (
+            <div style={{ marginBottom: "16px" }}>
+              <s-banner tone="success">WhatsApp Business connected successfully!</s-banner>
+            </div>
+          )}
+          {searchParams.get("whatsapp") === "error" && (
+            <div style={{ marginBottom: "16px" }}>
+              <s-banner tone="critical">WhatsApp connection failed. Please try again.</s-banner>
+            </div>
+          )}
+          {merchant.waConnectedAt ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+              <s-badge tone="success">Connected</s-badge>
+              <span style={{ fontSize: "14px", color: "#1a1a1a" }}>
+                {merchant.waPhone ?? merchant.waPhoneNumberId}
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  await fetch("/api/whatsapp/disconnect", { method: "POST" });
+                  window.location.reload();
+                }}
+                style={{
+                  background: "none",
+                  border: "1px solid #d72c0d",
+                  color: "#d72c0d",
+                  borderRadius: "6px",
+                  padding: "6px 12px",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            <div>
+              <p style={{ fontSize: "13px", color: "#666", marginBottom: "16px", marginTop: 0 }}>
+                Connect your WhatsApp Business number so customers can chat with your AI assistant on WhatsApp.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  type WinWithFBLogin = { FB?: { login: (cb: (r: { authResponse?: { code?: string } }) => void, opts: object) => void } };
+                  const fb = (window as unknown as WinWithFBLogin).FB;
+                  if (!fb || !waAppId) return;
+                  fb.login(
+                    (response) => {
+                      if (response.authResponse?.code) {
+                        window.location.href = `/api/whatsapp/connect?code=${response.authResponse.code}`;
+                      }
+                    },
+                    {
+                      config_id: waAppId,
+                      response_type: "code",
+                      override_default_response_type: true,
+                      extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
+                    },
+                  );
+                }}
+                style={{
+                  background: "#25D366",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "10px 20px",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  fontSize: "14px",
+                }}
+              >
+                Connect WhatsApp Business
+              </button>
+            </div>
+          )}
         </s-section>
         <s-section heading="👁️ Widget Visibility">
           <div

@@ -41,6 +41,12 @@ const CUSTOMER_OPTIONS = [
   { value: "anonymous", label: "Anonymous" },
 ] as const;
 
+const CHANNEL_OPTIONS = [
+  { value: "all", label: "All channels" },
+  { value: "website", label: "Website" },
+  { value: "whatsapp", label: "WhatsApp" },
+] as const;
+
 type BadgeTone = "success" | "critical" | "info" | "neutral" | "caution" | "warning" | "auto";
 
 const OUTCOME_BADGE: Record<string, { tone: BadgeTone; label: string }> = {
@@ -84,6 +90,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const outcome = url.searchParams.get("outcome") ?? "all";
   const customer = url.searchParams.get("customer") ?? "all";
+  const channel = url.searchParams.get("channel") ?? "all";
   const days = url.searchParams.get("days") ?? "all";
   const search = url.searchParams.get("q") ?? "";
   const page = Math.max(0, Number(url.searchParams.get("page") || "0"));
@@ -104,6 +111,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     : customer === "anonymous" ? { customerId: null }
     : {};
 
+  const channelFilter =
+    channel === "whatsapp" ? { channel: "whatsapp" }
+    : channel === "website" ? { NOT: { channel: "whatsapp" } }
+    : {};
+
   const searchFilter = search.trim()
     ? {
         OR: [
@@ -119,7 +131,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     : null;
   const dateFilter = since ? { startedAt: { gte: since } } : {};
 
-  const where = { shopDomain: shop, ...outcomeFilter, ...customerFilter, ...searchFilter, ...dateFilter };
+  const where = { shopDomain: shop, ...outcomeFilter, ...customerFilter, ...channelFilter, ...searchFilter, ...dateFilter };
   const dateOnlyWhere = { shopDomain: shop, ...dateFilter };
 
   const [
@@ -164,6 +176,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     page,
     outcome,
     customer,
+    channel,
     days,
     search,
     currencyCode,
@@ -182,6 +195,7 @@ export default function Conversations() {
     page,
     outcome,
     customer,
+    channel,
     days,
     search,
     currencyCode,
@@ -282,6 +296,26 @@ export default function Conversations() {
               </button>
             ))}
           </s-stack>
+          <s-stack direction="inline" gap="base">
+            {CHANNEL_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setParam("channel", opt.value)}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: "6px",
+                  border: channel === opt.value ? "1px solid #25D366" : "1px solid #d1d1d1",
+                  background: channel === opt.value ? "#25D366" : "transparent",
+                  color: channel === opt.value ? "#fff" : "#1a1a1a",
+                  cursor: "pointer",
+                  fontWeight: channel === opt.value ? 600 : 400,
+                  fontSize: "13px",
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </s-stack>
         </s-stack>
       </s-section>
 
@@ -361,7 +395,14 @@ export default function Conversations() {
                       )}
                     </s-table-cell>
                     <s-table-cell>
-                      <s-badge tone={badge.tone}>{badge.label}</s-badge>
+                      <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                        <s-badge tone={badge.tone}>{badge.label}</s-badge>
+                        {c.channel === "whatsapp" && (
+                          <span style={{ background: "#25D366", color: "#fff", borderRadius: "10px", padding: "2px 7px", fontSize: "11px", fontWeight: 600 }}>
+                            WhatsApp
+                          </span>
+                        )}
+                      </div>
                     </s-table-cell>
                     <s-table-cell>
                       {c.orderRevenueCents ? (
