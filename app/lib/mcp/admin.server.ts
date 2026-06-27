@@ -79,3 +79,53 @@ export async function adminGraphql<T = unknown>(
 
   return json.data;
 }
+
+export async function lookupCustomerByPhone(
+  shopDomain: string,
+  accessToken: string,
+  phone: string,
+): Promise<{ id: string; firstName?: string } | null> {
+  try {
+    const data = await adminGraphql<{
+      customers: { edges: Array<{ node: { id: string; firstName?: string } }> };
+    }>(
+      shopDomain,
+      accessToken,
+      `query($q: String!) { customers(query: $q, first: 1) { edges { node { id firstName } } } }`,
+      { q: `phone:"${phone}"` },
+    );
+    return data.customers?.edges?.[0]?.node ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getCustomerOrdersAdmin(
+  shopDomain: string,
+  accessToken: string,
+  customerId: string,
+): Promise<unknown[]> {
+  try {
+    const data = await adminGraphql<{
+      customer: { orders: { edges: Array<{ node: unknown }> } };
+    }>(
+      shopDomain,
+      accessToken,
+      `query($id: ID!) {
+        customer(id: $id) {
+          orders(first: 5, sortKey: CREATED_AT, reverse: true) {
+            edges { node {
+              name createdAt fulfillmentStatus
+              totalPriceV2 { amount currencyCode }
+              lineItems(first: 3) { edges { node { title quantity } } }
+            }}
+          }
+        }
+      }`,
+      { id: customerId },
+    );
+    return data.customer?.orders?.edges?.map((e) => e.node) ?? [];
+  } catch {
+    return [];
+  }
+}

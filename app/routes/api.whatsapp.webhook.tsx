@@ -8,6 +8,7 @@ import prisma from "~/db.server";
 import { verifyWebhookSignature, decryptToken, sendTextMessage } from "~/lib/whatsapp.server";
 import { getSession, setSession, appendMessage } from "~/lib/session.server";
 import { runWhatsAppAgent } from "~/lib/agents/whatsapp.server";
+import { lookupCustomerByPhone } from "~/lib/mcp/admin.server";
 
 // ---------------------------------------------------------------------------
 // GET — Meta verification handshake
@@ -97,10 +98,14 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     const shopifyAccessToken = shopifySession?.accessToken ?? "";
 
-    // 8. Run WhatsApp agent (no streaming — memory handled internally)
+    // 8. Look up Shopify customer by phone for unified persona
+    const shopifyCustomer = await lookupCustomerByPhone(shopDomain, shopifyAccessToken, from).catch(() => null);
+
+    // 9. Run WhatsApp agent (no streaming — memory handled internally)
     const result = await runWhatsAppAgent({
       shopDomain,
       customerPhone: from,
+      customerId: shopifyCustomer?.id,
       agentMessage: textBody,
       session,
       merchant,
@@ -109,10 +114,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const replyText = result.text?.trim() || "I'm not sure how to help with that. Could you rephrase?";
 
-    // 9. Send reply
+    // 10. Send reply
     await sendTextMessage(phoneNumberId, accessToken, from, replyText);
 
-    // 10. Append assistant reply and persist session
+    // 11. Append assistant reply and persist session
     await appendMessage(shopDomain, sessionId, {
       role: "assistant",
       content: replyText,
@@ -121,7 +126,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const updatedSession = await getSession(shopDomain, sessionId);
     await setSession(shopDomain, sessionId, updatedSession);
 
-    // 11. Persist to DB (fire-and-forget)
+    // 12. Persist to DB (fire-and-forget)
     const contactName = (value?.contacts as unknown[] | undefined)?.[0] as Record<string, unknown> | undefined;
     const customerEmail = (contactName?.profile as Record<string, string> | undefined)?.email ?? null;
 

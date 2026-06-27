@@ -1,4 +1,4 @@
-import { adminGraphql } from "~/lib/mcp/admin.server";
+import { adminGraphql, lookupCustomerByPhone } from "~/lib/mcp/admin.server";
 import { generateSummary } from "~/lib/llm.server";
 import type { ConversationSession, Message } from "~/lib/session.server";
 import { redis } from "~/redis.server";
@@ -359,4 +359,22 @@ export async function updateWhatsAppMemory(
   } catch {
     // ponytail: fails open — never block the agent on memory writes
   }
+}
+
+/**
+ * Look up a customer by phone, then load their metafield memory.
+ * Falls back to empty memory if the phone number isn't found in Shopify.
+ */
+export async function fetchCustomerMemoryByPhone(
+  shopDomain: string,
+  accessToken: string,
+  phone: string,
+): Promise<{ memory: CustomerMemory; customerId: string | null }> {
+  const customer = await lookupCustomerByPhone(shopDomain, accessToken, phone);
+  if (!customer) return { memory: {}, customerId: null };
+  const memory = await fetchCustomerMemory(shopDomain, accessToken, customer.id);
+  return {
+    memory: { ...memory, firstName: memory.firstName ?? customer.firstName },
+    customerId: customer.id,
+  };
 }
