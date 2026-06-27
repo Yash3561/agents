@@ -1,6 +1,7 @@
 import { adminGraphql } from "~/lib/mcp/admin.server";
 import { generateSummary } from "~/lib/llm.server";
 import type { ConversationSession, Message } from "~/lib/session.server";
+import { redis } from "~/redis.server";
 
 const NAMESPACE = "neonping_chat";
 const MAX_METAFIELD_BYTES = 2000;
@@ -327,4 +328,35 @@ async function summarize(history: Message[]): Promise<string> {
     "Summarize this shopping conversation in 1-2 sentences. Focus on what the customer bought or was interested in, their preferences, and any patterns. No PII.",
     transcript,
   );
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp memory — Redis-backed, keyed by phone number
+// ---------------------------------------------------------------------------
+
+const WA_MEM_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
+
+export async function fetchWhatsAppMemory(phone: string): Promise<CustomerMemory> {
+  try {
+    const val = await redis.get(`wamem:${phone}`);
+    return val ? (JSON.parse(String(val)) as CustomerMemory) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function updateWhatsAppMemory(
+  phone: string,
+  updates: Partial<CustomerMemory>,
+): Promise<void> {
+  try {
+    const existing = await fetchWhatsAppMemory(phone);
+    const merged = { ...existing, ...updates };
+    if (merged.recent_products) {
+      merged.recent_products = merged.recent_products.slice(0, 5);
+    }
+    await redis.setex(`wamem:${phone}`, WA_MEM_TTL, JSON.stringify(merged));
+  } catch {
+    // ponytail: fails open — never block the agent on memory writes
+  }
 }

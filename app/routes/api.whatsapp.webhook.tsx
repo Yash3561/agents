@@ -7,7 +7,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
 import { verifyWebhookSignature, decryptToken, sendTextMessage } from "~/lib/whatsapp.server";
 import { getSession, setSession, appendMessage } from "~/lib/session.server";
-import { runUnifiedAgent } from "~/lib/agents/unified.server";
+import { runWhatsAppAgent } from "~/lib/agents/whatsapp.server";
 
 // ---------------------------------------------------------------------------
 // GET — Meta verification handshake
@@ -97,13 +97,13 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     const shopifyAccessToken = shopifySession?.accessToken ?? "";
 
-    // 8. Run agent (no streaming needed on WhatsApp — wait for full text)
-    const result = await runUnifiedAgent({
+    // 8. Run WhatsApp agent (no streaming — memory handled internally)
+    const result = await runWhatsAppAgent({
       shopDomain,
+      customerPhone: from,
       agentMessage: textBody,
       session,
       merchant,
-      memory: {},
       accessToken: shopifyAccessToken,
     });
 
