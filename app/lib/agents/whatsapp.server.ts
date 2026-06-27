@@ -1,7 +1,9 @@
 /**
- * WhatsApp agent — non-streaming, text-only, no discounts.
+ * WhatsApp agent — non-streaming, text-only.
  * Shares the same UCP/MCP tools as the website agent but has a
  * WhatsApp-specific prompt (concise, plain text, no markdown).
+ * When a Shopify customer is identified by phone, uses unified metafield memory
+ * and the full tool set (discounts, checkout URL, order history).
  */
 
 import { tool, generateText, stepCountIs } from "ai";
@@ -11,7 +13,14 @@ import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.serv
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
 import { searchPoliciesAndFaqs } from "~/lib/mcp/policy.server";
 import { getOrder } from "~/lib/mcp/order.server";
-import { fetchWhatsAppMemory, updateWhatsAppMemory } from "~/lib/agents/memory.server";
+import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
+import { getCustomerOrdersAdmin } from "~/lib/mcp/admin.server";
+import {
+  fetchCustomerMemory,
+  updateCustomerMemory,
+  fetchWhatsAppMemory,
+  updateWhatsAppMemory,
+} from "~/lib/agents/memory.server";
 import type { ConversationSession } from "~/lib/session.server";
 import type { Merchant } from "@prisma/client";
 
@@ -22,6 +31,8 @@ import type { Merchant } from "@prisma/client";
 export interface WhatsAppAgentOutput {
   text: string;
   products?: unknown[];
+  checkout_url?: string;
+  discount_code?: string;
   last_search_query?: string;
   agent_trace: string[];
 }
@@ -33,6 +44,7 @@ export interface WhatsAppAgentOutput {
 function buildWhatsAppPrompt(
   merchant: Merchant,
   memory: { summary?: string; recent_products?: string[] },
+  discountsAvailable: boolean,
 ): string {
   const botName = (merchant as unknown as Record<string, unknown>).botName as string | undefined ?? "NeonPing";
   const storeName = merchant.shopDomain.replace(".myshopify.com", "").replace(/-/g, " ");
@@ -52,17 +64,21 @@ function buildWhatsAppPrompt(
     .filter(Boolean)
     .join("\n");
 
+  const discountLine = discountsAvailable
+    ? "You may offer a discount code when the customer signals real buying intent or asks about deals — call offer_discount tool, never mention codes in free text."
+    : "Do not offer discount codes.";
+
   return `You are ${botName}, a shopping assistant for ${storeName} on WhatsApp.${brandVoice ? `\nBrand voice: ${brandVoice}` : ""}
 
 Keep replies concise — under 200 characters when possible. Plain text only. No markdown, no asterisks, no bullet points, no numbered lists.
 When recommending products, name them briefly with price in one line each.
-Do not offer discount codes.
+${discountLine}
 ${memorySection ? `\n## CUSTOMER CONTEXT\n${memorySection}` : ""}
 ${faqSection}
 
 ## TOOLS
-- Shopping: search_catalog, get_product, lookup_catalog, create_cart, get_cart, update_cart
-- Support: search_policies_and_faqs, get_order
+- Shopping: search_catalog, get_product, lookup_catalog, create_cart, get_cart, update_cart, get_checkout_url
+- Support: search_policies_and_faqs, get_order, get_customer_orders
 - Greetings/small talk: respond directly, no tool needed`;
 }
 
@@ -73,23 +89,42 @@ ${faqSection}
 export async function runWhatsAppAgent(opts: {
   shopDomain: string;
   customerPhone: string;
+  customerId?: string;
   agentMessage: string;
   session: ConversationSession;
   merchant: Merchant;
   accessToken: string;
 }): Promise<WhatsAppAgentOutput> {
-  const { shopDomain, customerPhone, agentMessage, session, merchant } = opts;
+  const { shopDomain, customerPhone, customerId, agentMessage, session, merchant, accessToken } = opts;
 
   const toolsCalled: string[] = [];
   let products: unknown[] | undefined;
+  let checkoutUrl: string | undefined;
+  let discountCode: string | undefined;
   let lastSearchQuery: string | undefined;
 
-  const memory = await fetchWhatsAppMemory(customerPhone);
+  // Discount state from session (same as unified agent)
+  const { offered_codes, level: discountLevel } = session.discount_negotiation;
+  const discountsRemaining = Math.max(0, 3 - discountLevel);
+  const offered_codes_local = [...offered_codes];
+  let discountLevel_local = discountLevel;
 
-  const systemPrompt = buildWhatsAppPrompt(merchant, {
-    summary: memory.summary,
-    recent_products: memory.recent_products,
-  });
+  // Pre-fetch discounts only if personalization is on and budget allows
+  const availableDiscounts =
+    merchant.personalizationEnabled && discountsRemaining > 0
+      ? await getActiveDiscounts(shopDomain, accessToken)
+      : [];
+
+  // Use unified metafield memory when customer is identified, else Redis fallback
+  const memory = customerId
+    ? await fetchCustomerMemory(shopDomain, accessToken, customerId)
+    : await fetchWhatsAppMemory(customerPhone);
+
+  const systemPrompt = buildWhatsAppPrompt(
+    merchant,
+    { summary: memory.summary, recent_products: memory.recent_products },
+    merchant.personalizationEnabled && availableDiscounts.length > 0,
+  );
 
   const history = session.conversation_history
     .slice(-10)
@@ -99,7 +134,7 @@ export async function runWhatsAppAgent(opts: {
     { role: "user", content: agentMessage },
   ];
 
-  const tools = {
+  const baseTools = {
     search_catalog: tool({
       description:
         "Search the merchant catalog. Pass intent alongside query, and maxPriceCents when a budget was mentioned.",
@@ -160,7 +195,9 @@ export async function runWhatsAppAgent(opts: {
       }),
       execute: async (input) => {
         toolsCalled.push("create_cart");
-        return createCart(shopDomain, input.lineItems, { currency: input.currency });
+        const result = await createCart(shopDomain, input.lineItems, { currency: input.currency });
+        checkoutUrl = result.checkoutUrl;
+        return result;
       },
     }),
 
@@ -169,7 +206,9 @@ export async function runWhatsAppAgent(opts: {
       inputSchema: z.object({ cartId: z.string() }),
       execute: async (input) => {
         toolsCalled.push("get_cart");
-        return getCart(shopDomain, input.cartId);
+        const result = await getCart(shopDomain, input.cartId);
+        checkoutUrl = result.checkoutUrl;
+        return result;
       },
     }),
 
@@ -189,12 +228,26 @@ export async function runWhatsAppAgent(opts: {
       }),
       execute: async (input) => {
         toolsCalled.push("update_cart");
-        return updateCart(shopDomain, input.cartId, {
+        const result = await updateCart(shopDomain, input.cartId, {
           add: input.add,
           update: input.update,
           discountCodes: input.discountCodes,
           giftCardCodes: input.giftCardCodes,
         });
+        checkoutUrl = result.checkoutUrl;
+        return result;
+      },
+    }),
+
+    get_checkout_url: tool({
+      description: "Get the checkout URL for a cart so the buyer can complete their purchase.",
+      inputSchema: z.object({ cartId: z.string() }),
+      execute: async (input) => {
+        toolsCalled.push("get_checkout_url");
+        const cartData = await getCart(shopDomain, input.cartId);
+        const url = cartData.checkoutUrl ?? cartData.continue_url ?? "";
+        checkoutUrl = url;
+        return { continue_url: url, requires_escalation: !url };
       },
     }),
 
@@ -227,14 +280,79 @@ export async function runWhatsAppAgent(opts: {
         }
       },
     }),
+
+    get_customer_orders: tool({
+      description: "Get recent order history for this customer",
+      inputSchema: z.object({}),
+      execute: async () => {
+        toolsCalled.push("get_customer_orders");
+        if (!customerId) {
+          return { orders: [], message: "I need to verify your identity first." };
+        }
+        return { orders: await getCustomerOrdersAdmin(shopDomain, accessToken, customerId) };
+      },
+    }),
   };
+
+  // Conditionally add offer_discount — same logic as unified agent
+  if (merchant.personalizationEnabled && availableDiscounts.length > 0) {
+    (baseTools as Record<string, unknown>)["offer_discount"] = tool({
+      description:
+        "Offer a discount code when the customer shows real buying intent or asks about deals. Only call when discount_offers_remaining > 0 and the code hasn't been offered yet.",
+      inputSchema: z.object({
+        code: z.string().describe("The exact discount code string to offer"),
+        negotiationStance: z
+          .enum(["firm", "generous", "final"])
+          .describe("firm=starting low, generous=better deal, final=last/best offer"),
+        message: z.string().describe("Natural language message to show when offering the code"),
+      }),
+      execute: async (input) => {
+        toolsCalled.push("offer_discount");
+        if (discountLevel_local >= 3) {
+          return { error: "discount_cap_reached", message: "No more discount offers available." };
+        }
+        const isValid = availableDiscounts.some((d) => d.code === input.code);
+        const alreadyOffered = offered_codes_local.includes(input.code);
+        if (!isValid || alreadyOffered) {
+          return { error: "Code not available or already offered" };
+        }
+
+        if (session.cart_id) {
+          try {
+            const testCart = await updateCart(shopDomain, session.cart_id, {
+              discountCodes: [input.code],
+            });
+            const codes = testCart.discountCodes ?? testCart.discount_codes ?? [];
+            const applicable = codes.length === 0
+              ? true
+              : codes.some((d) => d.code === input.code && d.applicable !== false);
+            if (!applicable) {
+              offered_codes_local.push(input.code);
+              discountLevel_local += 1;
+              return {
+                error: "code_not_applicable",
+                message: `Code ${input.code} doesn't meet cart conditions. Try a different code or say no codes apply.`,
+              };
+            }
+          } catch {
+            // Network failure — surface the code anyway; customer can apply manually
+          }
+        }
+
+        discountCode = input.code;
+        offered_codes_local.push(input.code);
+        discountLevel_local += 1;
+        return { success: true, code: input.code, stance: input.negotiationStance, auto_applied: !!session.cart_id };
+      },
+    });
+  }
 
   // ponytail: no retry loop — WhatsApp has its own Meta retry on 5xx; let it bubble
   const result = await generateText({
     model: deployments.shopping(),
     system: systemPrompt,
     messages,
-    tools,
+    tools: baseTools,
     maxOutputTokens: 300, // WhatsApp messages are short
     stopWhen: stepCountIs(3),
   }).catch((err) => {
@@ -266,17 +384,23 @@ export async function runWhatsAppAgent(opts: {
     }
   }
 
-  // Fire-and-forget memory update
+  // Fire-and-forget memory update — use unified metafield memory when customer is identified
   if (lastSearchQuery || searchedProductTitles.length > 0) {
-    void updateWhatsAppMemory(customerPhone, {
-      ...(lastSearchQuery ? { last_search: lastSearchQuery } : {}),
-      ...(searchedProductTitles.length > 0 ? { recent_products: searchedProductTitles } : {}),
-    }).catch(() => null);
+    if (customerId) {
+      void updateCustomerMemory(shopDomain, accessToken, customerId, session, lastSearchQuery).catch(() => null);
+    } else {
+      void updateWhatsAppMemory(customerPhone, {
+        ...(lastSearchQuery ? { last_search: lastSearchQuery } : {}),
+        ...(searchedProductTitles.length > 0 ? { recent_products: searchedProductTitles } : {}),
+      }).catch(() => null);
+    }
   }
 
   return {
     text: result.text,
     products,
+    checkout_url: checkoutUrl,
+    discount_code: discountCode,
     last_search_query: lastSearchQuery,
     agent_trace: ["whatsapp", ...toolsCalled],
   };
