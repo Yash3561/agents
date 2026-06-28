@@ -3,19 +3,46 @@
  * POST /api/whatsapp/webhook — Inbound WhatsApp messages from Meta Cloud API
  */
 
+import { createHash } from "node:crypto";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
+import { checkAndIncrementUsage } from "~/lib/billing.server";
 import {
   verifyWebhookSignature,
   decryptToken,
   sendTextMessage,
   sendReplyButtons,
   sendCarousel,
+  sendVariantList,
+  sendCheckoutMessage,
 } from "~/lib/whatsapp.server";
 import { getSession, setSession, appendMessage } from "~/lib/session.server";
 import { runWhatsAppAgent } from "~/lib/agents/whatsapp.server";
+import { formatCarousel } from "~/lib/agents/whatsapp-formatter.server";
 import { lookupCustomerByPhone } from "~/lib/mcp/admin.server";
-import { createCart } from "~/lib/mcp/cart.server";
+import { createCart, updateCart } from "~/lib/mcp/cart.server";
+import { fetchWhatsAppMemory, updateWhatsAppMemory } from "~/lib/agents/memory.server";
+
+function logGuardrail(event: string, type: string, phone: string, shopDomain: string) {
+  const h = createHash("sha256").update(phone).digest("hex").slice(0, 12);
+  console.log(JSON.stringify({ event, type, phone_hash: h, shop: shopDomain, ts: Date.now() }));
+}
+
+const JAILBREAK_RE = [
+  /ignore\s+(previous|all|your)\s+(instructions?|prompt|rules?)/i,
+  /you\s+are\s+now\s+(a\s+)?(different|new|an?)\s+(ai|bot|assistant)/i,
+  /repeat\s+(your\s+)?(system\s+)?prompt/i,
+  /forget\s+(everything|your|all)\s+(previous\s+)?(instructions?|rules?|prompt)/i,
+  /\bjailbreak\b/i,
+  /\bDAN\b/,
+  /act\s+as\s+(?!a\s+shopping)/i,
+  /pretend\s+(you\s+(are|were)|to\s+be)\s+(?!a\s+shopping)/i,
+];
+
+const UNSAFE_OUTPUT_RE = [
+  /\b(kill\s+yourself|kys)\b/i,
+  /\bhow\s+to\s+(make|build)\s+(a\s+)?(bomb|weapon|explosive)/i,
+];
 
 // ---------------------------------------------------------------------------
 // GET — Meta verification handshake
@@ -73,11 +100,18 @@ export async function action({ request }: ActionFunctionArgs) {
     const messageId = msg.id as string;
     const textBody = (msg.text as Record<string, string> | undefined)?.body;
     const interactive = msg.interactive as Record<string, unknown> | undefined;
+    // Carousel quick_reply taps arrive as type="button" with msg.button.payload (not interactive)
+    const templateButtonPayload = (msg.button as Record<string, string> | undefined)?.payload;
     const buttonReplyPayload =
-      interactive?.type === "button_reply"
+      templateButtonPayload ??
+      (interactive?.type === "button_reply"
         ? (interactive.button_reply as Record<string, string> | undefined)?.id
+        : undefined);
+    const listReply =
+      interactive?.type === "list_reply"
+        ? (interactive.list_reply as Record<string, string> | undefined)
         : undefined;
-    if (!textBody && !buttonReplyPayload) return new Response("OK", { status: 200 }); // non-text (image/voice/etc.)
+    if (!textBody && !buttonReplyPayload && !listReply) return new Response("OK", { status: 200 });
 
     const metadata = value.metadata as Record<string, string> | undefined;
     const phoneNumberId = metadata?.phone_number_id;
@@ -93,22 +127,206 @@ export async function action({ request }: ActionFunctionArgs) {
     const shopDomain = merchant.shopDomain;
     const sessionId = `whatsapp_${from}`;
 
+    const { redis } = await import("~/redis.server");
+    // Deduplicate — Meta retries if we take >20s; a second delivery must not send a second reply
+    const isNew = await redis.set(`wamsg:${messageId}`, 1, "EX", 86400, "NX");
+    if (isNew === null) return new Response("OK", { status: 200 });
+
+    // STOP compliance — legal requirement; must run before any other processing
+    const STOP_RE = /^(stop|unsubscribe|opt[\s-]?out|cancel|quit|end)\s*$/i;
+    const START_RE = /^start\s*$/i;
+    if (textBody) {
+      const trimmed = textBody.trim();
+      if (STOP_RE.test(trimmed)) {
+        await redis.set(`wa:optout:${from}`, "1");
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          "You've been unsubscribed and won't receive further messages. Reply START to opt back in."
+        ).catch(() => null);
+        logGuardrail("optout_registered", "stop_word", from, shopDomain);
+        return new Response("OK", { status: 200 });
+      }
+      if (START_RE.test(trimmed)) {
+        await redis.del(`wa:optout:${from}`);
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          "Welcome back! You're now opted in. How can I help you shop today?"
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      }
+      if (await redis.exists(`wa:optout:${from}`)) {
+        logGuardrail("optout_blocked", "opted_out", from, shopDomain);
+        return new Response("OK", { status: 200 });
+      }
+    }
+
+    // Per-phone rate limit — 20 msgs/hour prevents one user burning merchant's quota
+    const phoneRlKey = `wa:rl:${shopDomain}:${from}`;
+    const phoneCount = await redis.incr(phoneRlKey);
+    if (phoneCount === 1) await redis.expire(phoneRlKey, 3600);
+    if (phoneCount > 20) {
+      await sendTextMessage(phoneNumberId, accessToken, from,
+        "You've sent too many messages. Please try again in an hour."
+      ).catch(() => null);
+      logGuardrail("rate_limit_hit", "per_phone", from, shopDomain);
+      return new Response("OK", { status: 200 });
+    }
+
+    // Per-merchant billing gate — same plan limits as web widget
+    const usageCheck = await checkAndIncrementUsage(shopDomain, sessionId).catch(() => ({ allowed: true, used: 0, limit: 0 }));
+    if (!usageCheck.allowed) {
+      await sendTextMessage(phoneNumberId, accessToken, from,
+        "This store's messaging limit has been reached for the month. Please contact the store directly."
+      ).catch(() => null);
+      logGuardrail("usage_limit_hit", "merchant_quota", from, shopDomain);
+      return new Response("OK", { status: 200 });
+    }
+
+    // ponytail: agentInput set by button path (greeting fallthrough) or text path below
+    let agentInput: string | undefined;
+
     // Handle carousel button taps — no agent needed
     if (buttonReplyPayload) {
-      if (buttonReplyPayload.startsWith("add_cart|")) {
-        const variantId = buttonReplyPayload.slice("add_cart|".length);
+      // Greeting reply buttons fall through to agent with mapped text; all others return early
+      const greetingMap: Record<string, string> = {
+        greeting_browse: "Show me your products",
+        greeting_discount: "Do you have any discount codes?",
+        greeting_track: "What is the status of my latest order?",
+        greeting_shopagain: "Show me products similar to what I bought before",
+      };
+      if (greetingMap[buttonReplyPayload]) {
+        agentInput = greetingMap[buttonReplyPayload];
+        // fall through to session load, customer lookup, agent call below
+      } else if (buttonReplyPayload.startsWith("add_cart|")) {
+        const parts = buttonReplyPayload.split("|");
+
+        // Multi-variant: show picker list instead of adding directly
+        if (parts[1] === "select_variant") {
+          const productId = parts[2];
+          const relativeUrl = parts[3] ?? "";
+          try {
+            const cached = await redis.get(`wa:variants:${productId}`);
+            const variants = cached
+              ? (JSON.parse(String(cached)) as Array<{ id: string; title: string; price: string; currency?: string }>)
+              : [];
+            if (variants.length > 0) {
+              await sendVariantList(phoneNumberId, accessToken, from, variants, relativeUrl);
+            } else {
+              await sendTextMessage(phoneNumberId, accessToken, from, "Please reply with your preferred size/color to add it to cart.").catch(() => null);
+            }
+          } catch {
+            await sendTextMessage(phoneNumberId, accessToken, from, "Tap the product link to choose your option.").catch(() => null);
+          }
+          return new Response("OK", { status: 200 });
+        }
+
+        // Single-variant: reuse existing cart or create new
+        const variantId = parts[1];
+        const relativeProductUrl = parts[2] ?? "";
         try {
-          const cart = await createCart(shopDomain, [{ item: { id: variantId }, quantity: 1 }]);
-          await sendTextMessage(phoneNumberId, accessToken, from, `Added! Complete your order: ${cart.checkoutUrl}`);
+          const waMem = await fetchWhatsAppMemory(from);
+          let cart;
+          if (waMem.cart_id) {
+            try {
+              cart = await updateCart(shopDomain, waMem.cart_id, { add: [{ product_variant_id: variantId, quantity: 1 }] });
+            } catch {
+              cart = await createCart(shopDomain, [{ item: { id: variantId }, quantity: 1 }]);
+            }
+          } else {
+            cart = await createCart(shopDomain, [{ item: { id: variantId }, quantity: 1 }]);
+          }
+          const addedTitle = cart.lines?.[0]?.merchandise?.product?.title ?? cart.lines?.[0]?.merchandise?.title;
+          void updateWhatsAppMemory(from, {
+            cart_id: cart.id,
+            ...(addedTitle ? { recent_products: [...(waMem.recent_products ?? []), addedTitle].slice(0, 5) } : {}),
+          }).catch(() => null);
+          const checkoutUrl = `${cart.checkoutUrl}${cart.checkoutUrl.includes("?") ? "&" : "?"}checkout[phone]=%2B${from}`;
+          const productPageUrl = relativeProductUrl ? `https://${shopDomain}${relativeProductUrl}` : `https://${shopDomain}`;
+          await sendCheckoutMessage(phoneNumberId, accessToken, from, addedTitle ?? "your item", "", checkoutUrl, productPageUrl);
         } catch {
           await sendTextMessage(phoneNumberId, accessToken, from, "Couldn't add to cart. Visit the store to complete your purchase.").catch(() => null);
         }
+      } else if (buttonReplyPayload.startsWith("know_more|")) {
+        const parts = buttonReplyPayload.split("|");
+        const relativeProductUrl = parts[2] ?? "";
+        const productPageUrl = relativeProductUrl ? `https://${shopDomain}${relativeProductUrl}` : `https://${shopDomain}`;
+        await sendReplyButtons(phoneNumberId, accessToken, from,
+          `Tap to add it or view full details:\n${productPageUrl}`,
+          [
+            { id: `add_cart|${parts[1]}|${relativeProductUrl}`, title: "Add to Cart" },
+            { id: `view|${productPageUrl}`, title: "View Product" },
+          ],
+        ).catch(() => null);
       } else if (buttonReplyPayload.startsWith("view|")) {
         await sendTextMessage(phoneNumberId, accessToken, from, buttonReplyPayload.slice("view|".length)).catch(() => null);
+      } else if (buttonReplyPayload.startsWith("prepaid|")) {
+        const url = buttonReplyPayload.slice("prepaid|".length);
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          `Great choice! Complete payment here: ${url}`
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      } else if (buttonReplyPayload.startsWith("cod_keep|")) {
+        const name = buttonReplyPayload.slice("cod_keep|".length);
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          `No problem! Your COD order ${name} is confirmed. We'll notify you before delivery.`
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      } else if (buttonReplyPayload.startsWith("support|")) {
+        const domain = buttonReplyPayload.slice("support|".length);
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          `You can reach the store directly at https://${domain}/pages/contact or reply to continue chatting.`
+        ).catch(() => null);
+      }
+      // Greeting payloads set agentInput and fall through; everything else returns here
+      if (!agentInput) return new Response("OK", { status: 200 });
+    }
+
+    // Handle list reply — variant picker selection
+    if (listReply) {
+      const parts = listReply.id?.split("|") ?? [];
+      if (parts[0] === "vadd" && parts[1]) {
+        // Variant selected from picker — add directly to cart
+        const variantId = parts[1];
+        const relativeProductUrl = parts[2] ?? "";
+        try {
+          const waMem = await fetchWhatsAppMemory(from);
+          let cart;
+          if (waMem.cart_id) {
+            try {
+              cart = await updateCart(shopDomain, waMem.cart_id, { add: [{ product_variant_id: variantId, quantity: 1 }] });
+            } catch {
+              cart = await createCart(shopDomain, [{ item: { id: variantId }, quantity: 1 }]);
+            }
+          } else {
+            cart = await createCart(shopDomain, [{ item: { id: variantId }, quantity: 1 }]);
+          }
+          const addedTitle = cart.lines?.[0]?.merchandise?.product?.title ?? cart.lines?.[0]?.merchandise?.title;
+          void updateWhatsAppMemory(from, { cart_id: cart.id }).catch(() => null);
+          const checkoutUrl = `${cart.checkoutUrl}${cart.checkoutUrl.includes("?") ? "&" : "?"}checkout[phone]=%2B${from}`;
+          const productPageUrl = relativeProductUrl ? `https://${shopDomain}${relativeProductUrl}` : `https://${shopDomain}`;
+          await sendCheckoutMessage(phoneNumberId, accessToken, from, addedTitle ?? listReply.title ?? "your item", "", checkoutUrl, productPageUrl);
+        } catch {
+          await sendTextMessage(phoneNumberId, accessToken, from, "Couldn't add to cart. Please try again.").catch(() => null);
+        }
       }
       return new Response("OK", { status: 200 });
     }
-    if (!textBody) return new Response("OK", { status: 200 });
+
+    if (textBody) {
+      // Input validation — strip non-printable, hard cap 500 chars
+      // eslint-disable-next-line no-control-regex
+      const validatedText = textBody.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim().slice(0, 500);
+      if (!validatedText) return new Response("OK", { status: 200 });
+      // Jailbreak blocklist — fast regex reject before any DB/agent work
+      if (JAILBREAK_RE.some((re) => re.test(validatedText))) {
+        const storeName = shopDomain.replace(".myshopify.com", "");
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          `I can only help with shopping at ${storeName}. What can I find for you?`
+        ).catch(() => null);
+        logGuardrail("guardrail_triggered", "jailbreak", from, shopDomain);
+        return new Response("OK", { status: 200 });
+      }
+      agentInput = validatedText;
+    }
+    if (!agentInput) return new Response("OK", { status: 200 });
 
     // 5. Load session from Redis
     const session = await getSession(shopDomain, sessionId);
@@ -116,7 +334,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // 6. Append user message to history
     await appendMessage(shopDomain, sessionId, {
       role: "user",
-      content: textBody,
+      content: agentInput,
       timestamp: Date.now(),
     });
 
@@ -130,12 +348,64 @@ export async function action({ request }: ActionFunctionArgs) {
     // 8. Look up Shopify customer by phone for unified persona
     const shopifyCustomer = await lookupCustomerByPhone(shopDomain, shopifyAccessToken, from);
 
+    // Greeting shortcut — warm reply + buttons for first contact; skip agent
+    const GREETING_RE = /^(hi|hello|hey|hola|namaste|नमस्ते|yo|sup|hiya|ola)\b/i;
+    if (GREETING_RE.test(agentInput) && session.conversation_history.length === 0) {
+      const isReturning = (shopifyCustomer?.numberOfOrders ?? 0) > 0;
+      const firstName = shopifyCustomer?.displayName?.split(" ")[0] ?? shopifyCustomer?.firstName;
+      const nameStr = firstName ? ` ${firstName}` : " there";
+      let greetingText: string;
+      let greetingButtons: Array<{ id: string; title: string }>;
+      if (isReturning) {
+        greetingText = `Hey${nameStr}! 👋 Good to see you again. What's on your mind?`;
+        greetingButtons = [
+          { id: "greeting_track", title: "📦 Track My Order" },
+          { id: "greeting_shopagain", title: "🛍️ Shop Again" },
+          { id: `support|${shopDomain}`, title: "💬 Help" },
+        ];
+      } else {
+        const storeName = shopDomain.replace(".myshopify.com", "");
+        greetingText = `Hi${nameStr}! 👋 Welcome to ${storeName}. What can I help you with?`;
+        greetingButtons = [
+          { id: "greeting_browse", title: "🛍️ Browse Products" },
+          { id: "greeting_discount", title: "🎁 Get 10% Off" },
+          { id: `support|${shopDomain}`, title: "💬 Talk to Us" },
+        ];
+      }
+      await sendReplyButtons(phoneNumberId, accessToken, from, greetingText, greetingButtons).catch(() => null);
+      await appendMessage(shopDomain, sessionId, { role: "assistant", content: greetingText, timestamp: Date.now() });
+      const updatedGreetingSession = await getSession(shopDomain, sessionId);
+      await setSession(shopDomain, sessionId, updatedGreetingSession);
+      const contactNameG = (value?.contacts as unknown[] | undefined)?.[0] as Record<string, unknown> | undefined;
+      const customerEmailG = (contactNameG?.profile as Record<string, string> | undefined)?.email ?? null;
+      void prisma.conversation.upsert({
+        where: { shopDomain_sessionId: { shopDomain, sessionId } },
+        update: {
+          messages: updatedGreetingSession.conversation_history as unknown as import("@prisma/client").Prisma.InputJsonValue,
+          messageCount: updatedGreetingSession.conversation_history.length,
+          channel: "whatsapp",
+          lastMessageAt: new Date(),
+          ...(customerEmailG ? { customerEmail: customerEmailG } : {}),
+        },
+        create: {
+          shopDomain,
+          sessionId,
+          messages: updatedGreetingSession.conversation_history as unknown as import("@prisma/client").Prisma.InputJsonValue,
+          messageCount: updatedGreetingSession.conversation_history.length,
+          channel: "whatsapp",
+          firstUserMessage: agentInput.slice(0, 255),
+          ...(customerEmailG ? { customerEmail: customerEmailG } : {}),
+        },
+      }).catch((err) => console.error("[wa-webhook] conversation persist failed:", err));
+      return new Response("OK", { status: 200 });
+    }
+
     // 9. Run WhatsApp agent (no streaming — memory handled internally)
     const result = await runWhatsAppAgent({
       shopDomain,
       customerPhone: from,
       customerId: shopifyCustomer?.id,
-      agentMessage: textBody,
+      agentMessage: agentInput,
       session,
       merchant,
       accessToken: shopifyAccessToken,
@@ -143,20 +413,90 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const replyText = result.text?.trim() || "I'm not sure how to help with that. Could you rephrase?";
 
-    // 10. Send reply
-    await sendTextMessage(phoneNumberId, accessToken, from, replyText);
+    // Human handoff detection — if AI can't help, offer an escape hatch
+    const NEEDS_HUMAN_RE = /contact support|order not found|unable to help|i['u2019]m not sure/i;
+    const needsHuman = NEEDS_HUMAN_RE.test(replyText);
 
-    // Send product carousel if agent found products (fire-and-forget — text already sent)
+    // Output safety filter + PII scrub before any send
+    const filteredReply = (
+      UNSAFE_OUTPUT_RE.some((re) => re.test(replyText))
+        ? "I'm not able to help with that. What can I find for you today?"
+        : replyText
+    )
+      .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[removed]")
+      .replace(/(\+\d{1,3}[\s-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/g, "[removed]");
+
+    // 10. Send reply — when ≥2 products, carousel replaces the text message
     const products = result.products;
+    const CURRENCY_SYM: Record<string, string> = { USD: "$", INR: "₹", EUR: "€", GBP: "£" };
+    console.log(`[wa-webhook] products found: ${products?.length ?? 0}`);
     if (products && products.length >= 2) {
-      const cards = products.slice(0, 3).map((p) => ({
-        imageUrl: p.image_url,
-        body: `${p.title}${p.price_min ? ` — ${p.currency ? p.currency + " " : ""}${p.price_min}` : ""}`,
-        addCartPayload: `add_cart|${p.variants?.[0]?.id ?? p.id}`,
-        viewPayload: `view|https://${shopDomain}${p.url ?? ""}`,
-      }));
-      await sendCarousel(phoneNumberId, accessToken, from, cards).catch(() => null);
+      // Try formatter first; fall back to template if it throws
+      const formatted = await formatCarousel(agentInput, products, replyText).catch(() => null);
+
+      const t = formatted?.intro ?? filteredReply.trim();
+      const cut = t.lastIndexOf(" ", 80);
+      const introText = (cut > 0 ? t.slice(0, cut) : t.slice(0, 80)) || "Here are some options:";
+
+      const cards = products.slice(0, 3).map((p, i) => {
+        const fc = formatted?.cards[i];
+        const sym = CURRENCY_SYM[p.currency ?? ""] ?? p.currency ?? "";
+        const cardBody = fc
+          ? [fc.heading, fc.description, fc.price].filter(Boolean).join("\n")
+          : (() => {
+              const wbSlice = (s: string, max: number) => {
+                if (s.length <= max) return s;
+                const cut = s.lastIndexOf(" ", max);
+                return cut > 0 ? s.slice(0, cut) : s.slice(0, max);
+              };
+              const rawDesc = p.description
+                ? p.description
+                    .replace(/<[^>]*>/g, "")
+                    .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+                    .replace(/\s+/g, " ").trim()
+                : "";
+              const sentEnd = rawDesc.search(/[.!?]/);
+              const firstSentence = sentEnd > 0 ? rawDesc.slice(0, sentEnd + 1) : rawDesc;
+              const ptags = (p as { tags?: string[] }).tags ?? [];
+              const personaPrefix = /gift|for my|for him|for her/i.test(agentInput)
+                ? "Perfect gift · "
+                : /budget|cheap|affordable|under \$/i.test(agentInput)
+                  ? "Best value · "
+                  : /premium|luxury|quality/i.test(agentInput)
+                    ? "Premium quality · "
+                    : "";
+              const prefix =
+                /eco|organic|sustainable/i.test(agentInput) && ptags.some((tag) => /eco|organic|sustainable/i.test(tag))
+                  ? "Eco-friendly · "
+                  : personaPrefix;
+              const shortTitle = wbSlice(p.title, 25);
+              const descLine = rawDesc ? prefix + wbSlice(firstSentence, 108 - prefix.length) : "";
+              const boldPrice = p.price_min ? `*from ${sym}${p.price_min}*` : "";
+              // ponytail: no outer wbSlice — fields are already individually bounded; sendCarousel clips to 160 anyway
+              return [shortTitle, descLine, boldPrice].filter(Boolean).join("\n");
+            })();
+        // Variant detection — cache variants for picker; variantId prefix drives button payload
+        const availableVariants = (p.variants ?? []).filter((v) => v.available);
+        let variantId: string;
+        if (availableVariants.length > 1) {
+          void redis.set(
+            `wa:variants:${p.id}`,
+            JSON.stringify(availableVariants.map((v) => ({ id: v.id, title: v.title, price: v.price, currency: v.currency }))),
+            "EX", 3600,
+          ).catch(() => null);
+          variantId = `select_variant|${p.id}|${p.url ?? ""}`;
+        } else {
+          variantId = `${availableVariants[0]?.id ?? p.variants?.[0]?.id ?? p.id}|${p.url ?? ""}`;
+        }
+        return { imageUrl: p.image_url, body: cardBody, variantId };
+      });
+
+      await sendCarousel(phoneNumberId, accessToken, from, cards, introText).catch(async (e: unknown) => {
+        console.error("[wa-webhook] carousel failed, falling back to text:", (e as Error).message);
+        await sendTextMessage(phoneNumberId, accessToken, from, formatted?.fallbackText ?? filteredReply).catch(() => null);
+      });
     } else if (products && products.length === 1) {
+      await sendTextMessage(phoneNumberId, accessToken, from, filteredReply);
       const p = products[0];
       await sendReplyButtons(
         phoneNumberId,
@@ -164,16 +504,39 @@ export async function action({ request }: ActionFunctionArgs) {
         from,
         `${p.title}${p.price_min ? ` — ${p.price_min}` : ""}`,
         [
-          { id: `add_cart|${p.variants?.[0]?.id ?? p.id}`, title: "Add to Cart" },
+          { id: `add_cart|${p.variants?.[0]?.id ?? p.id}|${p.url ?? ""}`, title: "Add to Cart" },
           { id: `view|https://${shopDomain}${p.url ?? ""}`, title: "View Product" },
         ],
+        p.image_url,
       ).catch(() => null);
+    } else if (result.checkout_url && result.cart_lines?.length) {
+      // Cart view — send interactive CTA message with itemised summary
+      const itemSummary = result.cart_lines
+        .map((l) => `• ${l.title}${l.quantity > 1 ? ` ×${l.quantity}` : ""}${l.price ? ` — ${l.price}` : ""}`)
+        .join("\n");
+      const cartBody = `Your cart:\n\n${itemSummary}`;
+      await sendCheckoutMessage(
+        phoneNumberId, accessToken, from,
+        cartBody, "", result.checkout_url, `https://${shopDomain}`,
+      ).catch(async () => {
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          `${cartBody}\n\nCheckout: ${result.checkout_url}`
+        ).catch(() => null);
+      });
+    } else {
+      await sendTextMessage(phoneNumberId, accessToken, from, filteredReply);
+      if (needsHuman) {
+        await sendReplyButtons(phoneNumberId, accessToken, from,
+          "Would you like to speak with someone from the store?",
+          [{ id: `support|${shopDomain}`, title: "Get Help 💬" }],
+        ).catch(() => null);
+      }
     }
 
     // 11. Append assistant reply and persist session
     await appendMessage(shopDomain, sessionId, {
       role: "assistant",
-      content: replyText,
+      content: filteredReply,
       timestamp: Date.now(),
     });
     const updatedSession = await getSession(shopDomain, sessionId);
@@ -198,7 +561,7 @@ export async function action({ request }: ActionFunctionArgs) {
         messages: updatedSession.conversation_history as unknown as import("@prisma/client").Prisma.InputJsonValue,
         messageCount: updatedSession.conversation_history.length,
         channel: "whatsapp",
-        firstUserMessage: textBody.slice(0, 255),
+        firstUserMessage: agentInput.slice(0, 255),
         ...(customerEmail ? { customerEmail } : {}),
       },
     }).catch((err) => console.error("[wa-webhook] conversation persist failed:", err));
