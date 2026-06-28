@@ -269,6 +269,21 @@ export async function action({ request }: ActionFunctionArgs) {
           `No problem! Your COD order ${name} is confirmed. We'll notify you before delivery.`
         ).catch(() => null);
         return new Response("OK", { status: 200 });
+      } else if (buttonReplyPayload.startsWith("review_good|")) {
+        await sendTextMessage(
+          phoneNumberId, accessToken, from,
+          `Amazing! Leave us a quick review here — it means a lot:\nhttps://${shopDomain}`,
+        ).catch(() => null);
+      } else if (buttonReplyPayload.startsWith("review_issue|")) {
+        await sendTextMessage(
+          phoneNumberId, accessToken, from,
+          "We're sorry to hear that! A team member will reach out shortly.",
+        ).catch(() => null);
+        await sendReplyButtons(
+          phoneNumberId, accessToken, from,
+          "Would you like to speak with someone from the store?",
+          [{ id: `support|${shopDomain}`, title: "Get Help 💬" }],
+        ).catch(() => null);
       } else if (buttonReplyPayload.startsWith("support|")) {
         const domain = buttonReplyPayload.slice("support|".length);
         await sendTextMessage(phoneNumberId, accessToken, from,
