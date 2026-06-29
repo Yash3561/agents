@@ -27,6 +27,8 @@ model Merchant {
   onboardingStep      Int            @default(1)
   customFaqs          Json           @default("[]")
   quickReplies        String[]       @default([])
+  insightsJson        Json?
+  revenueNarrative    Json?
   whatsappNumber      String?
   wabaId              String?
   waPhoneNumberId     String?
@@ -57,6 +59,8 @@ model Conversation {
   orderRevenueCents Int?              // written by orders/paid webhook
   agentTrace        Json?
   routeReason       String?
+  qualityScore      Float?
+  qaMeta            Json?
   customerEmail     String?
   resolvedAt        DateTime?
   startedAt         DateTime @default(now())

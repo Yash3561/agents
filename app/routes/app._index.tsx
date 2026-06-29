@@ -1,12 +1,13 @@
 import { useState } from "react";
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { redirect, useLoaderData, useSearchParams } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { Form, redirect, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getUsage, PLAN_LIMITS } from "../lib/billing.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
+import { runInsightsAnalysis, runRevenueNarrator } from "../lib/agents/merchant-analyst.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -174,12 +175,32 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // fall back to USD silently
   }
 
+  // Fetch cached AI insights + revenue narrative; auto-refresh if stale (non-blocking)
+  const merchantData = await prisma.merchant.findUnique({
+    where: { shopDomain: shop },
+    select: { insightsJson: true, revenueNarrative: true },
+  });
+
+  const insightsRaw = merchantData?.insightsJson as { generatedAt?: string; topics?: unknown[] } | null;
+  const insightsAge = insightsRaw?.generatedAt ? Date.now() - new Date(insightsRaw.generatedAt).getTime() : Infinity;
+  if (insightsAge > 24 * 3600 * 1000) {
+    void runInsightsAnalysis(shop).catch(() => null);
+  }
+
+  const narrativeRaw = merchantData?.revenueNarrative as { month?: string; generatedAt?: string } | null;
+  const narrativeMonth = narrativeRaw?.month ? new Date(narrativeRaw.month).getMonth() : -1;
+  if (narrativeMonth !== new Date().getMonth()) {
+    void runRevenueNarrator(shop).catch(() => null);
+  }
+
   return {
     hasPlan,
     days,
     channel,
     shopDomain: shop,
     currencyCode,
+    insightsJson: insightsRaw ?? null,
+    revenueNarrative: narrativeRaw ?? null,
     stats: {
       totalConversations,
       conversionsCount,
@@ -196,6 +217,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     topIntents,
   };
 };
+
+// ─── Action — manual refresh for AI cards ─────────────────────────────────────
+
+export async function action({ request }: ActionFunctionArgs) {
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
+  const formData = await request.formData();
+  const intent = formData.get("intent") as string;
+  if (intent === "refresh-insights") {
+    await runInsightsAnalysis(shop).catch(() => null);
+  } else if (intent === "refresh-revenue") {
+    await runRevenueNarrator(shop).catch(() => null);
+  }
+  return null;
+}
 
 // ─── Metric card (Polaris-native) ─────────────────────────────────────────────
 
@@ -546,7 +582,13 @@ export default function Index() {
     conversionByRoute,
     topIntents,
     currencyCode,
+    insightsJson,
+    revenueNarrative,
   } = loaderData;
+
+  type InsightsTopic = { label: string; count: number; sample: string; suggestion: string };
+  const insights = insightsJson as { topics?: InsightsTopic[]; generatedAt?: string } | null;
+  const narrative = revenueNarrative as { bullets?: string[]; month?: string; generatedAt?: string } | null;
 
   // ── Computed metrics ──────────────────────────────────────────────────────
   const conversionRatePct = stats.totalConversations
@@ -1120,6 +1162,80 @@ export default function Index() {
                 })}
               </div>
             )}
+          </div>
+        </s-section>
+      )}
+
+      {/* ── AI Insights card ── */}
+      <s-section heading="AI Insights — What customers need help with">
+        {!insights?.topics?.length ? (
+          <div style={{ padding: "24px", textAlign: "center", color: "#8c9196", fontSize: "13px" }}>
+            {insightsJson === null
+              ? "Analyzing your conversations… check back in a few minutes."
+              : "Not enough conversations yet to surface patterns."}
+            <Form method="post" style={{ marginTop: "12px", display: "inline-block" }}>
+              <input type="hidden" name="intent" value="refresh-insights" />
+              <button type="submit" style={{ padding: "6px 14px", fontSize: "12px", border: "1px solid #c9cccf", borderRadius: "5px", cursor: "pointer", background: "#fff" }}>
+                Analyze now
+              </button>
+            </Form>
+          </div>
+        ) : (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <span style={{ fontSize: "12px", color: "#8c9196" }}>
+                Based on last 7 days · Updated {insights.generatedAt ? new Date(insights.generatedAt).toLocaleDateString("en", { month: "short", day: "numeric" }) : "recently"}
+              </span>
+              <Form method="post" style={{ display: "inline" }}>
+                <input type="hidden" name="intent" value="refresh-insights" />
+                <button type="submit" style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #c9cccf", borderRadius: "5px", cursor: "pointer", background: "#fff", color: "#6d7175" }}>
+                  ↻ Refresh
+                </button>
+              </Form>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {(insights.topics as InsightsTopic[]).map((topic, i) => (
+                <div key={i} style={{ background: "#fafafa", border: "1px solid #e1e3e5", borderRadius: "8px", padding: "14px 16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
+                    <div style={{ fontWeight: 600, fontSize: "14px", color: "#202223" }}>{topic.label}</div>
+                    <span style={{ fontSize: "12px", color: "#6d7175", flexShrink: 0, marginLeft: "12px" }}>{topic.count} conversations</span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#6d7175", fontStyle: "italic", marginBottom: "8px" }}>&ldquo;{topic.sample}&rdquo;</div>
+                  <div style={{ fontSize: "12px", color: "#2c6ecb", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <span>💡</span>
+                    <span>{topic.suggestion}</span>
+                    {topic.suggestion?.toLowerCase().includes("faq") && (
+                      <a href="/app/ai-config" style={{ marginLeft: "8px", fontSize: "11px", color: "#2c6ecb", fontWeight: 600 }}>Add to FAQ →</a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </s-section>
+
+      {/* ── Revenue Attribution Narrator ── */}
+      {(narrative?.bullets?.length ?? 0) > 0 && (
+        <s-section heading="This Month's AI Impact">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <span style={{ fontSize: "12px", color: "#8c9196" }}>
+              {narrative?.month ? new Date(narrative.month).toLocaleString("default", { month: "long", year: "numeric" }) : "Current month"}
+            </span>
+            <Form method="post" style={{ display: "inline" }}>
+              <input type="hidden" name="intent" value="refresh-revenue" />
+              <button type="submit" style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #c9cccf", borderRadius: "5px", cursor: "pointer", background: "#fff", color: "#6d7175" }}>
+                ↻ Refresh
+              </button>
+            </Form>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {(narrative!.bullets as string[]).map((bullet, i) => (
+              <div key={i} style={{ display: "flex", gap: "10px", fontSize: "14px", color: "#202223", lineHeight: "1.5" }}>
+                <span style={{ color: "#008060", flexShrink: 0 }}>✓</span>
+                <span>{bullet}</span>
+              </div>
+            ))}
           </div>
         </s-section>
       )}

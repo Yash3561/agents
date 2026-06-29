@@ -6,6 +6,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
 import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
+import { runQAJudge } from "../lib/agents/merchant-analyst.server";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusFilter === "open" ? { resolved: false, escalated: false }
     : statusFilter === "escalated" ? { escalated: true, resolved: false }
     : statusFilter === "resolved" ? { resolved: true }
+    : statusFilter === "flagged" ? { qaMeta: { path: ["flagged"], equals: true } }
     : {};
 
   const conversations = await prisma.conversation.findMany({
@@ -67,6 +69,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cartValue: true,
       orderRevenueCents: true,
       orderId: true,
+      qualityScore: true,
+      qaMeta: true,
     },
   });
 
@@ -149,6 +153,21 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: conversationId },
       data: { resolved: true, resolvedAt: new Date(), escalated: false },
     });
+    void runQAJudge(conversationId);
+  } else if (intent === "train") {
+    // Add Q&A pair from a flagged conversation to the merchant's knowledge base
+    const question = (formData.get("question") as string)?.trim();
+    const answer = (formData.get("answer") as string)?.trim();
+    if (question && answer) {
+      const merchant = await prisma.merchant.findUnique({ where: { shopDomain: shop } });
+      const faqs = Array.isArray(merchant?.customFaqs) ? (merchant!.customFaqs as { q: string; a: string }[]) : [];
+      if (faqs.length < 20) {
+        await prisma.merchant.update({
+          where: { shopDomain: shop },
+          data: { customFaqs: [...faqs, { q: question, a: answer }] },
+        });
+      }
+    }
   } else if (intent === "escalate") {
     await prisma.conversation.update({
       where: { id: conversationId },
@@ -236,6 +255,7 @@ export default function Inbox() {
     { value: "open", label: "Open" },
     { value: "escalated", label: "🔴 Escalated" },
     { value: "resolved", label: "Resolved" },
+    { value: "flagged", label: "🔍 Needs Review" },
   ] as const;
 
   const filterBtn = (active: boolean, color = "#2c6ecb") => ({
@@ -282,6 +302,7 @@ export default function Inbox() {
             ) : conversations.map((c) => {
               const isSelected = selected?.id === c.id;
               const isEscalated = c.escalated && !c.resolved;
+              const isFlagged = c.qaMeta && (c.qaMeta as { flagged?: boolean }).flagged === true;
               return (
                 <div
                   key={c.id}
@@ -305,6 +326,7 @@ export default function Inbox() {
                       </span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                      {isFlagged && <span title="AI quality flagged" style={{ fontSize: "11px" }}>🔍</span>}
                       <StatusDot escalated={c.escalated} resolved={c.resolved} lastMessageAt={c.lastMessageAt} />
                       <span style={{ fontSize: "11px", color: "#8c9196" }}>{relativeTime(c.lastMessageAt)}</span>
                     </div>
@@ -537,8 +559,53 @@ export default function Inbox() {
                         : <s-badge tone="success">Open</s-badge>
                     }
                   </span>
+                  {selected.qualityScore != null && (
+                    <>
+                      <span style={{ color: "#6d7175" }}>AI Quality</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                        <span style={{
+                          fontWeight: 600, fontSize: "13px",
+                          color: selected.qualityScore >= 4 ? "#15803d" : selected.qualityScore >= 3 ? "#d97706" : "#dc2626",
+                        }}>
+                          {selected.qualityScore.toFixed(1)}/5
+                        </span>
+                        {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
+                          <span style={{ fontSize: "11px", color: "#dc2626" }}>● Needs review</span>
+                        )}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
+
+              {/* Train from this — visible on flagged conversations */}
+              {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
+                <div style={{ background: "#fff8f1", border: "1px solid #fed7aa", borderRadius: "8px", padding: "12px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 600, color: "#92400e", marginBottom: "8px" }}>🔍 AI flagged this conversation</div>
+                  <div style={{ fontSize: "11px", color: "#92400e", marginBottom: "10px" }}>
+                    {(selected.qaMeta as { reason?: string } | null)?.reason ?? "Low quality response detected."}
+                  </div>
+                  <Form method="post">
+                    <input type="hidden" name="intent" value="train" />
+                    <input type="hidden" name="conversationId" value={selected.id} />
+                    <input
+                      name="question"
+                      placeholder="Customer question"
+                      defaultValue={selected.firstUserMessage ?? ""}
+                      style={{ width: "100%", padding: "5px 8px", borderRadius: "4px", border: "1px solid #c9cccf", fontSize: "12px", marginBottom: "6px", boxSizing: "border-box" as const }}
+                    />
+                    <textarea
+                      name="answer"
+                      placeholder="Correct answer to add to FAQ…"
+                      rows={2}
+                      style={{ width: "100%", padding: "5px 8px", borderRadius: "4px", border: "1px solid #c9cccf", fontSize: "12px", marginBottom: "6px", resize: "none", fontFamily: "inherit", boxSizing: "border-box" as const }}
+                    />
+                    <button type="submit" style={{ width: "100%", padding: "6px", background: "#92400e", color: "#fff", border: "none", borderRadius: "5px", fontSize: "12px", cursor: "pointer", fontWeight: 600 }}>
+                      Add to Knowledge Base
+                    </button>
+                  </Form>
+                </div>
+              )}
 
               {/* Actions */}
               <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid #e1e3e5", paddingTop: "16px" }}>
