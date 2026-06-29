@@ -1,0 +1,10 @@
+# NeonPing CODEOWNERS
+# These paths require human approval — Copilot agents cannot self-approve PRs touching them.
+
+.github/                              @NeonPing/maintainers
+app/routes/auth*                      @NeonPing/maintainers
+shopify.server.ts                     @NeonPing/maintainers
+shopify.app.toml                      @NeonPing/maintainers
+Dockerfile                            @NeonPing/maintainers
+app/lib/billing.server.ts             @NeonPing/maintainers
+extensions/chat-widget/assets/        @NeonPing/maintainers

@@ -1,6 +1,6 @@
 # NeonPing — Context & Continuation Guide
 
-**Last updated**: 2026-06-24  
+**Last updated**: 2026-06-29  
 **Status**: ✅ Live on Azure Container Apps, merchant portal fully working, ready for feature work  
 **Model default**: Sonnet 4.6
 
@@ -45,7 +45,7 @@
 
 **#50 — 80% usage-warning email**: Not built — no email service exists in codebase. Blocked on provider choice (e.g., Resend). Part of #28 spec, split out as separate issue.
 
-**#27 — Shopify Billing API**: Not started. Blocks real plan assignment (all merchants default to `plan: "free"` today, limit enforcement works against that default). Required before #28 is fully closed.
+**#77 — Shopify Billing API (end-to-end wiring)**: Not started. #27 (closed) scaffolded the infrastructure; #77 wires real Shopify `appSubscriptionCreate`, plan write-back, and UI subscribe buttons. Blocks real plan assignment (all merchants default to `plan: "free"` today). Copilot agent spec added — ready to assign.
 
 **#31, #34, #37, #39, #42**: Not started (Sentry, E2E tests, App Store listing, security review, Order MCP).
 
@@ -61,6 +61,8 @@
 
 ```
 Frontend: React Router v7 + Polaris web components (s-page/s-section/etc., NOT @shopify/polaris)
+         ⚠️  Component names use s- prefix: s-page, s-section, s-badge, s-button, s-table, s-banner
+             DO NOT use @shopify/polaris React components — they are NOT installed
 Backend: Node.js/TypeScript, Shopify Embedded App + Theme App Extension
 AI: Azure AI Foundry /openai/v1 (gpt-4o-mini for all agents, @ai-sdk/openai-compatible)
 DB: Neon PostgreSQL (Prisma ORM)
@@ -93,7 +95,7 @@ az containerapp update --name neonping --resource-group neonping-rg --image caab
 ```
 Increment the version tag (v4 → v5 → etc.) each time. Check `az containerapp revision list` to confirm new revision is Healthy.
 
-⚠️ **Security debt**: `.env` is copied into the Docker image (`COPY . .` in Dockerfile). Add `.env` to `.dockerignore` before any public image is used. Secrets should come from Azure env vars only.
+`.env` is already in `.dockerignore` — secrets come from Azure env vars only. ✅
 
 ### If Azure URL Changes
 1. Update `shopify.app.toml`:
@@ -126,6 +128,12 @@ All required vars should already be configured on the Azure Container App. If de
 cd /Users/krkaushikkumar/Desktop/neonping
 npm run dev -- --store neonping-dev-a509ojgs.myshopify.com
 ```
+
+### Type-check (no build needed)
+```bash
+npx tsc --noEmit
+```
+Run this before deploying. No output = clean.
 
 **Note**: Tunnel URL changes on each restart. If embedded app login fails:
 1. Use `(p) Open app preview` from the dev terminal instead of navigating via Apps list manually

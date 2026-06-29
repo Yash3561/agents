@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
 import { checkAndIncrementUsage } from "~/lib/billing.server";
+import { extractCheckoutToken } from "~/lib/conversation.server";
 import {
   verifyWebhookSignature,
   decryptToken,
@@ -15,11 +16,12 @@ import {
   sendCarousel,
   sendVariantList,
   sendCheckoutMessage,
+  sendListMessage,
 } from "~/lib/whatsapp.server";
-import { getSession, setSession, appendMessage } from "~/lib/session.server";
+import { getSession, setSession, appendMessage, deleteSession } from "~/lib/session.server";
 import { runWhatsAppAgent } from "~/lib/agents/whatsapp.server";
 import { formatCarousel } from "~/lib/agents/whatsapp-formatter.server";
-import { lookupCustomerByPhone } from "~/lib/mcp/admin.server";
+import { lookupCustomerByPhone, fetchProductRatings } from "~/lib/mcp/admin.server";
 import { createCart, updateCart } from "~/lib/mcp/cart.server";
 import { fetchWhatsAppMemory, updateWhatsAppMemory } from "~/lib/agents/memory.server";
 
@@ -43,6 +45,82 @@ const UNSAFE_OUTPUT_RE = [
   /\b(kill\s+yourself|kys)\b/i,
   /\bhow\s+to\s+(make|build)\s+(a\s+)?(bomb|weapon|explosive)/i,
 ];
+
+// ---------------------------------------------------------------------------
+// Currency helpers — dynamic price tiers for filter list
+// ---------------------------------------------------------------------------
+
+const CURRENCY_SYM_EXT: Record<string, string> = {
+  USD: "$", CAD: "CA$", AUD: "A$", NZD: "NZ$", SGD: "S$", HKD: "HK$", MXN: "MX$", BRL: "R$",
+  INR: "₹", PKR: "₨", BDT: "৳", NPR: "₨", LKR: "₨",
+  EUR: "€", GBP: "£", CHF: "CHF ", SEK: "kr ", NOK: "kr ", DKK: "kr ", PLN: "zł ",
+  JPY: "¥", CNY: "¥", KRW: "₩",
+  AED: "AED ", SAR: "SAR ", QAR: "QAR ", KWD: "KWD ",
+  ZAR: "R", THB: "฿", MYR: "RM ", IDR: "Rp ", PHP: "₱", VND: "₫",
+};
+
+type PriceTierDef = { id: string; title: string; description: string; agentQuery: string };
+
+function buildPriceTiers(sym: string, code: string): PriceTierDef[] {
+  const noLimit: PriceTierDef = { id: "price|any", title: "No price limit", description: "Show everything", agentQuery: "Show me popular products across all price ranges" };
+  if (["JPY", "KRW"].includes(code)) return [
+    { id: "price|t1", title: `Under ${sym}3,000`, description: "Budget-friendly picks", agentQuery: `Show me products under ${sym}3000` },
+    { id: "price|t2", title: `${sym}3K – ${sym}10K`, description: "Mid-range options", agentQuery: `Show me products between ${sym}3000 and ${sym}10000` },
+    { id: "price|t3", title: `${sym}10K – ${sym}30K`, description: "Premium selection", agentQuery: `Show me products between ${sym}10000 and ${sym}30000` },
+    { id: "price|t4", title: `${sym}30,000+`, description: "Luxury & high-end", agentQuery: `Show me premium products over ${sym}30000` },
+    noLimit,
+  ];
+  if (["INR", "PKR", "BDT", "NPR", "LKR"].includes(code)) return [
+    { id: "price|t1", title: `Under ${sym}500`, description: "Budget-friendly picks", agentQuery: `Show me products under ${sym}500` },
+    { id: "price|t2", title: `${sym}500 – ${sym}2,000`, description: "Mid-range options", agentQuery: `Show me products between ${sym}500 and ${sym}2000` },
+    { id: "price|t3", title: `${sym}2,000 – ${sym}5,000`, description: "Premium selection", agentQuery: `Show me products between ${sym}2000 and ${sym}5000` },
+    { id: "price|t4", title: `${sym}5,000+`, description: "Luxury & high-end", agentQuery: `Show me premium products over ${sym}5000` },
+    noLimit,
+  ];
+  if (["IDR", "VND"].includes(code)) return [
+    { id: "price|t1", title: `Under ${sym}100K`, description: "Budget-friendly picks", agentQuery: `Show me products under ${sym}100000` },
+    { id: "price|t2", title: `${sym}100K – ${sym}500K`, description: "Mid-range options", agentQuery: `Show me products between ${sym}100000 and ${sym}500000` },
+    { id: "price|t3", title: `${sym}500K – ${sym}1.5M`, description: "Premium selection", agentQuery: `Show me products between ${sym}500000 and ${sym}1500000` },
+    { id: "price|t4", title: `${sym}1.5M+`, description: "Luxury & high-end", agentQuery: `Show me premium products over ${sym}1500000` },
+    noLimit,
+  ];
+  // Default: USD/EUR/GBP/CAD/AUD/AED/CHF etc.
+  return [
+    { id: "price|t1", title: `Under ${sym}25`, description: "Budget-friendly picks", agentQuery: `Show me products under ${sym}25` },
+    { id: "price|t2", title: `${sym}25 – ${sym}100`, description: "Mid-range options", agentQuery: `Show me products between ${sym}25 and ${sym}100` },
+    { id: "price|t3", title: `${sym}100 – ${sym}300`, description: "Premium selection", agentQuery: `Show me products between ${sym}100 and ${sym}300` },
+    { id: "price|t4", title: `${sym}300+`, description: "Luxury & high-end", agentQuery: `Show me premium products over ${sym}300` },
+    noLimit,
+  ];
+}
+
+async function getShopCurrency(shopDomain: string): Promise<{ code: string; sym: string }> {
+  const { redis } = await import("~/redis.server");
+  const cached = await redis.get(`wa:currency:${shopDomain}`).catch(() => null);
+  if (cached) {
+    const sep = cached.indexOf("|");
+    return { code: cached.slice(0, sep), sym: cached.slice(sep + 1) };
+  }
+  let code = "USD";
+  try {
+    const sess = await prisma.session.findFirst({
+      where: { shop: shopDomain, isOnline: false },
+      select: { accessToken: true },
+    });
+    if (sess?.accessToken) {
+      const res = await fetch(`https://${shopDomain}/admin/api/2026-04/shop.json`, {
+        headers: { "X-Shopify-Access-Token": sess.accessToken },
+      });
+      if (res.ok) {
+        const data = await res.json() as { shop?: { currency?: string } };
+        code = data.shop?.currency ?? "USD";
+      }
+    }
+  } catch { /* fall back to USD */ }
+  const sym = CURRENCY_SYM_EXT[code] ?? `${code} `;
+  await redis.set(`wa:currency:${shopDomain}`, `${code}|${sym}`, "EX", 86400).catch(() => null);
+  return { code, sym };
+}
 
 // ---------------------------------------------------------------------------
 // GET — Meta verification handshake
@@ -186,11 +264,50 @@ export async function action({ request }: ActionFunctionArgs) {
     // Handle carousel button taps — no agent needed
     if (buttonReplyPayload) {
       // Greeting reply buttons fall through to agent with mapped text; all others return early
+      // greeting_browse / greeting_question handled inline below (no agent needed)
+      if (buttonReplyPayload === "filter_price") {
+        const { code, sym } = await getShopCurrency(shopDomain);
+        const tiers = buildPriceTiers(sym, code);
+        await sendListMessage(phoneNumberId, accessToken, from,
+          "Choose your price range:",
+          "Select Range",
+          [{ title: "Price ranges", rows: tiers.map(({ id, title, description }) => ({ id, title, description })) }],
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      }
+      if (buttonReplyPayload === "refine_search") {
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          "Sure! Tell me what you're looking for — product type, color, occasion, or anything specific 🔍"
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      }
+      if (buttonReplyPayload === "pay_prepaid") {
+        const pendingUrl = await redis.get(`wa:pending_checkout:${from}`).catch(() => null);
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          `Great choice! 💳 Complete your payment securely:\n${pendingUrl ?? `https://${shopDomain}`}`
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      }
+      if (buttonReplyPayload === "pay_cod") {
+        const pendingUrl = await redis.get(`wa:pending_checkout:${from}`).catch(() => null);
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          `No problem! 💵 Cash on Delivery selected. Complete your order here:\n${pendingUrl ?? `https://${shopDomain}`}\n\nWe'll notify you before delivery.`
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      }
+      if (buttonReplyPayload === "greeting_question") {
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          "Sure! I can help with orders, returns, sizing, shipping, or anything else — what do you need? 😊"
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      }
       const greetingMap: Record<string, string> = {
-        greeting_browse: "Show me your products",
-        greeting_discount: "Do you have any discount codes?",
+        greeting_browse: "Show me your featured and popular products",
+        greeting_bestsellers: "Show me your best sellers and most popular products",
         greeting_track: "What is the status of my latest order?",
         greeting_shopagain: "Show me products similar to what I bought before",
+        post_checkout_track: "What is the status of my latest order?",
+        post_checkout_shop: "Show me more products I might like",
       };
       if (greetingMap[buttonReplyPayload]) {
         agentInput = greetingMap[buttonReplyPayload];
@@ -241,6 +358,15 @@ export async function action({ request }: ActionFunctionArgs) {
           const checkoutUrl = `${cart.checkoutUrl}${cart.checkoutUrl.includes("?") ? "&" : "?"}checkout[phone]=%2B${from}`;
           const productPageUrl = relativeProductUrl ? `https://${shopDomain}${relativeProductUrl}` : `https://${shopDomain}`;
           await sendCheckoutMessage(phoneNumberId, accessToken, from, addedTitle ?? "your item", "", checkoutUrl, productPageUrl);
+          await redis.set(`wa:pending_checkout:${from}`, checkoutUrl, "EX", 1800).catch(() => null);
+          await sendReplyButtons(phoneNumberId, accessToken, from,
+            "How would you like to pay?",
+            [
+              { id: "pay_prepaid", title: "💳 Pay Online" },
+              { id: "pay_cod", title: "💵 Cash on Delivery" },
+              { id: "post_checkout_shop", title: "🛍️ Keep Shopping" },
+            ],
+          ).catch(() => null);
         } catch {
           await sendTextMessage(phoneNumberId, accessToken, from, "Couldn't add to cart. Visit the store to complete your purchase.").catch(() => null);
         }
@@ -294,7 +420,7 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!agentInput) return new Response("OK", { status: 200 });
     }
 
-    // Handle list reply — variant picker selection
+    // Handle list reply — variant picker or dynamic filter selection
     if (listReply) {
       const parts = listReply.id?.split("|") ?? [];
       if (parts[0] === "vadd" && parts[1]) {
@@ -318,11 +444,43 @@ export async function action({ request }: ActionFunctionArgs) {
           const checkoutUrl = `${cart.checkoutUrl}${cart.checkoutUrl.includes("?") ? "&" : "?"}checkout[phone]=%2B${from}`;
           const productPageUrl = relativeProductUrl ? `https://${shopDomain}${relativeProductUrl}` : `https://${shopDomain}`;
           await sendCheckoutMessage(phoneNumberId, accessToken, from, addedTitle ?? listReply.title ?? "your item", "", checkoutUrl, productPageUrl);
+          await redis.set(`wa:pending_checkout:${from}`, checkoutUrl, "EX", 1800).catch(() => null);
+          await sendReplyButtons(phoneNumberId, accessToken, from,
+            "How would you like to pay?",
+            [
+              { id: "pay_prepaid", title: "💳 Pay Online" },
+              { id: "pay_cod", title: "💵 Cash on Delivery" },
+              { id: "post_checkout_shop", title: "🛍️ Keep Shopping" },
+            ],
+          ).catch(() => null);
         } catch {
           await sendTextMessage(phoneNumberId, accessToken, from, "Couldn't add to cart. Please try again.").catch(() => null);
         }
+        return new Response("OK", { status: 200 });
       }
-      return new Response("OK", { status: 200 });
+
+      // Price filter list reply — resolve currency dynamically, fall through to agent
+      if (listReply.id?.startsWith("price|")) {
+        const { code, sym } = await getShopCurrency(shopDomain);
+        const tiers = buildPriceTiers(sym, code);
+        const tier = tiers.find((t) => t.id === listReply.id);
+        agentInput = tier?.agentQuery ?? "Show me popular products across all price ranges";
+        // fall through to session/agent below
+      } else if (listReply.id === "recovery_help") {
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          "You can reach the store directly at https://" + shopDomain + "/pages/contact or just type your question here."
+        ).catch(() => null);
+        return new Response("OK", { status: 200 });
+      } else if (listReply.id === "recovery_bestsellers") {
+        agentInput = "Show me your best sellers and most popular products";
+        // fall through
+      } else if (listReply.id === "recovery_new") {
+        agentInput = "Show me your newest arrivals";
+        // fall through
+      } else {
+        return new Response("OK", { status: 200 });
+      }
+      // price|* and recovery_* fall through to session load + agent call below
     }
 
     if (textBody) {
@@ -345,6 +503,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // 5. Load session from Redis
     const session = await getSession(shopDomain, sessionId);
+    // Capture BEFORE append — appendMessage mutates session.conversation_history in-place
+    const isFirstMessage = session.conversation_history.length === 0;
 
     // 6. Append user message to history
     await appendMessage(shopDomain, sessionId, {
@@ -365,29 +525,35 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Greeting shortcut — warm reply + buttons for first contact; skip agent
     const GREETING_RE = /^(hi|hello|hey|hola|namaste|नमस्ते|yo|sup|hiya|ola)\b/i;
-    if (GREETING_RE.test(agentInput) && session.conversation_history.length === 0) {
+    const isGreeting = GREETING_RE.test(agentInput);
+    // Reset stale session when customer re-opens with a greeting — treat as fresh start
+    if (isGreeting && !isFirstMessage) {
+      await deleteSession(shopDomain, sessionId);
+      session.conversation_history = [];
+    }
+    if (isGreeting) {
       const isReturning = (shopifyCustomer?.numberOfOrders ?? 0) > 0;
       const firstName = shopifyCustomer?.displayName?.split(" ")[0] ?? shopifyCustomer?.firstName;
       const nameStr = firstName ? ` ${firstName}` : " there";
       let greetingText: string;
       let greetingButtons: Array<{ id: string; title: string }>;
       if (isReturning) {
-        greetingText = `Hey${nameStr}! 👋 Good to see you again. What's on your mind?`;
+        greetingText = `Hey${nameStr}! 👋 Good to see you again. What can I help you with?`;
         greetingButtons = [
           { id: "greeting_track", title: "📦 Track My Order" },
           { id: "greeting_shopagain", title: "🛍️ Shop Again" },
-          { id: `support|${shopDomain}`, title: "💬 Help" },
+          { id: "greeting_question", title: "💬 Get Help" },
         ];
       } else {
         const storeName = shopDomain.replace(".myshopify.com", "");
         greetingText = `Hi${nameStr}! 👋 Welcome to ${storeName}. What can I help you with?`;
         greetingButtons = [
           { id: "greeting_browse", title: "🛍️ Browse Products" },
-          { id: "greeting_discount", title: "🎁 Get 10% Off" },
-          { id: `support|${shopDomain}`, title: "💬 Talk to Us" },
+          { id: "greeting_bestsellers", title: "🔥 Best Sellers" },
+          { id: "greeting_question", title: "💬 Get Help" },
         ];
       }
-      await sendReplyButtons(phoneNumberId, accessToken, from, greetingText, greetingButtons).catch(() => null);
+      await sendReplyButtons(phoneNumberId, accessToken, from, greetingText, greetingButtons).catch((e: unknown) => console.error("[wa-greeting] sendReplyButtons failed:", e));
       await appendMessage(shopDomain, sessionId, { role: "assistant", content: greetingText, timestamp: Date.now() });
       const updatedGreetingSession = await getSession(shopDomain, sessionId);
       await setSession(shopDomain, sessionId, updatedGreetingSession);
@@ -446,6 +612,11 @@ export async function action({ request }: ActionFunctionArgs) {
     const CURRENCY_SYM: Record<string, string> = { USD: "$", INR: "₹", EUR: "€", GBP: "£" };
     console.log(`[wa-webhook] products found: ${products?.length ?? 0}`);
     if (products && products.length >= 2) {
+      // Fetch ratings for carousel products — cached 1h per product, best-effort
+      const ratingsMap = await fetchProductRatings(
+        shopDomain, shopifyAccessToken, products.slice(0, 3).map((p) => p.id),
+      ).catch(() => new Map<string, { rating: number; count: number }>());
+
       // Try formatter first; fall back to template if it throws
       const formatted = await formatCarousel(agentInput, products, replyText).catch(() => null);
 
@@ -503,13 +674,25 @@ export async function action({ request }: ActionFunctionArgs) {
         } else {
           variantId = `${availableVariants[0]?.id ?? p.variants?.[0]?.id ?? p.id}|${p.url ?? ""}`;
         }
-        return { imageUrl: p.image_url, body: cardBody, variantId };
+        const productRating = ratingsMap.get(p.id);
+        const ratingLine = productRating
+          ? `⭐ ${productRating.rating.toFixed(1)} (${productRating.count.toLocaleString()} reviews)\n`
+          : "";
+        return { imageUrl: p.image_url, body: ratingLine + cardBody, variantId };
       });
 
       await sendCarousel(phoneNumberId, accessToken, from, cards, introText).catch(async (e: unknown) => {
         console.error("[wa-webhook] carousel failed, falling back to text:", (e as Error).message);
         await sendTextMessage(phoneNumberId, accessToken, from, formatted?.fallbackText ?? filteredReply).catch(() => null);
       });
+      await sendReplyButtons(phoneNumberId, accessToken, from,
+        "Want to narrow it down?",
+        [
+          { id: "filter_price", title: "💰 Filter by Price" },
+          { id: "refine_search", title: "🔄 Try Different" },
+          { id: "greeting_question", title: "💬 Get Help" },
+        ],
+      ).catch(() => null);
     } else if (products && products.length === 1) {
       await sendTextMessage(phoneNumberId, accessToken, from, filteredReply);
       const p = products[0];
@@ -541,9 +724,26 @@ export async function action({ request }: ActionFunctionArgs) {
     } else {
       await sendTextMessage(phoneNumberId, accessToken, from, filteredReply);
       if (needsHuman) {
+        await sendListMessage(phoneNumberId, accessToken, from,
+          "I wasn't able to find what you need. Here are some options:",
+          "Browse Options",
+          [{
+            title: "Quick Browse",
+            rows: [
+              { id: "recovery_bestsellers", title: "🔥 Best Sellers", description: "Our most popular items" },
+              { id: "recovery_new", title: "✨ New Arrivals", description: "Just landed in store" },
+              { id: "recovery_help", title: "💬 Talk to Support", description: "Get human help" },
+            ],
+          }],
+        ).catch(() => null);
+      } else {
         await sendReplyButtons(phoneNumberId, accessToken, from,
-          "Would you like to speak with someone from the store?",
-          [{ id: `support|${shopDomain}`, title: "Get Help 💬" }],
+          "Anything else I can help with?",
+          [
+            { id: "post_checkout_shop", title: "🛍️ Browse More" },
+            { id: "post_checkout_track", title: "📦 My Orders" },
+            { id: "greeting_question", title: "💬 Get Help" },
+          ],
         ).catch(() => null);
       }
     }
@@ -561,6 +761,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const contactName = (value?.contacts as unknown[] | undefined)?.[0] as Record<string, unknown> | undefined;
     const customerEmail = (contactName?.profile as Record<string, string> | undefined)?.email ?? null;
 
+    const waCheckoutToken = result.checkout_url ? extractCheckoutToken(result.checkout_url) : undefined;
+
     void prisma.conversation.upsert({
       where: { shopDomain_sessionId: { shopDomain, sessionId } },
       update: {
@@ -569,6 +771,11 @@ export async function action({ request }: ActionFunctionArgs) {
         channel: "whatsapp",
         lastMessageAt: new Date(),
         ...(customerEmail ? { customerEmail } : {}),
+        ...(result.agent_trace?.length ? { agentTrace: result.agent_trace } : {}),
+        ...(result.route_reason ? { routeReason: result.route_reason } : {}),
+        ...(result.cart_id ? { cartId: result.cart_id } : {}),
+        ...(result.cart_value_cents != null ? { cartValue: result.cart_value_cents / 100 } : {}),
+        ...(waCheckoutToken ? { checkoutToken: waCheckoutToken } : {}),
       },
       create: {
         shopDomain,
@@ -578,6 +785,11 @@ export async function action({ request }: ActionFunctionArgs) {
         channel: "whatsapp",
         firstUserMessage: agentInput.slice(0, 255),
         ...(customerEmail ? { customerEmail } : {}),
+        ...(result.agent_trace?.length ? { agentTrace: result.agent_trace } : {}),
+        ...(result.route_reason ? { routeReason: result.route_reason } : {}),
+        ...(result.cart_id ? { cartId: result.cart_id } : {}),
+        ...(result.cart_value_cents != null ? { cartValue: result.cart_value_cents / 100 } : {}),
+        ...(waCheckoutToken ? { checkoutToken: waCheckoutToken } : {}),
       },
     }).catch((err) => console.error("[wa-webhook] conversation persist failed:", err));
 

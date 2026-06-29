@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { redirect, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getUsage, PLAN_LIMITS } from "../lib/billing.server";
@@ -26,8 +27,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const url = new URL(request.url);
   const days = url.searchParams.get("days") || "30";
+  const channel = url.searchParams.get("channel") || "all";
   const daysNum = parseInt(days, 10) || 30;
   const since = new Date(Date.now() - daysNum * 86400000);
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+
+  const channelFilter =
+    channel === "whatsapp" ? { channel: "whatsapp" }
+    : channel === "web" ? { NOT: { channel: "whatsapp" } }
+    : {};
+
+  const channelSql =
+    channel === "whatsapp" ? Prisma.sql`AND "channel" = 'whatsapp'`
+    : channel === "web" ? Prisma.sql`AND "channel" != 'whatsapp'`
+    : Prisma.sql``;
+
+  const baseWhere = { shopDomain: shop, startedAt: { gte: since }, ...channelFilter };
 
   const [
     totalConversations,
@@ -36,12 +51,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     revenueAgg,
     recentEscalations,
     usage,
+    openNow,
+    recentForResponseTime,
   ] = await Promise.all([
-    prisma.conversation.count({ where: { shopDomain: shop, startedAt: { gte: since } } }),
-    prisma.conversation.count({ where: { shopDomain: shop, orderId: { not: null }, startedAt: { gte: since } } }),
-    prisma.conversation.count({ where: { shopDomain: shop, discountCode: { not: null }, startedAt: { gte: since } } }),
+    prisma.conversation.count({ where: baseWhere }),
+    prisma.conversation.count({ where: { ...baseWhere, orderId: { not: null } } }),
+    prisma.conversation.count({ where: { ...baseWhere, discountCode: { not: null } } }),
     prisma.conversation.aggregate({
-      where: { shopDomain: shop, orderId: { not: null }, startedAt: { gte: since } },
+      where: { ...baseWhere, orderId: { not: null } },
       _sum: { orderRevenueCents: true },
     }),
     prisma.conversation.findMany({
@@ -55,7 +72,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       select: { id: true, sessionId: true, lastMessageAt: true, messageCount: true },
     }),
     getUsage(shop),
+    prisma.conversation.count({
+      where: { shopDomain: shop, resolved: false, lastMessageAt: { gte: tenMinutesAgo }, ...channelFilter },
+    }),
+    prisma.conversation.findMany({
+      where: baseWhere,
+      orderBy: { startedAt: "desc" },
+      take: 200,
+      select: { messages: true },
+    }),
   ]);
+
+  // Compute avg first-response time from messages JSON
+  const responseTimes = recentForResponseTime
+    .map((c) => {
+      const msgs = c.messages as Array<{ role: string; timestamp?: number }>;
+      const firstUser = msgs.find((m) => m.role === "user");
+      const firstBot = msgs.find((m) => m.role === "assistant" && (m.timestamp ?? 0) > (firstUser?.timestamp ?? 0));
+      return firstUser?.timestamp != null && firstBot?.timestamp != null ? firstBot.timestamp - firstUser.timestamp : null;
+    })
+    .filter((t): t is number => t !== null);
+  const avgResponseMs = responseTimes.length
+    ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
+    : null;
 
   const rawRouting = await prisma.$queryRaw<Array<{ route: string; count: bigint }>>`
     SELECT
@@ -66,6 +105,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       AND "startedAt" >= ${since}
       AND "agentTrace" IS NOT NULL
       AND "agentTrace"::json->>0 LIKE 'orchestrator:%'
+      ${channelSql}
     GROUP BY 1
     ORDER BY count DESC
   `;
@@ -84,6 +124,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       AND "startedAt" >= ${since}
       AND "agentTrace" IS NOT NULL
       AND "agentTrace"::json->>0 LIKE 'orchestrator:%'
+      ${channelSql}
     GROUP BY 1
   `;
   const conversionByRoute = new Map(
@@ -100,6 +141,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       AND "startedAt" >= ${since}
       AND "routeReason" IS NOT NULL
       AND "routeReason" != ''
+      ${channelSql}
     GROUP BY "routeReason"
     ORDER BY count DESC
     LIMIT 10
@@ -111,6 +153,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     FROM "Conversation"
     WHERE "shopDomain" = ${shop}
     AND "startedAt" >= ${since}
+    ${channelSql}
     GROUP BY DATE("startedAt")
     ORDER BY date ASC
   `;
@@ -134,6 +177,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     hasPlan,
     days,
+    channel,
     shopDomain: shop,
     currencyCode,
     stats: {
@@ -142,6 +186,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       discountsUsedCount,
       revenueCents: revenueAgg._sum.orderRevenueCents ?? 0,
     },
+    openNow,
+    avgResponseMs,
     recentEscalations,
     usage,
     routingData,
@@ -489,6 +535,9 @@ export default function Index() {
     hasPlan,
     stats,
     days,
+    channel,
+    openNow,
+    avgResponseMs,
     recentEscalations,
     usage,
     routingData,
@@ -527,6 +576,22 @@ export default function Index() {
     !isAtCapacity;
 
   const daysNum = parseInt(days, 10) || 30;
+
+  const fmtResponseTime = (ms: number | null) => {
+    if (ms === null) return "—";
+    const min = ms / 60000;
+    return min < 1 ? `${Math.round(ms / 1000)}s` : `${min.toFixed(1)} min`;
+  };
+  const responseColor = avgResponseMs === null ? "#8c9196"
+    : avgResponseMs < 180000 ? "#008060"
+    : avgResponseMs < 600000 ? "#b98900"
+    : "#d82c0d";
+
+  const CHANNEL_TOGGLE = [
+    { value: "all", label: "All channels" },
+    { value: "web", label: "🌐 Web Widget" },
+    { value: "whatsapp", label: "💚 WhatsApp" },
+  ] as const;
 
   return (
     <s-page heading="Dashboard">
@@ -633,6 +698,8 @@ export default function Index() {
           onChange={(e: Event) => {
             const next = new URLSearchParams(searchParams);
             next.set("days", (e.target as HTMLSelectElement).value);
+            // preserve channel filter
+            if (channel !== "all") next.set("channel", channel);
             setSearchParams(next);
           }}
         >
@@ -647,6 +714,32 @@ export default function Index() {
 
       {/* ── Performance (6 KPI grid) ── */}
       <s-section heading="Performance">
+        {/* Channel toggle */}
+        <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+          {CHANNEL_TOGGLE.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                next.set("channel", opt.value);
+                if (days !== "30") next.set("days", days);
+                setSearchParams(next);
+              }}
+              style={{
+                padding: "6px 16px",
+                borderRadius: "6px",
+                border: channel === opt.value ? "1px solid #2c6ecb" : "1px solid #d1d1d1",
+                background: channel === opt.value ? "#2c6ecb" : "transparent",
+                color: channel === opt.value ? "#fff" : "#1a1a1a",
+                cursor: "pointer",
+                fontWeight: channel === opt.value ? 600 : 400,
+                fontSize: "13px",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
         <div
           style={{
             display: "grid",
@@ -691,6 +784,18 @@ export default function Index() {
               usage.limit > 0 ? `${usagePercent}% of billing cycle` : "Unlimited"
             }
             borderColor={usagePercent >= 100 ? "#d82c0d" : usagePercent >= 80 ? "#ffc453" : "#008060"}
+          />
+          <Metric
+            label="Avg response time"
+            value={fmtResponseTime(avgResponseMs)}
+            sub={avgResponseMs !== null ? (avgResponseMs < 180000 ? "Excellent (< 3 min)" : avgResponseMs < 600000 ? "Good (< 10 min)" : "Slow (> 10 min)") : "No data yet"}
+            borderColor={responseColor}
+          />
+          <Metric
+            label="Active now"
+            value={String(openNow)}
+            sub={openNow === 1 ? "open conversation" : "open conversations"}
+            borderColor={openNow > 0 ? "#d97706" : "#e1e3e5"}
           />
         </div>
       </s-section>
