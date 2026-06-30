@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useLoaderData, useSearchParams } from "react-router";
+import { FilterButtonGroup } from "~/components/FilterButtonGroup";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
@@ -235,7 +236,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ─── Metric card (Polaris-native) ─────────────────────────────────────────────
 
-function Metric({ label, value, sub, borderColor = "#e1e3e5" }: {
+function Metric({ label, value, sub, borderColor = "var(--color-border)" }: {
   label: string;
   value: string;
   sub?: string;
@@ -244,7 +245,7 @@ function Metric({ label, value, sub, borderColor = "#e1e3e5" }: {
   return (
     <div style={{
       background: "#fff",
-      border: "1px solid #e1e3e5",
+      border: "1px solid var(--color-border)",
       borderTop: `3px solid ${borderColor}`,
       borderRadius: "8px",
       padding: "16px 20px",
@@ -255,7 +256,7 @@ function Metric({ label, value, sub, borderColor = "#e1e3e5" }: {
     }}>
       <div style={{
         fontSize: "12px",
-        color: "#6d7175",
+        color: "var(--color-neutral)",
         fontWeight: 500,
         textTransform: "uppercase",
         letterSpacing: "0.4px",
@@ -265,14 +266,14 @@ function Metric({ label, value, sub, borderColor = "#e1e3e5" }: {
       <div style={{
         fontSize: "28px",
         fontWeight: 600,
-        color: "#202223",
+        color: "var(--color-text)",
         lineHeight: 1.2,
         wordBreak: "break-word",
       }}>
         {value}
       </div>
       {sub && (
-        <div style={{ fontSize: "13px", color: "#8c9196" }}>{sub}</div>
+        <div style={{ fontSize: "13px", color: "var(--color-neutral)" }}>{sub}</div>
       )}
     </div>
   );
@@ -368,9 +369,7 @@ function LineChart({
           justifyContent: "center",
         }}
       >
-        <span style={{ fontSize: "14px", color: "#8c9196" }}>
-          No conversations in this period — share your store link to get started.
-        </span>
+        <s-text tone="neutral">No conversations in this period — share your store link to get started.</s-text>
       </div>
     );
   }
@@ -678,7 +677,7 @@ export default function Index() {
               display: "flex",
               flexDirection: "column",
               gap: "1px",
-              background: "#e1e3e5",
+              background: "var(--color-border)",
               borderRadius: "8px",
               overflow: "hidden",
             }}
@@ -699,12 +698,12 @@ export default function Index() {
                     style={{
                       fontSize: "13px",
                       fontWeight: 500,
-                      color: "#202223",
+                      color: "var(--color-text)",
                     }}
                   >
                     Session {e.sessionId.slice(0, 8)}
                   </div>
-                  <div style={{ fontSize: "12px", color: "#8c9196" }}>
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
                     {e.messageCount} message
                     {e.messageCount !== 1 ? "s" : ""} ·{" "}
                     {new Date(e.lastMessageAt).toLocaleDateString("en-US", {
@@ -715,17 +714,7 @@ export default function Index() {
                     })}
                   </div>
                 </div>
-                <a
-                  href={`/app/conversations/${e.id}`}
-                  style={{
-                    fontSize: "13px",
-                    color: "#2c6ecb",
-                    fontWeight: 500,
-                    textDecoration: "none",
-                  }}
-                >
-                  Review
-                </a>
+                <s-link href={`/app/conversations/${e.id}`}>Review</s-link>
               </div>
             ))}
           </div>
@@ -757,30 +746,17 @@ export default function Index() {
       {/* ── Performance (6 KPI grid) ── */}
       <s-section heading="Performance">
         {/* Channel toggle */}
-        <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
-          {CHANNEL_TOGGLE.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => {
-                const next = new URLSearchParams(searchParams);
-                next.set("channel", opt.value);
-                if (days !== "30") next.set("days", days);
-                setSearchParams(next);
-              }}
-              style={{
-                padding: "6px 16px",
-                borderRadius: "6px",
-                border: channel === opt.value ? "1px solid #2c6ecb" : "1px solid #d1d1d1",
-                background: channel === opt.value ? "#2c6ecb" : "transparent",
-                color: channel === opt.value ? "#fff" : "#1a1a1a",
-                cursor: "pointer",
-                fontWeight: channel === opt.value ? 600 : 400,
-                fontSize: "13px",
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div style={{ marginBottom: "16px" }}>
+          <FilterButtonGroup
+            options={CHANNEL_TOGGLE}
+            value={channel}
+            onChange={(v) => {
+              const next = new URLSearchParams(searchParams);
+              next.set("channel", v);
+              if (days !== "30") next.set("days", days);
+              setSearchParams(next);
+            }}
+          />
         </div>
         <div
           style={{
@@ -882,7 +858,7 @@ export default function Index() {
                 key={step.n}
                 style={{
                   background: "#fff",
-                  border: "1px solid #e1e3e5",
+                  border: "1px solid var(--color-border)",
                   borderRadius: "8px",
                   padding: "20px",
                 }}
@@ -892,7 +868,7 @@ export default function Index() {
                     width: "24px",
                     height: "24px",
                     borderRadius: "50%",
-                    background: "#2c6ecb",
+                    background: "var(--color-primary)",
                     color: "#fff",
                     fontSize: "12px",
                     fontWeight: 700,
@@ -908,7 +884,7 @@ export default function Index() {
                   style={{
                     fontSize: "14px",
                     fontWeight: 600,
-                    color: "#202223",
+                    color: "var(--color-text)",
                     marginBottom: "4px",
                   }}
                 >
@@ -917,7 +893,7 @@ export default function Index() {
                 <div
                   style={{
                     fontSize: "13px",
-                    color: "#6d7175",
+                    color: "var(--color-neutral)",
                     lineHeight: "1.5",
                     marginBottom: step.cta ? "14px" : "0",
                   }}
@@ -937,7 +913,7 @@ export default function Index() {
                     }
                     style={{
                       fontSize: "13px",
-                      color: "#2c6ecb",
+                      color: "var(--color-primary)",
                       fontWeight: 500,
                       textDecoration: "none",
                     }}
@@ -969,7 +945,7 @@ export default function Index() {
                 <div
                   style={{
                     fontSize: "12px",
-                    color: "#6d7175",
+                    color: "var(--color-neutral)",
                     fontWeight: 500,
                     textTransform: "uppercase",
                     letterSpacing: "0.4px",
@@ -1008,7 +984,7 @@ export default function Index() {
                           <span
                             style={{
                               fontSize: "13px",
-                              color: "#202223",
+                              color: "var(--color-text)",
                               fontWeight: 500,
                             }}
                           >
@@ -1026,7 +1002,7 @@ export default function Index() {
                                 style={{
                                   fontSize: "11px",
                                   color:
-                                    convPct > 0 ? "#008060" : "#8c9196",
+                                    convPct > 0 ? "var(--color-success)" : "var(--color-neutral)",
                                   fontWeight: 600,
                                 }}
                               >
@@ -1036,7 +1012,7 @@ export default function Index() {
                             <span
                               style={{
                                 fontSize: "12px",
-                                color: "#6d7175",
+                                color: "var(--color-neutral)",
                                 minWidth: "32px",
                                 textAlign: "right",
                               }}
@@ -1048,7 +1024,7 @@ export default function Index() {
                         <div
                           style={{
                             height: "6px",
-                            background: "#e1e3e5",
+                            background: "var(--color-border)",
                             borderRadius: "3px",
                           }}
                         >
@@ -1056,7 +1032,7 @@ export default function Index() {
                             style={{
                               width: `${pct}%`,
                               height: "100%",
-                              background: "#2c6ecb",
+                              background: "var(--color-primary)",
                               borderRadius: "3px",
                             }}
                           />
@@ -1073,7 +1049,7 @@ export default function Index() {
                 <div
                   style={{
                     fontSize: "12px",
-                    color: "#6d7175",
+                    color: "var(--color-neutral)",
                     fontWeight: 500,
                     textTransform: "uppercase",
                     letterSpacing: "0.4px",
@@ -1101,7 +1077,7 @@ export default function Index() {
                         style={{
                           width: "18px",
                           fontSize: "11px",
-                          color: "#8c9196",
+                          color: "var(--color-neutral)",
                           textAlign: "right",
                           flexShrink: 0,
                         }}
@@ -1120,7 +1096,7 @@ export default function Index() {
                           <span
                             style={{
                               fontSize: "13px",
-                              color: "#202223",
+                              color: "var(--color-text)",
                               overflow: "hidden",
                               textOverflow: "ellipsis",
                               whiteSpace: "nowrap",
@@ -1132,7 +1108,7 @@ export default function Index() {
                           <span
                             style={{
                               fontSize: "11px",
-                              color: "#8c9196",
+                              color: "var(--color-neutral)",
                               flexShrink: 0,
                               marginLeft: "8px",
                             }}
@@ -1143,7 +1119,7 @@ export default function Index() {
                         <div
                           style={{
                             height: "4px",
-                            background: "#e1e3e5",
+                            background: "var(--color-border)",
                             borderRadius: "2px",
                           }}
                         >
@@ -1151,7 +1127,7 @@ export default function Index() {
                             style={{
                               width: `${pct}%`,
                               height: "100%",
-                              background: "#2c6ecb",
+                              background: "var(--color-primary)",
                               borderRadius: "2px",
                             }}
                           />
@@ -1169,43 +1145,41 @@ export default function Index() {
       {/* ── AI Insights card ── */}
       <s-section heading="AI Insights — What customers need help with">
         {!insights?.topics?.length ? (
-          <div style={{ padding: "24px", textAlign: "center", color: "#8c9196", fontSize: "13px" }}>
-            {insightsJson === null
-              ? "Analyzing your conversations… check back in a few minutes."
-              : "Not enough conversations yet to surface patterns."}
-            <Form method="post" style={{ marginTop: "12px", display: "inline-block" }}>
+          <div style={{ padding: "24px", textAlign: "center" }}>
+            <s-text tone="neutral">
+              {insightsJson === null
+                ? "Analyzing your conversations… check back in a few minutes."
+                : "Not enough conversations yet to surface patterns."}
+            </s-text>
+            <Form method="post" style={{ marginTop: "12px" }}>
               <input type="hidden" name="intent" value="refresh-insights" />
-              <button type="submit" style={{ padding: "6px 14px", fontSize: "12px", border: "1px solid #c9cccf", borderRadius: "5px", cursor: "pointer", background: "#fff" }}>
-                Analyze now
-              </button>
+              <s-button type="submit">Analyze now</s-button>
             </Form>
           </div>
         ) : (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <span style={{ fontSize: "12px", color: "#8c9196" }}>
+              <span style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
                 Based on last 7 days · Updated {insights.generatedAt ? new Date(insights.generatedAt).toLocaleDateString("en", { month: "short", day: "numeric" }) : "recently"}
               </span>
               <Form method="post" style={{ display: "inline" }}>
                 <input type="hidden" name="intent" value="refresh-insights" />
-                <button type="submit" style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #c9cccf", borderRadius: "5px", cursor: "pointer", background: "#fff", color: "#6d7175" }}>
-                  ↻ Refresh
-                </button>
+                <s-button type="submit" variant="tertiary">↻ Refresh</s-button>
               </Form>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               {(insights.topics as InsightsTopic[]).map((topic, i) => (
-                <div key={i} style={{ background: "#fafafa", border: "1px solid #e1e3e5", borderRadius: "8px", padding: "14px 16px" }}>
+                <div key={i} style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "8px", padding: "14px 16px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
-                    <div style={{ fontWeight: 600, fontSize: "14px", color: "#202223" }}>{topic.label}</div>
-                    <span style={{ fontSize: "12px", color: "#6d7175", flexShrink: 0, marginLeft: "12px" }}>{topic.count} conversations</span>
+                    <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--color-text)" }}>{topic.label}</div>
+                    <span style={{ fontSize: "12px", color: "var(--color-neutral)", flexShrink: 0, marginLeft: "12px" }}>{topic.count} conversations</span>
                   </div>
-                  <div style={{ fontSize: "12px", color: "#6d7175", fontStyle: "italic", marginBottom: "8px" }}>&ldquo;{topic.sample}&rdquo;</div>
-                  <div style={{ fontSize: "12px", color: "#2c6ecb", display: "flex", alignItems: "center", gap: "4px" }}>
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontStyle: "italic", marginBottom: "8px" }}>&ldquo;{topic.sample}&rdquo;</div>
+                  <div style={{ fontSize: "12px", color: "var(--color-primary)", display: "flex", alignItems: "center", gap: "4px" }}>
                     <span>💡</span>
                     <span>{topic.suggestion}</span>
                     {topic.suggestion?.toLowerCase().includes("faq") && (
-                      <a href="/app/ai-config" style={{ marginLeft: "8px", fontSize: "11px", color: "#2c6ecb", fontWeight: 600 }}>Add to FAQ →</a>
+                      <a href="/app/ai-config" style={{ marginLeft: "8px", fontSize: "11px", color: "var(--color-primary)", fontWeight: 600 }}>Add to FAQ →</a>
                     )}
                   </div>
                 </div>
@@ -1219,20 +1193,18 @@ export default function Index() {
       {(narrative?.bullets?.length ?? 0) > 0 && (
         <s-section heading="This Month's AI Impact">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-            <span style={{ fontSize: "12px", color: "#8c9196" }}>
+            <span style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
               {narrative?.month ? new Date(narrative.month).toLocaleString("default", { month: "long", year: "numeric" }) : "Current month"}
             </span>
             <Form method="post" style={{ display: "inline" }}>
               <input type="hidden" name="intent" value="refresh-revenue" />
-              <button type="submit" style={{ padding: "4px 10px", fontSize: "11px", border: "1px solid #c9cccf", borderRadius: "5px", cursor: "pointer", background: "#fff", color: "#6d7175" }}>
-                ↻ Refresh
-              </button>
+              <s-button type="submit" variant="tertiary">↻ Refresh</s-button>
             </Form>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {(narrative!.bullets as string[]).map((bullet, i) => (
-              <div key={i} style={{ display: "flex", gap: "10px", fontSize: "14px", color: "#202223", lineHeight: "1.5" }}>
-                <span style={{ color: "#008060", flexShrink: 0 }}>✓</span>
+              <div key={i} style={{ display: "flex", gap: "10px", fontSize: "14px", color: "var(--color-text)", lineHeight: "1.5" }}>
+                <span style={{ color: "var(--color-success)", flexShrink: 0 }}>✓</span>
                 <span>{bullet}</span>
               </div>
             ))}

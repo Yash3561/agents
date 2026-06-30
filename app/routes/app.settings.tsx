@@ -6,6 +6,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { WidgetPreview } from "~/components/WidgetPreview";
 
 const VOICE_PRESETS = [
   {
@@ -90,109 +91,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   return { merchant, saved: true };
 };
-
-/**
- * Lightweight visual mock of the real widget (launcher + open panel header +
- * first bot bubble), styled to match extensions/chat-widget/assets/
- * neonping-widget.css so merchants see an accurate live preview while
- * editing — not just a rough approximation.
- */
-function WidgetPreview({
-  color,
-  position,
-  greeting,
-  botName,
-}: {
-  color: string;
-  position: string;
-  greeting: string;
-  botName: string;
-}) {
-  const isLeft = position === "bottom-left";
-  const side: "left" | "right" = isLeft ? "left" : "right";
-
-  return (
-    <div
-      style={{
-        position: "relative",
-        height: 240,
-        background: "#f0f0f3",
-        borderRadius: 12,
-        border: "1px solid #e1e1e1",
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          top: 10,
-          left: 12,
-          fontSize: 11,
-          color: "#9a9a9a",
-          fontFamily: "system-ui, sans-serif",
-        }}
-      >
-        Your storefront
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          bottom: 64,
-          [side]: 16,
-          width: 200,
-          borderRadius: 14,
-          background: "#fff",
-          boxShadow: "0 8px 24px rgba(0,0,0,.18)",
-          overflow: "hidden",
-          fontFamily: "system-ui, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            background: color || "#1a1a1a",
-            color: "#fff",
-            padding: "10px 12px",
-            fontSize: 12,
-            fontWeight: 600,
-          }}
-        >
-          {botName || "NeonPing"}
-        </div>
-        <div style={{ padding: 10, background: "#fff" }}>
-          <div
-            style={{
-              display: "inline-block",
-              background: "#f1f1f1",
-              color: "#111",
-              borderRadius: 10,
-              borderBottomLeftRadius: 3,
-              padding: "7px 10px",
-              fontSize: 11,
-              maxWidth: "90%",
-              wordBreak: "break-word",
-            }}
-          >
-            {greeting || "Hi! How can I help you today?"}
-          </div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          bottom: 16,
-          [side]: 16,
-          width: 40,
-          height: 40,
-          borderRadius: "50%",
-          background: color || "#1a1a1a",
-          boxShadow: "0 4px 12px rgba(0,0,0,.25)",
-        }}
-      />
-    </div>
-  );
-}
 
 export default function Settings() {
   const { merchant, waAppId } = useLoaderData<typeof loader>();
@@ -283,8 +181,8 @@ export default function Settings() {
   return (
     <s-page heading="Widget Settings">
       <form ref={formRef} data-save-bar onSubmit={handleSubmit}>
-        <s-section heading="🎨 Appearance">
-          <div style={{ marginBottom: "16px" }}>
+        <s-section heading="Appearance">
+          <s-stack direction="block" gap="base">
             <s-text-field
               label="Bot name"
               name="botName"
@@ -293,8 +191,6 @@ export default function Settings() {
               onInput={(e: Event) => setBotName((e.target as HTMLInputElement).value)}
               help-text="Appears in the widget header (max 30 characters). Give your bot a friendly name customers will recognize."
             ></s-text-field>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
             <s-text-field
               label="Opening greeting"
               name="widgetGreeting"
@@ -302,8 +198,6 @@ export default function Settings() {
               onInput={(e: Event) => setWidgetGreeting((e.target as HTMLInputElement).value)}
               help-text="The first message customers see. Keep it friendly and inviting."
             ></s-text-field>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
             <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
               <div style={{ flex: 1 }}>
                 <s-color-field
@@ -320,14 +214,12 @@ export default function Settings() {
                   height: "60px",
                   borderRadius: "8px",
                   background: widgetColor,
-                  border: "2px solid #e0e0e0",
+                  border: "2px solid var(--color-border)",
                   marginTop: "24px",
                   flexShrink: 0,
                 }}
               />
             </div>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
             <s-select
               label="Position"
               name="widgetPosition"
@@ -338,32 +230,19 @@ export default function Settings() {
               <s-option value="bottom-right">Bottom right</s-option>
               <s-option value="bottom-left">Bottom left</s-option>
             </s-select>
-          </div>
+          </s-stack>
 
-          <div style={{ marginTop: "24px", borderRadius: "8px", overflow: "hidden", border: "1px solid #e1e1e1" }}>
-            <div style={{
-              background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-              borderRadius: "8px 8px 0 0",
-              padding: "8px 16px",
-              color: "#fff",
-              fontSize: "12px",
-              fontWeight: 600,
-              letterSpacing: "0.5px",
-            }}>
-              LIVE PREVIEW
-            </div>
-            <div style={{ padding: "12px", background: "#f5f5f5" }}>
-              <p style={{ fontSize: "12px", color: "#666", margin: "0 0 0" }}>
-                This is how your widget looks on the storefront:
-              </p>
-            </div>
+          <div style={{ marginTop: "24px" }}>
+            <s-box background="subdued" padding="base" borderRadius="base">
+              <s-text tone="neutral">Live preview — this is how your widget looks on the storefront:</s-text>
+            </s-box>
           </div>
           <div style={{ marginTop: "12px" }}>
             <WidgetPreview color={widgetColor} position={widgetPosition} greeting={widgetGreeting} botName={botName} />
           </div>
         </s-section>
-        <s-section heading="🤖 AI Behavior">
-          <div style={{ marginBottom: "16px" }}>
+        <s-section heading="AI Behavior">
+          <s-stack direction="block" gap="base">
             <s-select
               label="Brand voice"
               name="brandVoice"
@@ -375,8 +254,6 @@ export default function Settings() {
                 <s-option key={p.value} value={p.value}>{p.label}</s-option>
               ))}
             </s-select>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
             <s-switch
               label="Enable personalized discounts"
               name="personalizationEnabled"
@@ -384,20 +261,16 @@ export default function Settings() {
               checked={personalizationEnabled}
               onChange={(e: Event) => setPersonalizationEnabled((e.target as HTMLInputElement).checked)}
             ></s-switch>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
-            <s-switch
-              label="Email me when AI escalates to human support"
-              name="escalationEmailEnabled"
-              help-text="Sends an email to your support address when the bot can't resolve a customer issue."
-              checked={escalationEmailEnabled}
-              onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
-            ></s-switch>
-            <p style={{ color: "#b45309", fontSize: "12px", marginTop: "8px" }}>
-              ⚠️ Email notifications are coming soon — no emails are currently sent. We&apos;ll notify you when this is live.
-            </p>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
+            <div>
+              <s-switch
+                label="Email me when AI escalates to human support"
+                name="escalationEmailEnabled"
+                help-text="Sends an email to your support address when the bot can't resolve a customer issue."
+                checked={escalationEmailEnabled}
+                onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
+              ></s-switch>
+              <s-banner tone="warning">Email notifications are coming soon — no emails are currently sent. We&apos;ll notify you when this is live.</s-banner>
+            </div>
             <s-checkbox
               name="proactiveEngagementEnabled"
               label="Proactive engagement"
@@ -405,10 +278,10 @@ export default function Settings() {
               checked={proactiveEngagementEnabled}
               onChange={(e: Event) => setProactiveEngagementEnabled((e.target as HTMLInputElement).checked)}
             ></s-checkbox>
-          </div>
+          </s-stack>
         </s-section>
-        <s-section heading="📧 Support">
-          <div style={{ marginBottom: "16px" }}>
+        <s-section heading="Support">
+          <s-stack direction="block" gap="base">
             <s-email-field
               label="Support email"
               name="supportEmail"
@@ -416,8 +289,6 @@ export default function Settings() {
               onInput={(e: Event) => setSupportEmail((e.target as HTMLInputElement).value)}
               help-text="Where escalated conversations and support alerts are sent."
             ></s-email-field>
-          </div>
-          <div style={{ marginBottom: "16px" }}>
             <s-text-field
               label="WhatsApp number"
               name="whatsappNumber"
@@ -425,9 +296,9 @@ export default function Settings() {
               onInput={(e: Event) => setWhatsappNumber((e.target as HTMLInputElement).value)}
               help-text="Customers can tap to reach you on WhatsApp when they need human help. Include country code, e.g. +1234567890"
             ></s-text-field>
-          </div>
+          </s-stack>
         </s-section>
-        <s-section heading="💬 WhatsApp Business">
+        <s-section heading="WhatsApp Business">
           {searchParams.get("whatsapp") === "connected" && (
             <div style={{ marginBottom: "16px" }}>
               <s-banner tone="success">WhatsApp Business connected successfully!</s-banner>
@@ -441,35 +312,26 @@ export default function Settings() {
           {merchant.waConnectedAt ? (
             <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
               <s-badge tone="success">Connected</s-badge>
-              <span style={{ fontSize: "14px", color: "#1a1a1a" }}>
-                {merchant.waPhone ?? merchant.waPhoneNumberId}
-              </span>
-              <button
-                type="button"
+              <s-text>{merchant.waPhone ?? merchant.waPhoneNumberId}</s-text>
+              <s-button
+                variant="tertiary"
+                tone="critical"
                 onClick={async () => {
                   await fetch("/api/whatsapp/disconnect", { method: "POST" });
                   window.location.reload();
                 }}
-                style={{
-                  background: "none",
-                  border: "1px solid #d72c0d",
-                  color: "#d72c0d",
-                  borderRadius: "6px",
-                  padding: "6px 12px",
-                  cursor: "pointer",
-                  fontSize: "13px",
-                }}
               >
                 Disconnect
-              </button>
+              </s-button>
             </div>
           ) : (
             <div>
               <p style={{ fontSize: "13px", color: "#666", marginBottom: "16px", marginTop: 0 }}>
                 Connect your WhatsApp Business number so customers can chat with your AI assistant on WhatsApp.
               </p>
-              <button
+              <s-button
                 type="button"
+                variant="primary"
                 onClick={() => {
                   type WinWithFBLogin = { FB?: { login: (cb: (r: { authResponse?: { code?: string } }) => void, opts: object) => void } };
                   const fb = (window as unknown as WinWithFBLogin).FB;
@@ -488,34 +350,17 @@ export default function Settings() {
                     },
                   );
                 }}
-                style={{
-                  background: "#25D366",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "6px",
-                  padding: "10px 20px",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                  fontSize: "14px",
-                }}
               >
                 Connect WhatsApp Business
-              </button>
+              </s-button>
             </div>
           )}
         </s-section>
-        <s-section heading="👁️ Widget Visibility">
-          <div
-            style={{
-              padding: "12px",
-              background: "#f5f5f5",
-              borderRadius: "8px",
-              marginBottom: "16px",
-            }}
-          >
-            <p style={{ margin: 0, fontSize: "13px", color: "#666" }}>
-              Hide the chat widget on these pages to avoid distracting customers during critical flows:
-            </p>
+        <s-section heading="Widget Visibility">
+          <div style={{ marginBottom: "16px" }}>
+            <s-box padding="base" background="subdued" borderRadius="base">
+              <s-text tone="neutral">Hide the chat widget on these pages to avoid distracting customers during critical flows:</s-text>
+            </s-box>
           </div>
           {['checkout', 'cart', 'account', 'blog'].map((page) => (
             <div key={page} style={{ marginBottom: "12px" }}>
@@ -570,13 +415,13 @@ export default function Settings() {
                       display: "inline-flex",
                       alignItems: "center",
                       gap: "6px",
-                      background: "#f0f0f3",
-                      border: "1px solid #d5d5d5",
+                      background: "var(--color-surface)",
+                      border: "1px solid var(--color-border)",
                       borderRadius: "16px",
                       padding: "4px 10px",
                       fontSize: "12px",
                       fontFamily: "monospace",
-                      color: "#333",
+                      color: "var(--color-text)",
                     }}
                   >
                     <span>{path}</span>
@@ -590,7 +435,7 @@ export default function Settings() {
                         cursor: "pointer",
                         padding: 0,
                         lineHeight: 1,
-                        color: "#666",
+                        color: "var(--color-neutral)",
                         fontSize: "14px",
                         fontWeight: 700,
                       }}

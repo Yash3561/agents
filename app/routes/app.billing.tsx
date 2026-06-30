@@ -231,13 +231,13 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
       style={{
         flex: "1 1 240px",
         border: isCurrent
-          ? "2px solid #008060"
+          ? "2px solid var(--color-success)"
           : plan.recommended
           ? "2px solid #7c3aed"
-          : "1px solid #e1e3e5",
+          : "1px solid var(--color-border)",
         borderRadius: "12px",
         padding: "20px",
-        background: isCurrent ? "#f0faf6" : "#ffffff",
+        background: isCurrent ? "#f0faf6" : "#fff",
         display: "flex",
         flexDirection: "column",
         gap: "12px",
@@ -261,10 +261,10 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
       </div>
       <div>
         <span style={{ fontSize: "28px", fontWeight: 700 }}>{plan.price}</span>
-        <span style={{ color: "#6d7175" }}> / month</span>
+        <span style={{ color: "var(--color-neutral)" }}> / month</span>
       </div>
       <s-text tone="neutral">{plan.conversations}</s-text>
-      <ul style={{ margin: "0", paddingLeft: "20px", color: "#202223" }}>
+      <ul style={{ margin: "0", paddingLeft: "20px", color: "var(--color-text)" }}>
         {ALL_FEATURES.map((f) => (
           <li key={f} style={{ marginBottom: "4px" }}>
             <s-text>{f}</s-text>
@@ -273,32 +273,23 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
       </ul>
       <div style={{ marginTop: "auto" }}>
         {billingError && (
-          <div style={{ marginBottom: "8px", padding: "8px 12px", background: "#fff0f0", border: "1px solid #fca5a5", borderRadius: "6px" }}>
-            <s-text tone="critical">
+          <div style={{ marginBottom: "8px" }}>
+            <s-banner tone="critical">
               {"detail" in (fetcher.data ?? {})
                 ? `Billing error: ${(fetcher.data as { detail?: string }).detail}`
                 : "Something went wrong with billing. Please try again."}
-            </s-text>
+            </s-banner>
           </div>
         )}
         <fetcher.Form method="POST">
           <input type="hidden" id={`plan-input-${plan.key}`} name="plan" value={plan.key} />
-          <button
+          <div style={{ width: "100%" }}>
+          <s-button
             id={`plan-submit-${plan.key}`}
             type="submit"
-            disabled={isCurrent || isSubmitting}
-            style={{
-              width: "100%",
-              padding: "10px 16px",
-              background: isCurrent ? "#e1e3e5" : "#008060",
-              color: isCurrent ? "#6d7175" : "#ffffff",
-              border: "none",
-              borderRadius: "6px",
-              cursor: isCurrent || isSubmitting ? "default" : "pointer",
-              fontWeight: 600,
-              fontSize: "14px",
-              opacity: isSubmitting ? 0.7 : 1,
-            }}
+            variant={isCurrent ? "secondary" : "primary"}
+            {...(isCurrent || isSubmitting ? { disabled: true } : {})}
+            {...(isSubmitting ? { loading: true } : {})}
           >
             {isCurrent
               ? "Current plan"
@@ -309,7 +300,8 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
               : PLAN_ORDER[plan.key] > currentPlanRank
               ? `Upgrade to ${plan.name}`
               : `Switch to ${plan.name}`}
-          </button>
+          </s-button>
+          </div>
         </fetcher.Form>
       </div>
     </div>

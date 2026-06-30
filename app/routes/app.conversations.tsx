@@ -1,5 +1,6 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Link, useLoaderData, useSearchParams } from "react-router";
+import { FilterButtonGroup } from "~/components/FilterButtonGroup";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -229,93 +230,13 @@ export default function Conversations() {
 
   return (
     <s-page heading="Conversations">
-      {/* Date range filter */}
-      <s-section>
-        <s-stack direction="inline" gap="base">
-          {DATE_RANGE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setParam("days", opt.value)}
-              style={{
-                padding: "5px 14px",
-                borderRadius: "6px",
-                border: days === opt.value ? "1px solid #008060" : "1px solid #d1d1d1",
-                background: days === opt.value ? "#008060" : "transparent",
-                color: days === opt.value ? "#fff" : "#1a1a1a",
-                cursor: "pointer",
-                fontWeight: days === opt.value ? 600 : 400,
-                fontSize: "13px",
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </s-stack>
-      </s-section>
-
-      {/* Outcome + Customer Type filters */}
+      {/* Filters */}
       <s-section>
         <s-stack direction="block" gap="base">
-          <s-stack direction="inline" gap="base">
-            {OUTCOME_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setParam("outcome", opt.value)}
-                style={{
-                  padding: "6px 16px",
-                  borderRadius: "6px",
-                  border: outcome === opt.value ? "1px solid #008060" : "1px solid #1a1a1a",
-                  background: outcome === opt.value ? "#008060" : "transparent",
-                  color: outcome === opt.value ? "#fff" : "#1a1a1a",
-                  cursor: "pointer",
-                  fontWeight: outcome === opt.value ? 600 : 400,
-                  fontSize: "14px",
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </s-stack>
-          <s-stack direction="inline" gap="base">
-            {CUSTOMER_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setParam("customer", opt.value)}
-                style={{
-                  padding: "5px 12px",
-                  borderRadius: "6px",
-                  border: customer === opt.value ? "1px solid #1d4ed8" : "1px solid #d1d1d1",
-                  background: customer === opt.value ? "#1d4ed8" : "transparent",
-                  color: customer === opt.value ? "#fff" : "#1a1a1a",
-                  cursor: "pointer",
-                  fontWeight: customer === opt.value ? 600 : 400,
-                  fontSize: "13px",
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </s-stack>
-          <s-stack direction="inline" gap="base">
-            {CHANNEL_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setParam("channel", opt.value)}
-                style={{
-                  padding: "5px 12px",
-                  borderRadius: "6px",
-                  border: channel === opt.value ? "1px solid #25D366" : "1px solid #d1d1d1",
-                  background: channel === opt.value ? "#25D366" : "transparent",
-                  color: channel === opt.value ? "#fff" : "#1a1a1a",
-                  cursor: "pointer",
-                  fontWeight: channel === opt.value ? 600 : 400,
-                  fontSize: "13px",
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </s-stack>
+          <FilterButtonGroup options={DATE_RANGE_OPTIONS} value={days} onChange={(v) => setParam("days", v)} />
+          <FilterButtonGroup options={OUTCOME_OPTIONS} value={outcome} onChange={(v) => setParam("outcome", v)} />
+          <FilterButtonGroup options={CUSTOMER_OPTIONS} value={customer} onChange={(v) => setParam("customer", v)} />
+          <FilterButtonGroup options={CHANNEL_OPTIONS} value={channel} onChange={(v) => setParam("channel", v)} />
         </s-stack>
       </s-section>
 
@@ -334,14 +255,14 @@ export default function Conversations() {
 
       {/* Summary bar */}
       <s-section>
-        <div style={{ padding: "8px 0", fontSize: "13px", color: "#666", borderBottom: "1px solid #f0f0f0", marginBottom: "12px" }}>
-          {totalCount} total
-          {purchasedCount > 0 && ` · ${purchasedCount} purchased`}
-          {inCartCount > 0 && ` · ${inCartCount} in cart`}
-          {escalatedCount > 0 && ` · ${escalatedCount} escalated`}
-          {liveCount > 0 && (
-            <span style={{ color: "#d97706", fontWeight: 600 }}> · {liveCount} live now</span>
-          )}
+        <div style={{ padding: "8px 0", borderBottom: "1px solid var(--color-border)", marginBottom: "12px" }}>
+          <s-text tone="neutral">
+            {totalCount} total
+            {purchasedCount > 0 && ` · ${purchasedCount} purchased`}
+            {inCartCount > 0 && ` · ${inCartCount} in cart`}
+            {escalatedCount > 0 && ` · ${escalatedCount} escalated`}
+            {liveCount > 0 && <> · <strong style={{ color: "var(--color-warning)" }}>{liveCount} live now</strong></>}
+          </s-text>
         </div>
 
         {/* Table */}
@@ -368,10 +289,9 @@ export default function Conversations() {
                 return (
                   <s-table-row key={c.id}>
                     <s-table-cell>
-                      <div style={isOpenEscalation ? { borderLeft: "3px solid #dc2626", paddingLeft: "8px", background: "#fff5f5", borderRadius: "2px" } : {}}>
+                      <div style={isOpenEscalation ? { borderLeft: "3px solid var(--color-critical)", paddingLeft: "8px", background: "#fff5f5", borderRadius: "2px" } : {}}>
                         <Link
                           to={`/app/conversations/${c.id}`}
-                          style={{ color: "#1a1a1a", textDecoration: "none", fontWeight: 500 }}
                         >
                           {c.customerId ? (
                             <span>Customer</span>
@@ -397,20 +317,14 @@ export default function Conversations() {
                     <s-table-cell>
                       <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
                         <s-badge tone={badge.tone}>{badge.label}</s-badge>
-                        {c.channel === "whatsapp" && (
-                          <span style={{ background: "#25D366", color: "#fff", borderRadius: "10px", padding: "2px 7px", fontSize: "11px", fontWeight: 600 }}>
-                            WhatsApp
-                          </span>
-                        )}
+                        {c.channel === "whatsapp" && <s-badge tone="success">WhatsApp</s-badge>}
                       </div>
                     </s-table-cell>
                     <s-table-cell>
                       {c.orderRevenueCents ? (
-                        <span style={{ color: "#15803d", fontWeight: 600 }}>
-                          {fmtValue(c, currencyCode)}
-                        </span>
+                        <s-text><strong style={{ color: "var(--color-success)" }}>{fmtValue(c, currencyCode)}</strong></s-text>
                       ) : c.cartValue ? (
-                        <span style={{ color: "#1d4ed8" }}>{fmtValue(c, currencyCode)}</span>
+                        <s-text tone="neutral">{fmtValue(c, currencyCode)}</s-text>
                       ) : (
                         <s-text tone="neutral">—</s-text>
                       )}
@@ -440,43 +354,27 @@ export default function Conversations() {
             </span>
             <div style={{ display: "flex", gap: "8px" }}>
               {page > 0 && (
-                <button
+                <s-button
                   onClick={() => {
                     const n = new URLSearchParams(searchParams);
                     n.set("page", String(page - 1));
                     setSearchParams(n);
                   }}
-                  style={{
-                    padding: "5px 14px",
-                    border: "1px solid #d1d1d1",
-                    borderRadius: "6px",
-                    background: "#fff",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                  }}
                 >
                   Previous
-                </button>
+                </s-button>
               )}
               {page < totalPages - 1 && (
-                <button
+                <s-button
+                  variant="primary"
                   onClick={() => {
                     const n = new URLSearchParams(searchParams);
                     n.set("page", String(page + 1));
                     setSearchParams(n);
                   }}
-                  style={{
-                    padding: "5px 14px",
-                    border: "1px solid #d1d1d1",
-                    borderRadius: "6px",
-                    background: "#1a1a1a",
-                    color: "#fff",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                  }}
                 >
                   Next
-                </button>
+                </s-button>
               )}
             </div>
           </div>

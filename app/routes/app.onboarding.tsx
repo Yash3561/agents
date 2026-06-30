@@ -7,6 +7,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { PLAN_CONFIG } from "../lib/plans";
 import { sendTestMessage } from "../lib/test-chat";
+import { WidgetPreview } from "~/components/WidgetPreview";
 
 const VOICE_PRESETS = [
   {
@@ -186,21 +187,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const url = new URL(request.url);
   return redirect(`/app?${url.searchParams.toString()}`);
 };
-
-function WidgetPreview({ color, greeting, botName }: { color: string; greeting: string; botName?: string }) {
-  return (
-    <div style={{ position: "relative", height: 200, background: "#f0f0f3", borderRadius: 12, border: "1px solid #e1e1e1", overflow: "hidden", marginTop: "16px" }}>
-      <div style={{ position: "absolute", top: 10, left: 12, fontSize: 11, color: "#9a9a9a", fontFamily: "system-ui, sans-serif" }}>Your storefront</div>
-      <div style={{ position: "absolute", bottom: 56, right: 16, width: 190, borderRadius: 14, background: "#fff", boxShadow: "0 8px 24px rgba(0,0,0,.18)", overflow: "hidden", fontFamily: "system-ui, sans-serif" }}>
-        <div style={{ background: color || "#1a1a1a", color: "#fff", padding: "8px 12px", fontSize: 12, fontWeight: 600 }}>
-          {botName || "Your store assistant"}
-        </div>
-        <div style={{ padding: 10, background: "#fff", fontSize: 11, color: "#111" }}>{greeting || "Hi! How can I help you today?"}</div>
-      </div>
-      <div style={{ position: "absolute", bottom: 12, right: 16, width: 36, height: 36, borderRadius: "50%", background: color || "#1a1a1a" }} />
-    </div>
-  );
-}
 
 // ─── Plan data for Step 3 ────────────────────────────────────────────────────
 
@@ -481,7 +467,7 @@ export default function Onboarding() {
             onInput={(e: Event) => setWidgetColor((e.target as HTMLInputElement).value)}
             help-text="Choose a color that matches your brand."
           ></s-color-field>
-          <WidgetPreview color={widgetColor} greeting={widgetGreeting} botName={botName} />
+          <WidgetPreview color={widgetColor} greeting={widgetGreeting} botName={botName} position="bottom-right" />
           <s-stack direction="inline" gap="base">
             <s-button onClick={() => goToStep(2)} variant="primary">
               Next
@@ -525,25 +511,11 @@ export default function Onboarding() {
           {isActivePlan ? (
             /* Merchant already subscribed — show confirmation state */
             <div>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  padding: "16px 20px",
-                  background: "#f0faf6",
-                  border: "1px solid #008060",
-                  borderRadius: "10px",
-                  marginBottom: "20px",
-                }}
-              >
-                <span style={{ fontSize: "20px", color: "#008060" }}>✓</span>
-                <div>
-                  <div style={{ fontWeight: 700, color: "#202223" }}>
-                    You{"'"}re on the {merchant.plan.charAt(0).toUpperCase() + merchant.plan.slice(1)} plan
-                  </div>
-                  <div style={{ fontSize: "13px", color: "#6d7175" }}>Your plan is active and ready to go.</div>
-                </div>
+              <div style={{ marginBottom: "20px" }}>
+                <s-banner tone="success">
+                  <s-text><strong>You&apos;re on the {merchant.plan.charAt(0).toUpperCase() + merchant.plan.slice(1)} plan</strong></s-text>
+                  <s-text tone="neutral">Your plan is active and ready to go.</s-text>
+                </s-banner>
               </div>
               <s-stack direction="inline" gap="base">
                 <s-button onClick={() => goToStep(2)} variant="tertiary">
@@ -564,8 +536,8 @@ export default function Onboarding() {
               </div>
 
               {billingError && (
-                <div style={{ marginBottom: "16px", padding: "12px 16px", background: "#fff0f0", border: "1px solid #fca5a5", borderRadius: "8px" }}>
-                  <s-text tone="critical">{billingError}</s-text>
+                <div style={{ marginBottom: "16px" }}>
+                  <s-banner tone="critical">{billingError}</s-banner>
                 </div>
               )}
 
@@ -592,21 +564,9 @@ export default function Onboarding() {
 
               {/* Subtle skip link */}
               <div style={{ marginTop: "16px", textAlign: "center" }}>
-                <button
-                  type="button"
-                  onClick={skipPlan}
-                  disabled={fetcher.state !== "idle"}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "#6d7175",
-                    fontSize: "12px",
-                    cursor: "pointer",
-                    textDecoration: "underline",
-                  }}
-                >
+                <s-button variant="tertiary" onClick={skipPlan} {...(fetcher.state !== "idle" ? { disabled: true } : {})}>
                   Skip for now
-                </button>
+                </s-button>
               </div>
             </div>
           )}
@@ -617,19 +577,13 @@ export default function Onboarding() {
         <s-section heading="Step 4 of 4 — Go live">
           {/* Warning banner if no active plan */}
           {!isActivePlan && (
-            <div style={{ marginBottom: "16px", padding: "12px 16px", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "8px", display: "flex", alignItems: "flex-start", gap: "10px" }}>
-              <span style={{ fontSize: "16px" }}>⚠</span>
-              <div>
-                <span style={{ fontWeight: 600, color: "#92400e" }}>No active plan </span>
-                <span style={{ color: "#78350f" }}>— customers won{"'"}t be able to chat until you subscribe. </span>
-                <button
-                  type="button"
-                  onClick={() => goToStep(3)}
-                  style={{ background: "none", border: "none", color: "#92400e", fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: "inherit" }}
-                >
+            <div style={{ marginBottom: "16px" }}>
+              <s-banner tone="warning">
+                No active plan — customers won&apos;t be able to chat until you subscribe.{" "}
+                <button type="button" onClick={() => goToStep(3)} style={{ background: "none", border: "none", color: "inherit", fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: "inherit" }}>
                   Choose a plan →
                 </button>
-              </div>
+              </s-banner>
             </div>
           )}
 
@@ -667,9 +621,7 @@ export default function Onboarding() {
             </s-button>
           </s-stack>
           {!themeConfirmed && (
-            <p style={{ fontSize: "12px", color: "#b45309", marginTop: "8px" }}>
-              ⚠️ Please confirm you{"'"}ve added the widget to your theme before finishing.
-            </p>
+            <s-banner tone="warning">Please confirm you&apos;ve added the widget to your theme before finishing.</s-banner>
           )}
         </s-section>
       )}

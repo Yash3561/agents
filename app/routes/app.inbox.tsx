@@ -7,6 +7,8 @@ import prisma from "../db.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
 import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
 import { runQAJudge } from "../lib/agents/merchant-analyst.server";
+import { FilterButtonGroup } from "~/components/FilterButtonGroup";
+import { JourneyFunnel } from "~/components/JourneyFunnel";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -182,10 +184,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
 function StatusDot({ escalated, resolved, lastMessageAt }: { escalated: boolean; resolved: boolean; lastMessageAt: Date | string }) {
   const isActive = new Date(lastMessageAt) > new Date(Date.now() - 10 * 60 * 1000);
-  if (escalated && !resolved) return <span style={{ color: "#dc2626", fontSize: "10px" }}>●</span>;
-  if (isActive) return <span style={{ color: "#d97706", fontSize: "10px" }}>●</span>;
-  if (resolved) return <span style={{ color: "#9ca3af", fontSize: "10px" }}>●</span>;
-  return <span style={{ color: "#6b7280", fontSize: "10px" }}>●</span>;
+  if (escalated && !resolved) return <span aria-label="Escalated" title="Escalated" style={{ color: "var(--color-critical)", fontSize: "10px" }}>●</span>;
+  if (isActive) return <span aria-label="Active now" title="Active now" style={{ color: "var(--color-warning)", fontSize: "10px" }}>●</span>;
+  if (resolved) return <span aria-label="Resolved" title="Resolved" style={{ color: "#9ca3af", fontSize: "10px" }}>●</span>;
+  return <span aria-label="Inactive" title="Inactive" style={{ color: "#6b7280", fontSize: "10px" }}>●</span>;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -237,13 +239,6 @@ export default function Inbox() {
   const inCart = selected ? !!selected.cartId : false;
   const purchased = selected ? !!selected.orderId : false;
 
-  const funnelSteps = selected ? [
-    { label: "Started", done: true, detail: undefined as string | undefined },
-    { label: "Browsed", done: browsed },
-    { label: "Cart Added", done: inCart, detail: selected.cartValue ? fmtMoney(selected.cartValue) : undefined },
-    { label: "Purchased", done: purchased, detail: selected.orderRevenueCents ? fmtMoney(selected.orderRevenueCents / 100) : undefined },
-  ] : [];
-
   const CHANNEL_OPTS = [
     { value: "all", label: "All" },
     { value: "web", label: "🌐 Web" },
@@ -258,46 +253,33 @@ export default function Inbox() {
     { value: "flagged", label: "🔍 Needs Review" },
   ] as const;
 
-  const filterBtn = (active: boolean, color = "#2c6ecb") => ({
-    padding: "4px 12px",
-    borderRadius: "5px",
-    border: active ? `1px solid ${color}` : "1px solid #d1d1d1",
-    background: active ? color : "transparent",
-    color: active ? "#fff" : "#1a1a1a",
-    cursor: "pointer",
-    fontWeight: active ? 600 : 400,
-    fontSize: "12px",
-  });
-
   return (
     <s-page heading="Inbox">
       <div style={{ display: "grid", gridTemplateColumns: "300px 1fr 280px", gap: "0", height: "calc(100vh - 120px)", minHeight: "600px" }}>
 
         {/* ── Left Panel: Conversation List ────────────────────────────────── */}
-        <div style={{ borderRight: "1px solid #e1e3e5", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {/* Channel filter */}
-          <div style={{ padding: "12px", borderBottom: "1px solid #f0f0f0" }}>
-            <div style={{ display: "flex", gap: "4px", marginBottom: "8px" }}>
-              {CHANNEL_OPTS.map((opt) => (
-                <button key={opt.value} onClick={() => setFilter("channel", opt.value)} style={filterBtn(channelFilter === opt.value)}>
-                  {opt.label}
-                </button>
-              ))}
+        <div style={{ borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {/* Channel + status filters */}
+          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--color-border)" }}>
+            <div style={{ marginBottom: "6px" }}>
+              <FilterButtonGroup
+                options={CHANNEL_OPTS}
+                value={channelFilter}
+                onChange={(v) => setFilter("channel", v)}
+              />
             </div>
-            <div style={{ display: "flex", gap: "4px" }}>
-              {STATUS_OPTS.map((opt) => (
-                <button key={opt.value} onClick={() => setFilter("status", opt.value)} style={filterBtn(statusFilter === opt.value, "#6b7280")}>
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            <FilterButtonGroup
+              options={STATUS_OPTS}
+              value={statusFilter}
+              onChange={(v) => setFilter("status", v)}
+            />
           </div>
 
           {/* Conversation rows */}
           <div style={{ flex: 1, overflowY: "auto" }}>
             {conversations.length === 0 ? (
-              <div style={{ padding: "24px 16px", fontSize: "13px", color: "#8c9196", textAlign: "center" }}>
-                No conversations match these filters.
+              <div style={{ padding: "24px 16px", textAlign: "center" }}>
+                <s-text tone="neutral">No conversations match these filters.</s-text>
               </div>
             ) : conversations.map((c) => {
               const isSelected = selected?.id === c.id;
@@ -308,6 +290,7 @@ export default function Inbox() {
                   key={c.id}
                   role="button"
                   tabIndex={0}
+                  aria-label={c.firstUserMessage ?? "Conversation"}
                   onClick={() => selectConversation(c.id)}
                   onKeyDown={(e) => e.key === "Enter" && selectConversation(c.id)}
                   style={{
@@ -315,7 +298,7 @@ export default function Inbox() {
                     borderBottom: "1px solid #f0f0f0",
                     cursor: "pointer",
                     background: isSelected ? "#f0f4ff" : isEscalated ? "#fff5f5" : "#fff",
-                    borderLeft: isSelected ? "3px solid #2c6ecb" : isEscalated ? "3px solid #dc2626" : "3px solid transparent",
+                    borderLeft: isSelected ? `3px solid var(--color-primary)` : isEscalated ? `3px solid var(--color-critical)` : "3px solid transparent",
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "3px" }}>
@@ -345,7 +328,7 @@ export default function Inbox() {
         </div>
 
         {/* ── Center Panel: Transcript ──────────────────────────────────────── */}
-        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid #e1e3e5" }}>
+        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
           {!selected ? (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#8c9196", fontSize: "14px" }}>
               Select a conversation to view the transcript
@@ -353,37 +336,22 @@ export default function Inbox() {
           ) : (
             <>
               {/* Journey funnel */}
-              <div style={{ padding: "14px 16px", borderBottom: "1px solid #f0f0f0", background: "#fafafa" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0" }}>
-                  {funnelSteps.map((step, i) => (
-                    <div key={step.label} style={{ display: "flex", alignItems: "center", flex: i < funnelSteps.length - 1 ? 1 : "none" }}>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "60px" }}>
-                        <div style={{
-                          width: "24px", height: "24px", borderRadius: "50%",
-                          background: step.done ? "#008060" : "#e0e0e0",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          color: step.done ? "#fff" : "#999", fontSize: "12px", fontWeight: 700,
-                        }}>
-                          {step.done ? "✓" : "○"}
-                        </div>
-                        <div style={{ fontSize: "10px", fontWeight: 600, marginTop: "2px", color: step.done ? "#008060" : "#999" }}>
-                          {step.label}
-                        </div>
-                        {step.detail && <div style={{ fontSize: "10px", color: "#15803d" }}>{step.detail}</div>}
-                      </div>
-                      {i < funnelSteps.length - 1 && (
-                        <div style={{ flex: 1, height: "2px", background: step.done ? "#008060" : "#e0e0e0", margin: "0 2px", marginBottom: "16px" }} />
-                      )}
-                    </div>
-                  ))}
-                </div>
+              <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
+                <JourneyFunnel
+                  browsed={browsed}
+                  inCart={inCart}
+                  purchased={purchased}
+                  cartValue={selected.cartValue}
+                  orderRevenue={selected.orderRevenueCents}
+                  currency={currencyCode}
+                  compact={true}
+                />
               </div>
 
               {/* Escalation note */}
               {selected.escalated && !selected.resolved && (
-                <div style={{ padding: "8px 16px", background: "#fff5f5", borderBottom: "1px solid #fca5a5", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <s-badge tone="critical">Escalated</s-badge>
-                  <span style={{ fontSize: "13px", color: "#dc2626" }}>Merchant reply enabled below</span>
+                <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
+                  <s-banner tone="critical">Merchant reply enabled — use the box below to respond directly.</s-banner>
                 </div>
               )}
 
@@ -421,7 +389,7 @@ export default function Inbox() {
 
               {/* Reply box — only on escalated, unresolved conversations */}
               {selected.escalated && !selected.resolved ? (
-                <div style={{ padding: "12px 16px", borderTop: "1px solid #e1e3e5", background: "#fff" }}>
+                <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)", background: "#fff" }}>
                   <Form method="post">
                     <input type="hidden" name="intent" value="reply" />
                     <input type="hidden" name="conversationId" value={selected.id} />
@@ -433,7 +401,7 @@ export default function Inbox() {
                         rows={2}
                         style={{
                           flex: 1, padding: "8px 10px", borderRadius: "6px",
-                          border: "1px solid #c9cccf", fontSize: "13px",
+                          border: "1px solid var(--color-border)", fontSize: "13px",
                           resize: "none", fontFamily: "inherit",
                         }}
                         onKeyDown={(e) => {
@@ -447,12 +415,19 @@ export default function Inbox() {
                         type="submit"
                         disabled={isSubmitting}
                         style={{
-                          padding: "8px 16px", background: "#2c6ecb", color: "#fff",
-                          border: "none", borderRadius: "6px", cursor: isSubmitting ? "wait" : "pointer",
-                          fontSize: "13px", fontWeight: 600, flexShrink: 0,
+                          padding: "8px 16px",
+                          background: isSubmitting ? "var(--color-neutral)" : "var(--color-primary)",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "var(--radius-sm)",
+                          cursor: isSubmitting ? "wait" : "pointer",
+                          fontSize: "13px",
+                          fontWeight: 600,
+                          flexShrink: 0,
+                          transition: "background 0.1s ease",
                         }}
                       >
-                        {isSubmitting ? "…" : "Send"}
+                        {isSubmitting ? "Sending…" : "Send"}
                       </button>
                     </div>
                     <div style={{ fontSize: "11px", color: "#8c9196", marginTop: "4px" }}>
@@ -461,7 +436,7 @@ export default function Inbox() {
                   </Form>
                 </div>
               ) : selected && !selected.resolved ? (
-                <div style={{ padding: "10px 16px", borderTop: "1px solid #e1e3e5", background: "#fafafa", fontSize: "12px", color: "#8c9196" }}>
+                <div style={{ padding: "10px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-surface)", fontSize: "12px", color: "#8c9196" }}>
                   AI is handling this conversation · Escalate from sidebar to reply manually
                 </div>
               ) : null}
@@ -477,27 +452,22 @@ export default function Inbox() {
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               {/* Channel */}
               <div>
-                <div style={{ fontSize: "11px", color: "#6d7175", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Channel</div>
-                <span style={{
-                  background: selected.channel === "whatsapp" ? "#e8fff0" : "#e8f4fd",
-                  color: selected.channel === "whatsapp" ? "#166534" : "#1e3a5f",
-                  padding: "4px 10px", borderRadius: "10px", fontSize: "12px", fontWeight: 600,
-                }}>
-                  {selected.channel === "whatsapp" ? "💚 WhatsApp" : "🌐 Web Widget"}
-                </span>
+                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Channel</div>
+                <s-badge tone={selected.channel === "whatsapp" ? "success" : "info"}>
+                  {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
+                </s-badge>
               </div>
 
               {/* Customer */}
               <div>
-                <div style={{ fontSize: "11px", color: "#6d7175", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Customer</div>
+                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Customer</div>
                 {selected.customerId ? (
-                  <a
+                  <s-link
                     href={`https://admin.shopify.com/store/${storeHandle}/customers/${selected.customerId.replace("gid://shopify/Customer/", "")}`}
-                    target="_blank" rel="noreferrer"
-                    style={{ fontSize: "13px", color: "#2c6ecb" }}
+                    target="_blank"
                   >
                     View in Shopify →
-                  </a>
+                  </s-link>
                 ) : (
                   <span style={{ fontSize: "13px", color: "#6d7175" }}>Anonymous</span>
                 )}
@@ -506,7 +476,7 @@ export default function Inbox() {
               {/* Contact (WhatsApp phone — masked) */}
               {selected.channel === "whatsapp" && (
                 <div>
-                  <div style={{ fontSize: "11px", color: "#6d7175", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Phone</div>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Phone</div>
                   <span style={{ fontSize: "13px", color: "#202223" }}>
                     {"****" + selected.sessionId.replace("whatsapp_", "").slice(-4)}
                   </span>
@@ -516,8 +486,8 @@ export default function Inbox() {
               {/* Cart value */}
               {selected.cartValue ? (
                 <div>
-                  <div style={{ fontSize: "11px", color: "#6d7175", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Cart Value</div>
-                  <span style={{ fontSize: "16px", fontWeight: 600, color: "#1d4ed8" }}>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Cart Value</div>
+                  <span style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-primary)" }}>
                     {fmtMoney(selected.cartValue)}
                   </span>
                 </div>
@@ -526,16 +496,15 @@ export default function Inbox() {
               {/* Order */}
               {selected.orderId && (
                 <div>
-                  <div style={{ fontSize: "11px", color: "#6d7175", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Order</div>
-                  <a
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Order</div>
+                  <s-link
                     href={`https://admin.shopify.com/store/${storeHandle}/orders/${selected.orderId}`}
-                    target="_blank" rel="noreferrer"
-                    style={{ fontSize: "13px", color: "#15803d", fontWeight: 600 }}
+                    target="_blank"
                   >
                     {selected.orderId} →
-                  </a>
+                  </s-link>
                   {selected.orderRevenueCents && (
-                    <div style={{ fontSize: "12px", color: "#15803d", marginTop: "2px" }}>
+                    <div style={{ fontSize: "12px", color: "var(--color-success)", marginTop: "2px" }}>
                       {fmtMoney(selected.orderRevenueCents / 100)}
                     </div>
                   )}
@@ -544,7 +513,7 @@ export default function Inbox() {
 
               {/* Metadata */}
               <div>
-                <div style={{ fontSize: "11px", color: "#6d7175", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Details</div>
+                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Details</div>
                 <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: "12px" }}>
                   <span style={{ color: "#6d7175" }}>Started</span>
                   <span>{new Date(selected.startedAt).toLocaleDateString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
@@ -580,65 +549,49 @@ export default function Inbox() {
 
               {/* Train from this — visible on flagged conversations */}
               {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
-                <div style={{ background: "#fff8f1", border: "1px solid #fed7aa", borderRadius: "8px", padding: "12px" }}>
-                  <div style={{ fontSize: "12px", fontWeight: 600, color: "#92400e", marginBottom: "8px" }}>🔍 AI flagged this conversation</div>
-                  <div style={{ fontSize: "11px", color: "#92400e", marginBottom: "10px" }}>
-                    {(selected.qaMeta as { reason?: string } | null)?.reason ?? "Low quality response detected."}
+                <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: "12px" }}>
+                  <s-banner tone="warning">
+                    <s-text><strong>AI flagged this conversation</strong></s-text>
+                    <s-text tone="neutral">{(selected.qaMeta as { reason?: string } | null)?.reason ?? "Low quality response detected."}</s-text>
+                  </s-banner>
+                  <div style={{ marginTop: "12px" }}>
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="train" />
+                      <input type="hidden" name="conversationId" value={selected.id} />
+                      <s-stack direction="block">
+                        <s-text-field
+                          label="Customer question"
+                          name="question"
+                          value={selected.firstUserMessage ?? ""}
+                        ></s-text-field>
+                        <s-text-field
+                          label="Correct answer"
+                          name="answer"
+                          placeholder="Correct answer to add to FAQ…"
+                        ></s-text-field>
+                        <div>
+                          <s-button type="submit" variant="primary">Add to Knowledge Base</s-button>
+                        </div>
+                      </s-stack>
+                    </Form>
                   </div>
-                  <Form method="post">
-                    <input type="hidden" name="intent" value="train" />
-                    <input type="hidden" name="conversationId" value={selected.id} />
-                    <input
-                      name="question"
-                      placeholder="Customer question"
-                      defaultValue={selected.firstUserMessage ?? ""}
-                      style={{ width: "100%", padding: "5px 8px", borderRadius: "4px", border: "1px solid #c9cccf", fontSize: "12px", marginBottom: "6px", boxSizing: "border-box" as const }}
-                    />
-                    <textarea
-                      name="answer"
-                      placeholder="Correct answer to add to FAQ…"
-                      rows={2}
-                      style={{ width: "100%", padding: "5px 8px", borderRadius: "4px", border: "1px solid #c9cccf", fontSize: "12px", marginBottom: "6px", resize: "none", fontFamily: "inherit", boxSizing: "border-box" as const }}
-                    />
-                    <button type="submit" style={{ width: "100%", padding: "6px", background: "#92400e", color: "#fff", border: "none", borderRadius: "5px", fontSize: "12px", cursor: "pointer", fontWeight: 600 }}>
-                      Add to Knowledge Base
-                    </button>
-                  </Form>
                 </div>
               )}
 
               {/* Actions */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid #e1e3e5", paddingTop: "16px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
                 {!selected.resolved && (
                   <Form method="post">
                     <input type="hidden" name="intent" value="resolve" />
                     <input type="hidden" name="conversationId" value={selected.id} />
-                    <button
-                      type="submit"
-                      style={{
-                        width: "100%", padding: "8px", borderRadius: "6px",
-                        border: "1px solid #c9cccf", background: "#fff",
-                        cursor: "pointer", fontSize: "13px", color: "#202223",
-                      }}
-                    >
-                      Mark as Resolved
-                    </button>
+                    <div style={{ width: "100%" }}><s-button type="submit" variant="secondary">Mark as Resolved</s-button></div>
                   </Form>
                 )}
                 {!selected.escalated && !selected.resolved && (
                   <Form method="post">
                     <input type="hidden" name="intent" value="escalate" />
                     <input type="hidden" name="conversationId" value={selected.id} />
-                    <button
-                      type="submit"
-                      style={{
-                        width: "100%", padding: "8px", borderRadius: "6px",
-                        border: "1px solid #fca5a5", background: "#fff5f5",
-                        cursor: "pointer", fontSize: "13px", color: "#dc2626",
-                      }}
-                    >
-                      Escalate — Enable Reply
-                    </button>
+                    <div style={{ width: "100%" }}><s-button type="submit" tone="critical">Escalate — Enable Reply</s-button></div>
                   </Form>
                 )}
               </div>

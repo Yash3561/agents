@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, useLoaderData, useRouteError } from "react-router";
+import { JourneyFunnel } from "~/components/JourneyFunnel";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
@@ -81,10 +82,6 @@ const TOOL_LABELS: Record<string, string | null> = {
 export default function ConversationDetail() {
   const { conversation, currencyCode } = useLoaderData<typeof loader>();
 
-  function fmtMoney(dollars: number) {
-    return new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(dollars);
-  }
-
   const agentTraceArr = Array.isArray(conversation.agentTrace)
     ? (conversation.agentTrace as string[])
     : [];
@@ -95,27 +92,9 @@ export default function ConversationDetail() {
 
   const storeHandle = conversation.shopDomain.replace(".myshopify.com", "");
 
-  // Funnel steps
   const browsed = agentTraceArr.includes("search_catalog");
   const inCart = !!conversation.cartId;
   const purchased = !!conversation.orderId;
-
-  const funnelSteps = [
-    { label: "Started", done: true, detail: undefined as string | undefined },
-    { label: "Browsed", done: browsed, detail: undefined as string | undefined },
-    {
-      label: "Cart Added",
-      done: inCart,
-      detail: conversation.cartValue ? fmtMoney(conversation.cartValue) : undefined,
-    },
-    {
-      label: "Purchased",
-      done: purchased,
-      detail: conversation.orderRevenueCents
-        ? fmtMoney(conversation.orderRevenueCents / 100)
-        : undefined,
-    },
-  ];
 
   // AI actions — filter out internal routing and unmapped steps
   const aiActions = agentTraceArr
@@ -135,55 +114,34 @@ export default function ConversationDetail() {
       {/* Escalation banner */}
       {conversation.escalated && (
         <s-section>
-          <div
-            style={{
-              background: "#fff5f5",
-              border: "1px solid #fca5a5",
-              borderRadius: "8px",
-              padding: "16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "12px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <s-badge tone="critical">Escalated</s-badge>
-              <span style={{ fontSize: "14px", fontWeight: 600, color: "#dc2626" }}>
-                This conversation was escalated to your support team
-              </span>
-            </div>
-            {(conversation as { customerEmail?: string | null }).customerEmail && (
-              <div style={{ fontSize: "14px" }}>
-                <span style={{ color: "#666" }}>Customer email: </span>
-                <a
-                  href={`mailto:${(conversation as { customerEmail?: string | null }).customerEmail}`}
-                  style={{ color: "#1a1a1a", fontWeight: 600 }}
-                >
-                  {(conversation as { customerEmail?: string | null }).customerEmail}
-                </a>
-              </div>
-            )}
-            {conversation.resolved ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <s-badge tone="info">Resolved</s-badge>
-                {(conversation as { resolvedAt?: Date | string | null }).resolvedAt && (
-                  <span style={{ fontSize: "13px", color: "#555" }}>
-                    Resolved at{" "}
-                    {new Date(
-                      (conversation as { resolvedAt?: Date | string | null }).resolvedAt as string | Date,
-                    ).toLocaleString()}
-                  </span>
-                )}
-              </div>
-            ) : (
-              <Form method="post">
-                <input type="hidden" name="intent" value="resolve" />
-                <s-button type="submit" tone="neutral">
-                  Mark as Resolved
-                </s-button>
-              </Form>
-            )}
-          </div>
+          <s-banner tone="critical">
+            <s-stack direction="block" gap="base">
+              <s-text>This conversation was escalated to your support team.</s-text>
+              {(conversation as { customerEmail?: string | null }).customerEmail && (
+                <s-text>
+                  Customer email:{" "}
+                  <s-link href={`mailto:${(conversation as { customerEmail?: string | null }).customerEmail}`}>
+                    {(conversation as { customerEmail?: string | null }).customerEmail}
+                  </s-link>
+                </s-text>
+              )}
+              {conversation.resolved ? (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <s-badge tone="info">Resolved</s-badge>
+                  {(conversation as { resolvedAt?: Date | string | null }).resolvedAt && (
+                    <s-text tone="neutral">
+                      Resolved at {new Date((conversation as { resolvedAt?: Date | string | null }).resolvedAt as string | Date).toLocaleString()}
+                    </s-text>
+                  )}
+                </div>
+              ) : (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="resolve" />
+                  <s-button type="submit" tone="neutral">Mark as Resolved</s-button>
+                </Form>
+              )}
+            </s-stack>
+          </s-banner>
         </s-section>
       )}
 
@@ -200,132 +158,62 @@ export default function ConversationDetail() {
 
       {/* Journey funnel */}
       <s-section heading="Journey">
-        <div style={{ display: "flex", alignItems: "center", gap: "0", padding: "12px 0" }}>
-          {funnelSteps.map((step, i) => (
-            <div
-              key={step.label}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                flex: i < funnelSteps.length - 1 ? 1 : "none",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  minWidth: "80px",
-                }}
-              >
-                <div
-                  style={{
-                    width: "32px",
-                    height: "32px",
-                    borderRadius: "50%",
-                    background: step.done ? "#008060" : "#e0e0e0",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: step.done ? "#fff" : "#999",
-                    fontSize: "16px",
-                    fontWeight: 700,
-                  }}
-                >
-                  {step.done ? "✓" : "○"}
-                </div>
-                <div
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    marginTop: "4px",
-                    color: step.done ? "#008060" : "#999",
-                  }}
-                >
-                  {step.label}
-                </div>
-                {step.detail && (
-                  <div style={{ fontSize: "11px", color: "#15803d", fontWeight: 500 }}>
-                    {step.detail}
-                  </div>
-                )}
-              </div>
-              {i < funnelSteps.length - 1 && (
-                <div
-                  style={{
-                    flex: 1,
-                    height: "2px",
-                    background: step.done ? "#008060" : "#e0e0e0",
-                    margin: "0 4px",
-                    marginBottom: "20px",
-                  }}
-                />
-              )}
-            </div>
-          ))}
-        </div>
+        <JourneyFunnel
+          browsed={browsed}
+          inCart={inCart}
+          purchased={purchased}
+          cartValue={conversation.cartValue}
+          orderRevenue={conversation.orderRevenueCents}
+          currency={currencyCode}
+        />
       </s-section>
 
       {/* Details */}
       <s-section heading="Details">
         <s-stack direction="block" gap="base">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "120px 1fr",
-              gap: "8px 16px",
-              fontSize: "14px",
-            }}
-          >
-            <span style={{ color: "#666" }}>Customer</span>
-            <span>
+          <div style={{ display: "flex", gap: "16px" }}>
+            <span style={{ minWidth: "120px", color: "var(--color-neutral)" }}><s-text tone="neutral">Customer</s-text></span>
+            <s-text>
               {conversation.customerId ? (
-                <a
+                <s-link
                   href={`https://admin.shopify.com/store/${storeHandle}/customers/${conversation.customerId.replace("gid://shopify/Customer/", "")}`}
                   target="_blank"
-                  rel="noreferrer"
-                  style={{ color: "#1a1a1a" }}
                 >
                   View in Shopify
-                </a>
-              ) : (
-                "Anonymous"
-              )}
-            </span>
-            <span style={{ color: "#666" }}>Started</span>
-            <span>{new Date(conversation.startedAt).toLocaleString()}</span>
-            <span style={{ color: "#666" }}>Last active</span>
-            <span>{new Date(conversation.lastMessageAt).toLocaleString()}</span>
-            {conversation.discountCode && (
-              <>
-                <span style={{ color: "#666" }}>Discount used</span>
-                <span style={{ fontWeight: 600 }}>{conversation.discountCode}</span>
-              </>
-            )}
-            {conversation.orderId && (
-              <>
-                <span style={{ color: "#666" }}>Order</span>
-                <span>
-                  <a
-                    href={`https://admin.shopify.com/store/${storeHandle}/orders/${conversation.orderId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: "#1a1a1a" }}
-                  >
-                    {conversation.orderId}
-                  </a>
-                </span>
-              </>
-            )}
-            {conversation.escalated && (
-              <>
-                <span style={{ color: "#666" }}>Status</span>
-                <span>
-                  <s-badge tone="critical">Escalated</s-badge>
-                </span>
-              </>
-            )}
+                </s-link>
+              ) : "Anonymous"}
+            </s-text>
           </div>
+          <div style={{ display: "flex", gap: "16px" }}>
+            <span style={{ minWidth: "120px" }}><s-text tone="neutral">Started</s-text></span>
+            <s-text>{new Date(conversation.startedAt).toLocaleString()}</s-text>
+          </div>
+          <div style={{ display: "flex", gap: "16px" }}>
+            <span style={{ minWidth: "120px" }}><s-text tone="neutral">Last active</s-text></span>
+            <s-text>{new Date(conversation.lastMessageAt).toLocaleString()}</s-text>
+          </div>
+          {conversation.discountCode && (
+            <div style={{ display: "flex", gap: "16px" }}>
+              <span style={{ minWidth: "120px" }}><s-text tone="neutral">Discount used</s-text></span>
+              <s-text><strong>{conversation.discountCode}</strong></s-text>
+            </div>
+          )}
+          {conversation.orderId && (
+            <div style={{ display: "flex", gap: "16px" }}>
+              <span style={{ minWidth: "120px" }}><s-text tone="neutral">Order</s-text></span>
+              <s-text>
+                <s-link href={`https://admin.shopify.com/store/${storeHandle}/orders/${conversation.orderId}`} target="_blank">
+                  {conversation.orderId}
+                </s-link>
+              </s-text>
+            </div>
+          )}
+          {conversation.escalated && (
+            <div style={{ display: "flex", gap: "16px" }}>
+              <span style={{ minWidth: "120px" }}><s-text tone="neutral">Status</s-text></span>
+              <s-badge tone="critical">Escalated</s-badge>
+            </div>
+          )}
         </s-stack>
       </s-section>
 
@@ -336,11 +224,8 @@ export default function ConversationDetail() {
         ) : (
           <s-stack direction="block" gap="base">
             {aiActions.map((action, i) => (
-              <div
-                key={i}
-                style={{ fontSize: "13px", padding: "4px 0", borderBottom: "1px solid #f5f5f5" }}
-              >
-                {action}
+              <div key={i} style={{ padding: "4px 0", borderBottom: "1px solid var(--color-border)" }}>
+                <s-text>{action}</s-text>
               </div>
             ))}
           </s-stack>
