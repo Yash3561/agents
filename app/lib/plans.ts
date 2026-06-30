@@ -5,6 +5,7 @@ export const PLAN_CONFIG: Record<string, { name: string; amount: number; trialDa
 };
 
 export const PLAN_LIMITS: Record<string, number> = {
+  free: 10,
   spark: 500,
   pulse: 2500,
   surge: 10000,
