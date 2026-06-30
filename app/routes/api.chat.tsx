@@ -152,6 +152,26 @@ export async function action({ request }: ActionFunctionArgs) {
     }
   }
 
+  // Check if AI is paused for this conversation — merchant has taken over manually
+  const convPause = await prisma.conversation.findFirst({
+    where: { shopDomain: shop, sessionId: session_id },
+    select: { aiPaused: true },
+  });
+  if (convPause?.aiPaused) {
+    const pauseBody =
+      `event: delta\ndata: ${JSON.stringify({ text: "A team member is handling your conversation. We'll be with you shortly." })}\n\n` +
+      `event: meta\ndata: ${JSON.stringify({ agent_trace: [] })}\n\n` +
+      `event: done\ndata: {}\n\n`;
+    return new Response(pauseBody, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  }
+
   // Build the SSE stream
   const stream = buildSseStream({
     shop,

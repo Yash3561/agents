@@ -66,6 +66,7 @@ model Conversation {
   startedAt         DateTime @default(now())
   lastMessageAt     DateTime @updatedAt
   firstUserMessage  String?
+  aiPaused          Boolean  @default(false)
   merchant          Merchant @relation(fields: [shopDomain], references: [shopDomain])
 
   @@unique([shopDomain, sessionId])

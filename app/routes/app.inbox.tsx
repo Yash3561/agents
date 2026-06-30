@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Form, useLoaderData, useRouteError, useSearchParams, useNavigation } from "react-router";
+import { Form, useFetcher, useLoaderData, useRouteError, useSearchParams, useNavigation } from "react-router";
 import type { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -147,6 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           orderId: true,
           qualityScore: true,
           qaMeta: true,
+          aiPaused: true,
         },
       }),
       prisma.conversation.count({ where: countBase }),
@@ -259,6 +260,12 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: conversationId },
       data: { escalated: true, resolved: false },
     });
+  } else if (intent === "pause-ai") {
+    const pause = formData.get("pause") === "true";
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { aiPaused: pause },
+    });
   }
 
   return null;
@@ -295,6 +302,17 @@ export default function Inbox() {
   // Reply mode: "reply" sends to customer, "note" saves as internal note
   const [replyMode, setReplyMode] = useState<"reply" | "note">("reply");
 
+  // Browser notification permission state
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "denied",
+  );
+
+  // Pause/resume AI fetcher
+  const pauseFetcher = useFetcher<typeof action>();
+  const isAiPaused = pauseFetcher.formData
+    ? pauseFetcher.formData.get("pause") === "true"
+    : selected?.aiPaused ?? false;
+
   // SSE real-time: track last update time and hold merged updates
   type ConvItem = typeof conversations[number];
   const [lastSeen, setLastSeen] = useState(() => new Date().toISOString());
@@ -302,6 +320,13 @@ export default function Inbox() {
   const [otherViewers, setOtherViewers] = useState(0);
 
   const selectedId = selected?.id ?? null;
+
+  // One-time: auto-request notification permission on inbox load
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().then(setNotifPermission).catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams({ since: lastSeen });
@@ -323,6 +348,49 @@ export default function Inbox() {
                    new Date(a.lastMessageAt as unknown as string).getTime();
           });
         });
+
+        // Browser notification + audio ping when tab is not focused
+        if (
+          typeof document !== "undefined" &&
+          document.visibilityState === "hidden" &&
+          data.conversations.length > 0
+        ) {
+          // Visual notification
+          if ("Notification" in window && Notification.permission === "granted") {
+            const newest = data.conversations[0];
+            const body = newest.firstUserMessage
+              ? newest.firstUserMessage.slice(0, 100)
+              : "New message received";
+            const notif = new Notification("NeonPing — New message", {
+              body,
+              icon: "/favicon.ico",
+              tag: `conv-${newest.id}`, // dedupes — same conv won't double-notify
+              silent: false,
+            });
+            setTimeout(() => notif.close(), 5000);
+            notif.onclick = () => {
+              window.focus();
+              notif.close();
+              selectConversation(newest.id);
+            };
+          }
+
+          // Audio ping via Web Audio API — no external file needed
+          try {
+            const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+            const ctx = new AudioCtx();
+            const oscillator = ctx.createOscillator();
+            const gain = ctx.createGain();
+            oscillator.connect(gain);
+            gain.connect(ctx.destination);
+            oscillator.type = "sine";
+            oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+            gain.gain.setValueAtTime(0.1, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+            oscillator.start(ctx.currentTime);
+            oscillator.stop(ctx.currentTime + 0.3);
+          } catch { /* Web Audio not available — silent fail */ }
+        }
       } catch { /* ignore parse errors */ }
     });
 
@@ -414,6 +482,13 @@ export default function Inbox() {
   const fmtMoney = (dollars: number) =>
     new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(dollars);
 
+  const requestNotifPermission = async () => {
+    if ("Notification" in window) {
+      const result = await Notification.requestPermission();
+      setNotifPermission(result);
+    }
+  };
+
   // Selected conversation data
   const msgs = selected && Array.isArray(selected.messages)
     ? (selected.messages as unknown as ChatMessage[])
@@ -433,6 +508,14 @@ export default function Inbox() {
 
         {/* ── Left Panel: Conversation List ────────────────────────────────── */}
         <div style={{ borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+          {/* Notification permission prompt */}
+          {notifPermission === "default" && (
+            <div style={{ padding: "8px 12px", background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <s-text tone="neutral">Enable notifications to get alerted when customers message</s-text>
+              <s-button variant="tertiary" onClick={requestNotifPermission}>Enable</s-button>
+            </div>
+          )}
 
           {/* Summary bar */}
           <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
@@ -586,6 +669,31 @@ export default function Inbox() {
               {selected.escalated && !selected.resolved && (
                 <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
                   <s-banner tone="critical">Merchant reply enabled — use the box below to respond directly.</s-banner>
+                </div>
+              )}
+
+              {/* AI pause/resume toggle */}
+              {!selected.resolved && (
+                <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                  <pauseFetcher.Form method="POST" style={{ display: "inline" }}>
+                    <input type="hidden" name="intent" value="pause-ai" />
+                    <input type="hidden" name="conversationId" value={selected.id} />
+                    <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
+                    <s-button
+                      type="submit"
+                      variant={isAiPaused ? "primary" : "secondary"}
+                      tone={isAiPaused ? "critical" : undefined}
+                    >
+                      {isAiPaused ? "▶ Resume AI" : "⏸ Pause AI"}
+                    </s-button>
+                  </pauseFetcher.Form>
+                </div>
+              )}
+
+              {/* AI paused banner */}
+              {isAiPaused && (
+                <div style={{ padding: "6px 16px", background: "#fff7ed", borderBottom: "1px solid #fed7aa", fontSize: "12px", color: "#c2410c" }}>
+                  AI is paused — you&apos;re handling this conversation. Replies you send are from you, not the AI.
                 </div>
               )}
 
