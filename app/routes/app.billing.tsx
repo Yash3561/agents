@@ -351,7 +351,7 @@ export default function BillingPage() {
             <s-text>
               <strong>{usage.used.toLocaleString()}</strong> / {limitDisplay} conversations used this month
             </s-text>
-            <div style={{ marginTop: "8px", height: "8px", background: "#e1e3e5", borderRadius: "4px", overflow: "hidden" }}>
+            <div style={{ marginTop: "8px", height: "8px", background: "var(--color-border)", borderRadius: "4px", overflow: "hidden" }}>
               <div style={{ height: "100%", width: `${usagePct}%`, background: barColor, borderRadius: "4px", transition: "width 0.3s ease" }} />
             </div>
             <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between" }}>
