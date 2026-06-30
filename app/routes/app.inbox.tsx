@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, useLoaderData, useRouteError, useSearchParams, useNavigation } from "react-router";
 import type { Prisma } from "@prisma/client";
@@ -204,7 +204,9 @@ export async function action({ request }: ActionFunctionArgs) {
     const message = (formData.get("message") as string)?.trim();
     if (!message) return { error: "Empty message" };
 
-    if (conversation.channel === "whatsapp") {
+    const isNote = formData.get("isNote") === "true";
+
+    if (!isNote && conversation.channel === "whatsapp") {
       const phone = conversation.sessionId.replace("whatsapp_", "");
       const merchant = await prisma.merchant.findFirst({
         where: { shopDomain: shop },
@@ -223,10 +225,13 @@ export async function action({ request }: ActionFunctionArgs) {
     const existing = Array.isArray(conversation.messages)
       ? (conversation.messages as object[])
       : [];
+    const newMsg = isNote
+      ? { role: "note", content: message, timestamp: Date.now() }
+      : { role: "assistant", content: `[Merchant] ${message}`, timestamp: Date.now() };
     await prisma.conversation.update({
       where: { id: conversationId },
       data: {
-        messages: [...existing, { role: "assistant", content: `[Merchant] ${message}`, timestamp: Date.now() }],
+        messages: [...existing, newMsg],
         lastMessageAt: new Date(),
       },
     });
@@ -287,10 +292,67 @@ export default function Inbox() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Clear textarea after submission
+  // Reply mode: "reply" sends to customer, "note" saves as internal note
+  const [replyMode, setReplyMode] = useState<"reply" | "note">("reply");
+
+  // SSE real-time: track last update time and hold merged updates
+  type ConvItem = typeof conversations[number];
+  const [lastSeen, setLastSeen] = useState(() => new Date().toISOString());
+  const [realtimeConvs, setRealtimeConvs] = useState<ConvItem[]>([]);
+
+  useEffect(() => {
+    const es = new EventSource(`/api/events?since=${encodeURIComponent(lastSeen)}`);
+
+    es.addEventListener("update", (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as { conversations: ConvItem[]; ts: string };
+        setLastSeen(data.ts);
+        setRealtimeConvs((prev) => {
+          const map = new Map(prev.map((c) => [c.id, c]));
+          for (const c of data.conversations) {
+            map.set(c.id, { ...map.get(c.id), ...c } as ConvItem);
+          }
+          return Array.from(map.values()).sort((a, b) => {
+            if (a.escalated !== b.escalated) return a.escalated ? -1 : 1;
+            return new Date(b.lastMessageAt as unknown as string).getTime() -
+                   new Date(a.lastMessageAt as unknown as string).getTime();
+          });
+        });
+      } catch { /* ignore parse errors */ }
+    });
+
+    es.addEventListener("reconnect", () => {
+      es.close();
+      setTimeout(() => setLastSeen(new Date().toISOString()), 1000);
+    });
+
+    es.onerror = () => {
+      es.close();
+      setTimeout(() => setLastSeen(new Date().toISOString()), 5000);
+    };
+
+    return () => es.close();
+  }, [lastSeen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Merge SSE updates into loader conversations
+  const allConversations = useMemo<ConvItem[]>(() => {
+    if (realtimeConvs.length === 0) return conversations;
+    const map = new Map(conversations.map((c) => [c.id, c]));
+    for (const c of realtimeConvs) {
+      map.set(c.id, { ...map.get(c.id), ...c } as ConvItem);
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.escalated !== b.escalated) return a.escalated ? -1 : 1;
+      return new Date(b.lastMessageAt as unknown as string).getTime() -
+             new Date(a.lastMessageAt as unknown as string).getTime();
+    });
+  }, [conversations, realtimeConvs]);
+
+  // Clear textarea and reset mode after submission
   useEffect(() => {
     if (prevNavState.current === "submitting" && navigation.state === "idle") {
       if (replyRef.current) replyRef.current.value = "";
+      setReplyMode("reply");
     }
     prevNavState.current = navigation.state;
   }, [navigation.state]);
@@ -358,12 +420,16 @@ export default function Inbox() {
         <div style={{ borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
           {/* Summary bar */}
-          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
             <span>{totalCount} total</span>
             {purchasedCount > 0 && <span style={{ color: "var(--color-success)" }}>● {purchasedCount} purchased</span>}
             {inCartCount > 0 && <span style={{ color: "var(--color-primary)" }}>● {inCartCount} in cart</span>}
             {escalatedCount > 0 && <span style={{ color: "var(--color-critical)" }}>● {escalatedCount} escalated</span>}
             {liveCount > 0 && <span style={{ color: "#22c55e", fontWeight: 600 }}>⬤ {liveCount} live</span>}
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "4px" }}>
+              <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
+              <span style={{ fontSize: "11px", color: "var(--color-neutral)" }}>Live</span>
+            </span>
           </div>
 
           {/* Search */}
@@ -387,11 +453,11 @@ export default function Inbox() {
 
           {/* Conversation rows */}
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {conversations.length === 0 ? (
+            {allConversations.length === 0 ? (
               <div style={{ padding: "24px 16px", textAlign: "center" }}>
                 <s-text tone="neutral">No conversations match these filters.</s-text>
               </div>
-            ) : conversations.map((conv) => {
+            ) : allConversations.map((conv) => {
               const isSelected = selected?.id === conv.id;
               const isEscalated = conv.escalated && !conv.resolved;
               const isFlagged = conv.qaMeta && (conv.qaMeta as { flagged?: boolean }).flagged === true;
@@ -502,6 +568,19 @@ export default function Inbox() {
                 {msgs.length === 0 ? (
                   <span style={{ color: "#8c9196", fontSize: "13px" }}>No messages recorded.</span>
                 ) : msgs.map((msg, i) => {
+                  if (msg.role === "note") {
+                    return (
+                      <div key={i} style={{ margin: "8px 0", padding: "8px 12px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "8px", borderLeft: "3px solid var(--color-warning)" }}>
+                        <div style={{ fontSize: "11px", color: "var(--color-warning)", fontWeight: 600, marginBottom: "4px" }}>🔒 Internal note</div>
+                        <div style={{ fontSize: "13px", color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{msg.content}</div>
+                        {msg.timestamp && (
+                          <div style={{ fontSize: "10px", color: "#aaa", marginTop: "4px" }}>
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
                   const isUser = msg.role === "user";
                   const isMerchant = msg.content?.startsWith("[Merchant]");
                   return (
@@ -531,20 +610,40 @@ export default function Inbox() {
 
               {/* Reply box (escalated only) or status hint */}
               {selected.escalated && !selected.resolved ? (
-                <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)", background: "#fff" }}>
+                <div style={{ borderTop: "1px solid var(--color-border)", background: "#fff" }}>
+                  {/* Mode tabs */}
+                  <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)" }}>
+                    <button
+                      type="button"
+                      onClick={() => setReplyMode("reply")}
+                      style={{ padding: "6px 16px", border: "none", background: "none", cursor: "pointer", fontSize: "13px", fontWeight: replyMode === "reply" ? 600 : 400, color: replyMode === "reply" ? "var(--color-primary)" : "var(--color-neutral)", borderBottom: replyMode === "reply" ? "2px solid var(--color-primary)" : "2px solid transparent" }}
+                    >
+                      Reply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReplyMode("note")}
+                      style={{ padding: "6px 16px", border: "none", background: "none", cursor: "pointer", fontSize: "13px", fontWeight: replyMode === "note" ? 600 : 400, color: replyMode === "note" ? "var(--color-warning)" : "var(--color-neutral)", borderBottom: replyMode === "note" ? "2px solid var(--color-warning)" : "2px solid transparent" }}
+                    >
+                      🔒 Note
+                    </button>
+                  </div>
+                  <div style={{ padding: "12px 16px" }}>
                   <Form method="post">
                     <input type="hidden" name="intent" value="reply" />
                     <input type="hidden" name="conversationId" value={selected.id} />
+                    <input type="hidden" name="isNote" value={replyMode === "note" ? "true" : "false"} />
                     <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
                       <textarea
                         ref={replyRef}
                         name="message"
-                        placeholder="Reply as store (customer will see this)…"
+                        placeholder={replyMode === "note" ? "Leave an internal note (customer won't see this)…" : "Reply as store (customer will see this)…"}
                         rows={2}
                         style={{
                           flex: 1, padding: "8px 10px", borderRadius: "6px",
-                          border: "1px solid var(--color-border)", fontSize: "13px",
-                          resize: "none", fontFamily: "inherit",
+                          border: `1px solid ${replyMode === "note" ? "#fde68a" : "var(--color-border)"}`,
+                          fontSize: "13px", resize: "none", fontFamily: "inherit",
+                          background: replyMode === "note" ? "#fffbeb" : "#fff",
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && !e.shiftKey) {
@@ -558,7 +657,7 @@ export default function Inbox() {
                         disabled={isSubmitting}
                         style={{
                           padding: "8px 16px",
-                          background: isSubmitting ? "var(--color-neutral)" : "var(--color-primary)",
+                          background: isSubmitting ? "var(--color-neutral)" : replyMode === "note" ? "#d97706" : "var(--color-primary)",
                           color: "#fff", border: "none",
                           borderRadius: "var(--radius-sm)",
                           cursor: isSubmitting ? "wait" : "pointer",
@@ -566,13 +665,14 @@ export default function Inbox() {
                           transition: "background 0.1s ease",
                         }}
                       >
-                        {isSubmitting ? "Sending…" : "Send"}
+                        {isSubmitting ? "Saving…" : replyMode === "note" ? "Save Note" : "Send"}
                       </button>
                     </div>
                     <div style={{ fontSize: "11px", color: "#8c9196", marginTop: "4px" }}>
-                      {selected.channel === "whatsapp" ? "Sends via WhatsApp to customer" : "Stored in conversation — AI picks up on next reply"}
+                      {replyMode === "note" ? "Internal only — not sent to customer or AI" : selected.channel === "whatsapp" ? "Sends via WhatsApp to customer" : "Stored in conversation — AI picks up on next reply"}
                     </div>
                   </Form>
+                  </div>
                 </div>
               ) : selected && !selected.resolved ? (
                 <div style={{ padding: "10px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-surface)", fontSize: "12px", color: "#8c9196" }}>
