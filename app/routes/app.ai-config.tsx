@@ -178,12 +178,7 @@ export default function AiConfig() {
       {/* Section 1 — Custom Knowledge Base (FAQs)                            */}
       {/* ------------------------------------------------------------------ */}
       <s-section heading="Custom knowledge base">
-        <div style={{ borderLeft: "3px solid #7c3aed", paddingLeft: "12px" }}>
-        <s-text tone="neutral">
-          Add up to 20 Q&amp;A pairs. The support agent will answer these questions exactly as
-          written.
-        </s-text>
-        </div>
+        <s-banner tone="info">Add up to 20 Q&amp;A pairs. The support agent will answer these questions exactly as written.</s-banner>
 
         {/* Fix D — empty state */}
         {faqs.length === 0 ? (
@@ -285,12 +280,7 @@ export default function AiConfig() {
       {/* Section 3 — Quick Replies                                            */}
       {/* ------------------------------------------------------------------ */}
       <s-section heading="Quick replies">
-        <div style={{ borderLeft: "3px solid #7c3aed", paddingLeft: "12px" }}>
-        <s-text tone="neutral">
-          Up to 5 quick-reply buttons shown to customers at the start of a conversation. Leave
-          blank to skip a slot.
-        </s-text>
-        </div>
+        <s-banner tone="info">Up to 5 quick-reply buttons shown to customers at the start of a conversation. Leave blank to skip a slot.</s-banner>
         {quickReplies.map((reply, i) => (
           <s-text-field
             key={i}
@@ -306,26 +296,16 @@ export default function AiConfig() {
           ></s-text-field>
         ))}
         {quickReplies.some(r => r.trim()) && (
-          <div style={{ padding: "12px", background: "#f5f5f5", borderRadius: "8px" }}>
-            <s-text tone="neutral">Preview — how customers will see these:</s-text>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" }}>
-              {quickReplies.filter(r => r.trim()).map((r, i) => (
-                <span key={i} style={{
-                  display: "inline-block",
-                  padding: "6px 14px",
-                  borderRadius: "18px",
-                  border: "1px solid #b2dfdb",
-                  background: "#e6f4f1",
-                  color: "#008060",
-                  fontSize: "13px",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}>
-                  {r}
-                </span>
-              ))}
-            </div>
-          </div>
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-stack direction="block" gap="base">
+              <s-text tone="neutral">Preview — how customers will see these:</s-text>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {quickReplies.filter(r => r.trim()).map((r, i) => (
+                  <s-badge key={i} tone="success">{r}</s-badge>
+                ))}
+              </div>
+            </s-stack>
+          </s-box>
         )}
         <s-button variant="primary" onClick={submitQuickReplies}>
           Save quick replies
