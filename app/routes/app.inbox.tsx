@@ -299,9 +299,14 @@ export default function Inbox() {
   type ConvItem = typeof conversations[number];
   const [lastSeen, setLastSeen] = useState(() => new Date().toISOString());
   const [realtimeConvs, setRealtimeConvs] = useState<ConvItem[]>([]);
+  const [otherViewers, setOtherViewers] = useState(0);
+
+  const selectedId = selected?.id ?? null;
 
   useEffect(() => {
-    const es = new EventSource(`/api/events?since=${encodeURIComponent(lastSeen)}`);
+    const params = new URLSearchParams({ since: lastSeen });
+    if (selectedId) params.set("conv", selectedId);
+    const es = new EventSource(`/api/events?${params.toString()}`);
 
     es.addEventListener("update", (e: MessageEvent) => {
       try {
@@ -321,6 +326,15 @@ export default function Inbox() {
       } catch { /* ignore parse errors */ }
     });
 
+    es.addEventListener("presence", (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as { conv_id: string; viewer_count: number };
+        if (data.conv_id === selectedId) {
+          setOtherViewers(Math.max(0, data.viewer_count - 1));
+        }
+      } catch { /* ignore */ }
+    });
+
     es.addEventListener("reconnect", () => {
       es.close();
       setTimeout(() => setLastSeen(new Date().toISOString()), 1000);
@@ -332,7 +346,7 @@ export default function Inbox() {
     };
 
     return () => es.close();
-  }, [lastSeen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lastSeen, selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Merge SSE updates into loader conversations
   const allConversations = useMemo<ConvItem[]>(() => {
@@ -375,6 +389,7 @@ export default function Inbox() {
   function selectConversation(id: string) {
     const next = new URLSearchParams(searchParams);
     next.set("id", id);
+    setOtherViewers(0);
     setSearchParams(next);
   }
 
@@ -533,6 +548,17 @@ export default function Inbox() {
             </div>
           ) : (
             <>
+              {/* Collision banner — another browser tab or team member has this convo open */}
+              {otherViewers > 0 && (
+                <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)" }}>
+                  <s-banner tone="warning">
+                    {otherViewers === 1
+                      ? "Someone else is also viewing this conversation — coordinate before replying."
+                      : `${otherViewers} others are viewing this conversation.`}
+                  </s-banner>
+                </div>
+              )}
+
               {/* Resolved banner */}
               {selected.resolved && (
                 <div style={{ padding: "8px 12px", background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)", display: "flex", gap: "8px", alignItems: "center" }}>

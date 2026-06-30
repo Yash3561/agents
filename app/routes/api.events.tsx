@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { redis } from "../redis.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -9,12 +10,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const since = url.searchParams.get("since");
   const sinceDate = since ? new Date(since) : new Date(Date.now() - 60_000);
+  const convId = url.searchParams.get("conv") ?? "";
+  // ponytail: random suffix scopes this key to one SSE connection (one browser tab)
+  const viewerKey = convId ? `presence:${shop}:${convId}:${Math.random().toString(36).slice(2)}` : null;
 
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
       controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
+
+      // Register presence for this tab
+      if (viewerKey) {
+        await redis.set(viewerKey, "1", "EX", 35).catch(() => {});
+      }
+
+      // Clean up presence key when the client disconnects
+      request.signal.addEventListener("abort", () => {
+        if (viewerKey) redis.del(viewerKey).catch(() => {});
+        controller.close();
+      });
 
       let lastCheck = sinceDate;
       let iterations = 0;
@@ -55,6 +70,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
           } else if (iterations % 10 === 0) {
             controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
           }
+
+          // Presence: refresh TTL and broadcast viewer count every poll
+          if (viewerKey && convId) {
+            await redis.set(viewerKey, "1", "EX", 35).catch(() => {});
+            const keys = await redis.keys(`presence:${shop}:${convId}:*`).catch(() => [] as string[]);
+            controller.enqueue(
+              encoder.encode(
+                `event: presence\ndata: ${JSON.stringify({ conv_id: convId, viewer_count: keys.length })}\n\n`,
+              ),
+            );
+          }
         } catch {
           controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
         }
@@ -63,6 +89,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (!request.signal.aborted) {
         controller.enqueue(encoder.encode("event: reconnect\ndata: {}\n\n"));
       }
+      if (viewerKey) redis.del(viewerKey).catch(() => {});
       controller.close();
     },
   });
