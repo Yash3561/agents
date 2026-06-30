@@ -1,4 +1,10 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import type { LinksFunction } from "react-router";
+import tokensHref from "./styles/tokens.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: tokensHref },
+];
 
 export default function App() {
   return (
