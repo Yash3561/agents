@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, useLoaderData, useRouteError, useSearchParams, useNavigation } from "react-router";
+import type { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
@@ -18,6 +19,44 @@ interface ChatMessage {
   timestamp?: number;
 }
 
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const TOOL_LABELS: Record<string, string | null> = {
+  search_catalog: "🔍 Searched product catalog",
+  lookup_catalog: "🔍 Looked up product details",
+  get_product: "🔍 Fetched product info",
+  create_cart: "🛒 Created cart",
+  update_cart: "🛒 Updated cart",
+  get_cart: "🛒 Checked cart contents",
+  get_checkout_url: "✓ Generated checkout link",
+  offer_discount: "🏷 Offered discount code",
+  search_policies_and_faqs: "📋 Checked store policies",
+  get_order: "📦 Looked up order",
+  get_customer_orders: "📦 Fetched order history",
+  unified: null, // internal routing — skip
+};
+
+const DATE_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
+] as const;
+
+const OUTCOME_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "live", label: "🟢 Live" },
+  { value: "purchased", label: "Purchased" },
+  { value: "incart", label: "In Cart" },
+  { value: "escalated", label: "Escalated" },
+  { value: "ended", label: "Ended" },
+] as const;
+
+const CHANNEL_OPTS = [
+  { value: "all", label: "All" },
+  { value: "web", label: "🌐 Web" },
+  { value: "whatsapp", label: "💚 WhatsApp" },
+] as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,43 +77,84 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const selectedId = url.searchParams.get("id") ?? null;
-  const channelFilter = url.searchParams.get("channel") ?? "all";
-  const statusFilter = url.searchParams.get("status") ?? "all";
+  const channel = url.searchParams.get("channel") ?? "all";
+  const outcome = url.searchParams.get("outcome") ?? "all";
+  const dateRange = url.searchParams.get("dateRange") ?? "all";
+  const search = url.searchParams.get("search") ?? "";
+  const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1"));
+  const offset = (page - 1) * 50;
 
-  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
 
-  const channelWhere =
-    channelFilter === "whatsapp" ? { channel: "whatsapp" }
-    : channelFilter === "web" ? { NOT: { channel: "whatsapp" } }
-    : {};
+  // Build main where clause
+  const where: Prisma.ConversationWhereInput = { shopDomain: shop };
 
-  const statusWhere =
-    statusFilter === "open" ? { resolved: false, escalated: false }
-    : statusFilter === "escalated" ? { escalated: true, resolved: false }
-    : statusFilter === "resolved" ? { resolved: true }
-    : statusFilter === "flagged" ? { qaMeta: { path: ["flagged"], equals: true } }
-    : {};
+  if (dateRange !== "all") {
+    const ms = dateRange === "24h" ? 86_400_000 : dateRange === "7d" ? 604_800_000 : 2_592_000_000;
+    where.startedAt = { gte: new Date(Date.now() - ms) };
+  }
 
-  const conversations = await prisma.conversation.findMany({
-    where: { shopDomain: shop, ...channelWhere, ...statusWhere },
-    orderBy: { lastMessageAt: "desc" },
-    take: 100,
-    select: {
-      id: true,
-      sessionId: true,
-      channel: true,
-      firstUserMessage: true,
-      lastMessageAt: true,
-      escalated: true,
-      resolved: true,
-      customerId: true,
-      cartValue: true,
-      orderRevenueCents: true,
-      orderId: true,
-      qualityScore: true,
-      qaMeta: true,
-    },
-  });
+  if (search.trim()) {
+    where.OR = [
+      { firstUserMessage: { contains: search.trim(), mode: "insensitive" } },
+      { sessionId: { contains: search.trim(), mode: "insensitive" } },
+    ];
+  }
+
+  if (channel === "whatsapp") {
+    where.channel = "whatsapp";
+  } else if (channel === "web") {
+    where.NOT = { channel: "whatsapp" };
+  }
+
+  if (outcome === "live") {
+    where.lastMessageAt = { gte: fiveMinAgo };
+    where.resolved = false;
+  } else if (outcome === "purchased") {
+    where.orderId = { not: null };
+  } else if (outcome === "incart") {
+    where.cartId = { not: null };
+    where.orderId = null;
+  } else if (outcome === "escalated") {
+    where.escalated = true;
+    where.resolved = false;
+  } else if (outcome === "ended") {
+    where.resolved = true;
+  }
+
+  // Summary counts use global shop scope (not filtered by date/outcome/channel)
+  const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
+
+  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount] =
+    await Promise.all([
+      prisma.conversation.findMany({
+        where,
+        orderBy: [{ escalated: "desc" }, { lastMessageAt: "desc" }],
+        take: 50,
+        skip: offset,
+        select: {
+          id: true,
+          sessionId: true,
+          channel: true,
+          firstUserMessage: true,
+          lastMessageAt: true,
+          escalated: true,
+          resolved: true,
+          customerId: true,
+          cartValue: true,
+          cartId: true,
+          orderRevenueCents: true,
+          orderId: true,
+          qualityScore: true,
+          qaMeta: true,
+        },
+      }),
+      prisma.conversation.count({ where: countBase }),
+      prisma.conversation.count({ where: { ...countBase, orderId: { not: null } } }),
+      prisma.conversation.count({ where: { ...countBase, cartId: { not: null }, orderId: null } }),
+      prisma.conversation.count({ where: { ...countBase, escalated: true, resolved: false } }),
+      prisma.conversation.count({ where: { ...countBase, lastMessageAt: { gte: fiveMinAgo }, resolved: false } }),
+    ]);
 
   let selected = null;
   if (selectedId) {
@@ -97,11 +177,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     conversations,
     selected,
-    channelFilter,
-    statusFilter,
+    totalCount, purchasedCount, inCartCount, escalatedCount, liveCount,
+    page, hasMore: conversations.length === 50,
+    search, dateRange, outcome, channel,
     currencyCode,
     storeHandle,
-    tenMinAgo: tenMinAgo.toISOString(),
   };
 }
 
@@ -136,7 +216,7 @@ export async function action({ request }: ActionFunctionArgs) {
           decryptToken(merchant.waAccessToken),
           phone,
           message,
-        ).catch(() => null); // best-effort — already appended to history below
+        ).catch(() => null);
       }
     }
 
@@ -157,7 +237,6 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     void runQAJudge(conversationId);
   } else if (intent === "train") {
-    // Add Q&A pair from a flagged conversation to the merchant's knowledge base
     const question = (formData.get("question") as string)?.trim();
     const answer = (formData.get("answer") as string)?.trim();
     if (question && answer) {
@@ -193,14 +272,22 @@ function StatusDot({ escalated, resolved, lastMessageAt }: { escalated: boolean;
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Inbox() {
-  const { conversations, selected, channelFilter, statusFilter, currencyCode, storeHandle } =
-    useLoaderData<typeof loader>();
+  const {
+    conversations, selected,
+    totalCount, purchasedCount, inCartCount, escalatedCount, liveCount,
+    page, hasMore,
+    search, dateRange, outcome, channel,
+    currencyCode, storeHandle,
+  } = useLoaderData<typeof loader>();
+
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const prevNavState = useRef("idle");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Clear the textarea AFTER submission completes — not in onSubmit (which fires before form data is read)
+  // Clear textarea after submission
   useEffect(() => {
     if (prevNavState.current === "submitting" && navigation.state === "idle") {
       if (replyRef.current) replyRef.current.value = "";
@@ -208,12 +295,18 @@ export default function Inbox() {
     prevNavState.current = navigation.state;
   }, [navigation.state]);
 
+  // Sync search input when URL param changes (e.g. after filter reset)
+  useEffect(() => {
+    if (searchInputRef.current) searchInputRef.current.value = search;
+  }, [search]);
+
   const isSubmitting = navigation.state === "submitting";
 
   function setFilter(key: string, value: string) {
     const next = new URLSearchParams(searchParams);
     next.set(key, value);
-    next.delete("id"); // clear selection when filter changes
+    next.set("page", "1");
+    next.delete("id");
     setSearchParams(next);
   }
 
@@ -221,6 +314,24 @@ export default function Inbox() {
     const next = new URLSearchParams(searchParams);
     next.set("id", id);
     setSearchParams(next);
+  }
+
+  function nextPage() {
+    const next = new URLSearchParams(searchParams);
+    next.set("page", String(page + 1));
+    setSearchParams(next);
+  }
+
+  function handleSearch(value: string) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      if (value.trim()) next.set("search", value.trim());
+      else next.delete("search");
+      next.set("page", "1");
+      next.delete("id");
+      setSearchParams(next);
+    }, 400);
   }
 
   const fmtMoney = (dollars: number) =>
@@ -235,23 +346,9 @@ export default function Inbox() {
     ? (selected.agentTrace as string[])
     : [];
 
-  const browsed = agentTraceArr.includes("search_catalog");
-  const inCart = selected ? !!selected.cartId : false;
-  const purchased = selected ? !!selected.orderId : false;
-
-  const CHANNEL_OPTS = [
-    { value: "all", label: "All" },
-    { value: "web", label: "🌐 Web" },
-    { value: "whatsapp", label: "💚 WhatsApp" },
-  ] as const;
-
-  const STATUS_OPTS = [
-    { value: "all", label: "All" },
-    { value: "open", label: "Open" },
-    { value: "escalated", label: "🔴 Escalated" },
-    { value: "resolved", label: "Resolved" },
-    { value: "flagged", label: "🔍 Needs Review" },
-  ] as const;
+  const aiActions = agentTraceArr
+    .map((step) => (step in TOOL_LABELS ? TOOL_LABELS[step] : null))
+    .filter((a): a is string => a !== null);
 
   return (
     <s-page heading="Inbox">
@@ -259,20 +356,33 @@ export default function Inbox() {
 
         {/* ── Left Panel: Conversation List ────────────────────────────────── */}
         <div style={{ borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {/* Channel + status filters */}
-          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--color-border)" }}>
-            <div style={{ marginBottom: "6px" }}>
-              <FilterButtonGroup
-                options={CHANNEL_OPTS}
-                value={channelFilter}
-                onChange={(v) => setFilter("channel", v)}
-              />
-            </div>
-            <FilterButtonGroup
-              options={STATUS_OPTS}
-              value={statusFilter}
-              onChange={(v) => setFilter("status", v)}
+
+          {/* Summary bar */}
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            <span>{totalCount} total</span>
+            {purchasedCount > 0 && <span style={{ color: "var(--color-success)" }}>● {purchasedCount} purchased</span>}
+            {inCartCount > 0 && <span style={{ color: "var(--color-primary)" }}>● {inCartCount} in cart</span>}
+            {escalatedCount > 0 && <span style={{ color: "var(--color-critical)" }}>● {escalatedCount} escalated</span>}
+            {liveCount > 0 && <span style={{ color: "#22c55e", fontWeight: 600 }}>⬤ {liveCount} live</span>}
+          </div>
+
+          {/* Search */}
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)" }}>
+            <input
+              ref={searchInputRef}
+              type="search"
+              placeholder="Search conversations..."
+              defaultValue={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              style={{ width: "100%", padding: "6px 10px", border: "1px solid var(--color-border)", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
             />
+          </div>
+
+          {/* Filters */}
+          <div style={{ padding: "6px 12px", borderBottom: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: "4px" }}>
+            <FilterButtonGroup options={DATE_OPTIONS} value={dateRange} onChange={(v) => setFilter("dateRange", v)} />
+            <FilterButtonGroup options={OUTCOME_OPTIONS} value={outcome} onChange={(v) => setFilter("outcome", v)} />
+            <FilterButtonGroup options={CHANNEL_OPTS} value={channel} onChange={(v) => setFilter("channel", v)} />
           </div>
 
           {/* Conversation rows */}
@@ -281,49 +391,71 @@ export default function Inbox() {
               <div style={{ padding: "24px 16px", textAlign: "center" }}>
                 <s-text tone="neutral">No conversations match these filters.</s-text>
               </div>
-            ) : conversations.map((c) => {
-              const isSelected = selected?.id === c.id;
-              const isEscalated = c.escalated && !c.resolved;
-              const isFlagged = c.qaMeta && (c.qaMeta as { flagged?: boolean }).flagged === true;
+            ) : conversations.map((conv) => {
+              const isSelected = selected?.id === conv.id;
+              const isEscalated = conv.escalated && !conv.resolved;
+              const isFlagged = conv.qaMeta && (conv.qaMeta as { flagged?: boolean }).flagged === true;
               return (
                 <div
-                  key={c.id}
+                  key={conv.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={c.firstUserMessage ?? "Conversation"}
-                  onClick={() => selectConversation(c.id)}
-                  onKeyDown={(e) => e.key === "Enter" && selectConversation(c.id)}
+                  aria-label={conv.firstUserMessage ?? "Conversation"}
+                  onClick={() => selectConversation(conv.id)}
+                  onKeyDown={(e) => e.key === "Enter" && selectConversation(conv.id)}
                   style={{
-                    padding: "12px 14px",
-                    borderBottom: "1px solid #f0f0f0",
+                    padding: "10px 12px",
+                    borderBottom: "1px solid var(--color-border)",
                     cursor: "pointer",
-                    background: isSelected ? "#f0f4ff" : isEscalated ? "#fff5f5" : "#fff",
-                    borderLeft: isSelected ? `3px solid var(--color-primary)` : isEscalated ? `3px solid var(--color-critical)` : "3px solid transparent",
+                    background: isSelected ? "#f0f4ff" : "transparent",
+                    borderLeft: isEscalated
+                      ? "3px solid var(--color-critical)"
+                      : isSelected
+                      ? "3px solid var(--color-primary)"
+                      : "3px solid transparent",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "3px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                      <span style={{ fontSize: "12px" }}>{c.channel === "whatsapp" ? "💚" : "🌐"}</span>
-                      <span style={{ fontSize: "13px", fontWeight: 500, color: "#202223" }}>
-                        {c.customerId ? "Customer" : "Anonymous"}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
+                    <span style={{ fontWeight: 600, fontSize: "13px", color: "var(--color-text)" }}>
+                      {conv.customerId ? "Customer" : "Anonymous"}
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      {isFlagged && <span title="AI quality flagged" style={{ fontSize: "11px" }}>🔍</span>}
+                      <StatusDot escalated={conv.escalated} resolved={conv.resolved} lastMessageAt={conv.lastMessageAt} />
+                      <span style={{ fontSize: "11px", color: "var(--color-neutral)" }}>
+                        {relativeTime(conv.lastMessageAt)}
                       </span>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                      {isFlagged && <span title="AI quality flagged" style={{ fontSize: "11px" }}>🔍</span>}
-                      <StatusDot escalated={c.escalated} resolved={c.resolved} lastMessageAt={c.lastMessageAt} />
-                      <span style={{ fontSize: "11px", color: "#8c9196" }}>{relativeTime(c.lastMessageAt)}</span>
-                    </div>
                   </div>
-                  <div style={{ fontSize: "12px", color: "#6d7175", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {c.firstUserMessage
-                      ? c.firstUserMessage.length > 58
-                        ? c.firstUserMessage.slice(0, 58) + "…"
-                        : c.firstUserMessage
-                      : "—"}
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", marginBottom: "4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {conv.firstUserMessage ?? "No message"}
+                  </div>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                    {conv.channel === "whatsapp" && <s-badge tone="success">WhatsApp</s-badge>}
+                    {conv.orderId && conv.orderRevenueCents != null && (
+                      <span style={{ fontSize: "11px", color: "var(--color-success)", fontWeight: 600 }}>
+                        ${(conv.orderRevenueCents / 100).toFixed(0)} order
+                      </span>
+                    )}
+                    {!conv.orderId && conv.cartId && conv.cartValue != null && (
+                      <span style={{ fontSize: "11px", color: "var(--color-primary)", fontWeight: 600 }}>
+                        ${conv.cartValue.toFixed(0)} in cart
+                      </span>
+                    )}
+                    {isEscalated && <s-badge tone="critical">Escalated</s-badge>}
+                    {conv.resolved && <s-badge tone="neutral">Resolved</s-badge>}
                   </div>
                 </div>
               );
             })}
+
+            {hasMore && (
+              <div style={{ padding: "12px", textAlign: "center" }}>
+                <s-button variant="tertiary" onClick={nextPage}>
+                  Load more conversations
+                </s-button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -335,12 +467,22 @@ export default function Inbox() {
             </div>
           ) : (
             <>
+              {/* Resolved banner */}
+              {selected.resolved && (
+                <div style={{ padding: "8px 12px", background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)", display: "flex", gap: "8px", alignItems: "center" }}>
+                  <s-badge tone="success">Resolved</s-badge>
+                  {selected.resolvedAt && (
+                    <s-text tone="neutral">{new Date(selected.resolvedAt as unknown as string).toLocaleDateString()}</s-text>
+                  )}
+                </div>
+              )}
+
               {/* Journey funnel */}
               <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
                 <JourneyFunnel
-                  browsed={browsed}
-                  inCart={inCart}
-                  purchased={purchased}
+                  browsed={agentTraceArr.includes("search_catalog")}
+                  inCart={!!selected.cartId}
+                  purchased={!!selected.orderId}
                   cartValue={selected.cartValue}
                   orderRevenue={selected.orderRevenueCents}
                   currency={currencyCode}
@@ -387,7 +529,7 @@ export default function Inbox() {
                 })}
               </div>
 
-              {/* Reply box — only on escalated, unresolved conversations */}
+              {/* Reply box (escalated only) or status hint */}
               {selected.escalated && !selected.resolved ? (
                 <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)", background: "#fff" }}>
                   <Form method="post">
@@ -417,13 +559,10 @@ export default function Inbox() {
                         style={{
                           padding: "8px 16px",
                           background: isSubmitting ? "var(--color-neutral)" : "var(--color-primary)",
-                          color: "#fff",
-                          border: "none",
+                          color: "#fff", border: "none",
                           borderRadius: "var(--radius-sm)",
                           cursor: isSubmitting ? "wait" : "pointer",
-                          fontSize: "13px",
-                          fontWeight: 600,
-                          flexShrink: 0,
+                          fontSize: "13px", fontWeight: 600, flexShrink: 0,
                           transition: "background 0.1s ease",
                         }}
                       >
@@ -473,7 +612,7 @@ export default function Inbox() {
                 )}
               </div>
 
-              {/* Contact (WhatsApp phone — masked) */}
+              {/* Phone (WhatsApp only) */}
               {selected.channel === "whatsapp" && (
                 <div>
                   <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Phone</div>
@@ -484,14 +623,14 @@ export default function Inbox() {
               )}
 
               {/* Cart value */}
-              {selected.cartValue ? (
+              {selected.cartValue != null && (
                 <div>
                   <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Cart Value</div>
                   <span style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-primary)" }}>
                     {fmtMoney(selected.cartValue)}
                   </span>
                 </div>
-              ) : null}
+              )}
 
               {/* Order */}
               {selected.orderId && (
@@ -503,7 +642,7 @@ export default function Inbox() {
                   >
                     {selected.orderId} →
                   </s-link>
-                  {selected.orderRevenueCents && (
+                  {selected.orderRevenueCents != null && (
                     <div style={{ fontSize: "12px", color: "var(--color-success)", marginTop: "2px" }}>
                       {fmtMoney(selected.orderRevenueCents / 100)}
                     </div>
@@ -511,12 +650,32 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Metadata */}
+              {/* Discount code */}
+              {selected.discountCode && (
+                <div>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Discount Used</div>
+                  <s-badge>{selected.discountCode}</s-badge>
+                </div>
+              )}
+
+              {/* AI Actions */}
+              {aiActions.length > 0 && (
+                <div>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>AI Actions</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                    {aiActions.map((a, i) => (
+                      <div key={i} style={{ fontSize: "12px", color: "var(--color-neutral)" }}>{a}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Details */}
               <div>
                 <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Details</div>
                 <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: "12px" }}>
                   <span style={{ color: "#6d7175" }}>Started</span>
-                  <span>{new Date(selected.startedAt).toLocaleDateString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                  <span>{new Date(selected.startedAt as unknown as string).toLocaleDateString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
                   <span style={{ color: "#6d7175" }}>Messages</span>
                   <span>{selected.messageCount}</span>
                   <span style={{ color: "#6d7175" }}>Status</span>
