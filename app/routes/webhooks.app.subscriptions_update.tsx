@@ -51,9 +51,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     let plan = "free";
 
     if (subscription.status === "ACTIVE") {
+      // ponytail: includes() handles both legacy "Spark" and current "NeonPing Spark" names
       const subName = subscription.name.toLowerCase();
-      if (subName === "spark" || subName === "pulse" || subName === "surge") {
-        plan = subName;
+      if (subName.includes("spark")) {
+        plan = "spark";
+      } else if (subName.includes("pulse")) {
+        plan = "pulse";
+      } else if (subName.includes("surge")) {
+        plan = "surge";
       } else {
         // Fallback: try to extract from price
         const price = subscription.lineItems?.[0]?.plan?.pricingDetails?.price?.amount;
@@ -71,8 +76,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     } else if (subscription.status === "PENDING") {
       // Trial period — treat as the plan they're trialing
       const subName = subscription.name.toLowerCase();
-      if (subName === "spark" || subName === "pulse" || subName === "surge") {
-        plan = subName;
+      if (subName.includes("spark")) {
+        plan = "spark";
+      } else if (subName.includes("pulse")) {
+        plan = "pulse";
+      } else if (subName.includes("surge")) {
+        plan = "surge";
       }
     } else if (subscription.status === "FROZEN") {
       // Frozen (e.g., due to payment failure) — downgrade to free

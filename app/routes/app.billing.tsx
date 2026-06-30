@@ -44,14 +44,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const activeSub = subs.find(s => s.status === "ACTIVE" || s.status === "PENDING");
     if (activeSub) {
       activeSubscription = { id: activeSub.id, name: activeSub.name };
-      const planName = activeSub.name.toLowerCase();
-      if (VALID_PLANS.includes(planName as PlanKey) && planName !== usage.plan) {
+      // ponytail: includes() handles both legacy "Spark" and current "NeonPing Spark" names
+      const subName = activeSub.name.toLowerCase();
+      const planName: PlanKey | null = subName.includes("spark") ? "spark"
+        : subName.includes("pulse") ? "pulse"
+        : subName.includes("surge") ? "surge"
+        : null;
+      if (planName && planName !== usage.plan) {
         await db.merchant.update({
           where: { shopDomain: session.shop },
           data: { plan: planName },
         });
         usage.plan = planName;
-        usage.limit = PLAN_LIMITS[planName as PlanKey] ?? 0;
+        usage.limit = PLAN_LIMITS[planName] ?? 0;
       }
     } else {
       // No active subscription — if DB shows a paid plan, downgrade to free
