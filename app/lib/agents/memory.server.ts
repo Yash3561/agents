@@ -17,6 +17,7 @@ export interface CustomerMemory {
   summary?: string;                        // 2-sentence compressed history
   abandoned_cart?: { items: unknown[]; total: number; timestamp: string };
   firstName?: string;           // customer's first name from Shopify profile
+  cart_id?: string;             // active Shopify cart GID for WhatsApp channel
 }
 
 // ---------------------------------------------------------------------------

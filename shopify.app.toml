@@ -47,6 +47,14 @@ api_version = "2026-04"
   uri = "/webhooks/checkouts/update"
   topics = [ "checkouts/update" ]
 
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/orders/fulfilled"
+  topics = [ "orders/fulfilled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/orders/create"
+  topics = [ "orders/create" ]
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_customers,read_discounts,read_orders,write_customers"

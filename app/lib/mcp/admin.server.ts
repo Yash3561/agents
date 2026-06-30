@@ -84,20 +84,100 @@ export async function lookupCustomerByPhone(
   shopDomain: string,
   accessToken: string,
   phone: string,
-): Promise<{ id: string; firstName?: string } | null> {
+): Promise<{ id: string; firstName?: string; displayName?: string; numberOfOrders?: number } | null> {
   try {
     const data = await adminGraphql<{
-      customers: { edges: Array<{ node: { id: string; firstName?: string } }> };
+      customers: { edges: Array<{ node: { id: string; firstName?: string; displayName?: string; numberOfOrders?: number } }> };
     }>(
       shopDomain,
       accessToken,
-      `query($q: String!) { customers(query: $q, first: 1) { edges { node { id firstName } } } }`,
+      `query($q: String!) { customers(query: $q, first: 1) { edges { node { id firstName displayName numberOfOrders } } } }`,
       { q: `phone:"${phone.replace(/"/g, "")}"` },
     );
     return data.customers?.edges?.[0]?.node ?? null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetch product star ratings from Shopify metafields.
+ * Tries the native "reviews" namespace (Shopify Product Reviews app + native ratings).
+ * Results cached in Redis 1h — ratings don't change per-minute.
+ * Best-effort: always returns a Map (empty on any error).
+ */
+export async function fetchProductRatings(
+  shopDomain: string,
+  accessToken: string,
+  productIds: string[],
+): Promise<Map<string, { rating: number; count: number }>> {
+  if (!productIds.length) return new Map();
+  const { redis } = await import("~/redis.server");
+
+  const result = new Map<string, { rating: number; count: number }>();
+  const misses: string[] = [];
+
+  await Promise.all(productIds.map(async (id) => {
+    const cached = await redis.get(`wa:rating:${id}`).catch(() => null);
+    if (cached === "none") return;
+    if (cached) {
+      try { result.set(id, JSON.parse(cached) as { rating: number; count: number }); } catch { misses.push(id); }
+    } else {
+      misses.push(id);
+    }
+  }));
+
+  if (!misses.length) return result;
+
+  try {
+    const data = await adminGraphql<{
+      nodes: Array<{
+        id: string;
+        rating?: { value: string };
+        ratingCount?: { value: string };
+      } | null>;
+    }>(
+      shopDomain,
+      accessToken,
+      `query GetRatings($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on Product {
+            id
+            rating: metafield(namespace: "reviews", key: "rating") { value }
+            ratingCount: metafield(namespace: "reviews", key: "rating_count") { value }
+          }
+        }
+      }`,
+      { ids: misses },
+    );
+
+    await Promise.all((data.nodes ?? []).map(async (node) => {
+      if (!node?.id) return;
+      let rating: number | undefined;
+      let count: number | undefined;
+      if (node.rating?.value) {
+        try {
+          const parsed = JSON.parse(node.rating.value) as { value?: string };
+          const r = parseFloat(parsed.value ?? "");
+          if (!isNaN(r)) rating = Math.round(r * 10) / 10;
+        } catch { /* skip */ }
+      }
+      if (node.ratingCount?.value) {
+        const c = parseInt(node.ratingCount.value, 10);
+        if (!isNaN(c)) count = c;
+      }
+      const cacheKey = `wa:rating:${node.id}`;
+      if (rating !== undefined && count !== undefined && count > 0) {
+        const val = { rating, count };
+        result.set(node.id, val);
+        await redis.set(cacheKey, JSON.stringify(val), "EX", 3600).catch(() => null);
+      } else {
+        await redis.set(cacheKey, "none", "EX", 3600).catch(() => null);
+      }
+    }));
+  } catch { /* best-effort */ }
+
+  return result;
 }
 
 export async function getCustomerOrdersAdmin(

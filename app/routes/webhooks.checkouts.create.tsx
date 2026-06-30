@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { writeAbandonedCart } from "~/lib/agents/memory.server";
+import { decryptToken, normalizePhone, sendTextMessage } from "~/lib/whatsapp.server";
 
 /**
  * POST /webhooks/checkouts/create
@@ -69,6 +70,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const customerGid = `gid://shopify/Customer/${customerId}`;
     await writeAbandonedCart(shop, session.accessToken, customerGid, items, totalCents);
+
+    // WhatsApp abandoned cart recovery — fire-and-forget
+    void (async () => {
+      try {
+        const merchant = await prisma.merchant.findFirst({ where: { shopDomain: shop } });
+        if (!merchant?.waPhoneNumberId || !merchant?.waAccessToken) return;
+
+        const rawPhone =
+          (payload.customer as Record<string, unknown>)?.phone as string | undefined ??
+          (payload.shipping_address as Record<string, unknown> | undefined)?.phone as string | undefined;
+        const phone = normalizePhone(rawPhone ?? "");
+        if (!phone) return;
+
+        const { redis } = await import("~/redis.server");
+        if (await redis.exists(`wa:optout:${phone}`)) return;
+
+        const checkoutId = String((payload as Record<string, unknown>).id ?? "");
+        const isNew = await redis.set(`wa:abcart:${checkoutId}`, 1, "EX", 86400, "NX");
+        if (isNew === null) return;
+
+        const waAccessToken = decryptToken(merchant.waAccessToken);
+        const storeName = shop.replace(".myshopify.com", "");
+        const checkoutUrl = (payload as Record<string, unknown>).abandoned_checkout_url as string | undefined
+          ?? (payload as Record<string, unknown>).checkout_url as string | undefined;
+
+        const itemLines = items.slice(0, 3).map((i) => `• ${i.title} ×${i.quantity}`).join("\n");
+        const message = `Hey! You left something in your cart at ${storeName}:\n\n${itemLines}\n\nYour cart is saved:\n${checkoutUrl ?? `https://${shop}`}\n\nReply STOP to unsubscribe.`;
+
+        await sendTextMessage(merchant.waPhoneNumberId, waAccessToken, phone, message);
+      } catch {
+        // best-effort — never throw
+      }
+    })();
   } catch (err) {
     console.error(`[checkouts/create] Error processing webhook for ${shop}:`, err);
     // Return 200 so Shopify doesn't retry — the signal is best-effort

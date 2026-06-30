@@ -36,6 +36,8 @@ export interface CatalogProduct {
   price_min?: string;   // lowest variant price, formatted
   currency?: string;
   url?: string;         // relative URL e.g. "/products/handle"
+  rating?: number;      // star rating from metafields (0-5)
+  rating_count?: number; // review count
 }
 
 export interface CatalogSearchResult {

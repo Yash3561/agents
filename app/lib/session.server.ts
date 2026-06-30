@@ -71,6 +71,10 @@ export async function setSession(
     .catch(() => null);
 }
 
+export async function deleteSession(shopDomain: string, sessionId: string): Promise<void> {
+  await redis.del(KEY(shopDomain, sessionId)).catch(() => null);
+}
+
 /** Append a message to conversation history and persist. */
 export async function appendMessage(
   shopDomain: string,

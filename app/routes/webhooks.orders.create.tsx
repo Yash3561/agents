@@ -44,7 +44,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const waPhoneNumberId = merchant.waPhoneNumberId;
       const capturedUrl = orderStatusUrl;
       void (async () => {
-        await new Promise((r) => setTimeout(r, 90_000));
+        await new Promise((r) => setTimeout(r, 30_000));
         try {
           const session = await prisma.session.findFirst({
             where: { shop, isOnline: false },
