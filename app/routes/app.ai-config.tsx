@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData, useRouteError } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -15,6 +15,11 @@ import { sendTestMessage } from "../lib/test-chat";
 interface Faq {
   question: string;
   answer: string;
+}
+
+interface ChatMessage {
+  role: "user" | "ai";
+  text: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,11 +106,11 @@ export default function AiConfig() {
   const testFetcher = useFetcher<typeof action>();
   const quickFetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
+  const playgroundRef = useRef<HTMLDivElement>(null);
 
   // --- FAQ state ---
   const [faqs, setFaqs] = useState<Faq[]>(merchant.customFaqs);
 
-  // Fix A — toast fires only after server responds
   useEffect(() => {
     if (faqFetcher.state === "idle" && (faqFetcher.data as { saved?: string } | undefined)?.saved === "faqs") {
       shopify.toast.show("FAQ knowledge base saved");
@@ -114,7 +119,7 @@ export default function AiConfig() {
 
   useEffect(() => {
     if (quickFetcher.state === "idle" && (quickFetcher.data as { saved?: string } | undefined)?.saved === "quick_replies") {
-      shopify.toast.show("Quick replies saved");
+      shopify.toast.show("Conversation starters saved");
     }
   }, [quickFetcher.state, quickFetcher.data, shopify]);
 
@@ -145,22 +150,36 @@ export default function AiConfig() {
   };
 
   // --- Test chat state ---
-  const [testMessage, setTestMessage] = useState("Hello");
+  const [testMessage, setTestMessage] = useState("");
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const prevTestStateRef = useRef(testFetcher.state);
+
+  // Append AI response when fetcher transitions from loading → idle
+  useEffect(() => {
+    if (prevTestStateRef.current !== "idle" && testFetcher.state === "idle") {
+      const data = testFetcher.data as { testResponse?: string; error?: string } | undefined;
+      if (data?.testResponse) {
+        setChatHistory((prev) => [...prev, { role: "ai", text: data.testResponse! }]);
+      } else if (data?.error) {
+        setChatHistory((prev) => [...prev, { role: "ai", text: `Error: ${data.error}` }]);
+      }
+    }
+    prevTestStateRef.current = testFetcher.state;
+  }, [testFetcher.state, testFetcher.data]);
+
+  const isTestLoading = testFetcher.state !== "idle";
 
   const runTest = () => {
+    if (!testMessage.trim()) return;
     const fd = new FormData();
     fd.set("intent", "test-chat");
     fd.set("testMessage", testMessage);
+    setChatHistory((prev) => [...prev, { role: "user", text: testMessage }]);
+    setTestMessage("");
     testFetcher.submit(fd, { method: "POST" });
   };
 
-  const testResponse =
-    (testFetcher.data as { testResponse?: string } | undefined)?.testResponse;
-  const testError =
-    (testFetcher.data as { error?: string } | undefined)?.error;
-  const testLoading = testFetcher.state !== "idle";
-
-  // --- Quick replies state ---
+  // --- Conversation starters state ---
   const [quickReplies, setQuickReplies] = useState<string[]>(
     Array.from({ length: 5 }, (_, i) => merchant.quickReplies[i] ?? ""),
   );
@@ -175,7 +194,43 @@ export default function AiConfig() {
   return (
     <s-page heading="Knowledge Base">
       {/* ------------------------------------------------------------------ */}
-      {/* Section 1 — Custom Knowledge Base (FAQs)                            */}
+      {/* Section 1 — Conversation starters (customers see these first)       */}
+      {/* ------------------------------------------------------------------ */}
+      <s-section heading="Conversation starters">
+        <s-banner tone="info">Up to 5 conversation starter buttons shown to customers at the start of a conversation. Leave blank to skip a slot.</s-banner>
+        {quickReplies.map((reply, i) => (
+          <s-text-field
+            key={i}
+            label={`Starter ${i + 1}`}
+            name={`quickReply${i}`}
+            value={reply}
+            placeholder={QUICK_REPLY_PLACEHOLDERS[i]}
+            onInput={(e: Event) => {
+              const next = [...quickReplies];
+              next[i] = (e.target as HTMLInputElement).value;
+              setQuickReplies(next);
+            }}
+          ></s-text-field>
+        ))}
+        {quickReplies.some((r) => r.trim()) && (
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-stack direction="block" gap="base">
+              <s-text tone="neutral">Preview — how customers will see these:</s-text>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {quickReplies.filter((r) => r.trim()).map((r, i) => (
+                  <s-badge key={i} tone="success">{r}</s-badge>
+                ))}
+              </div>
+            </s-stack>
+          </s-box>
+        )}
+        <s-button variant="primary" onClick={submitQuickReplies}>
+          Save conversation starters
+        </s-button>
+      </s-section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Section 2 — Custom Knowledge Base (FAQs)                            */}
       {/* ------------------------------------------------------------------ */}
       <s-section heading="Custom knowledge base">
         <s-banner tone="info">Add up to 20 Q&amp;A pairs. The support agent will answer these questions exactly as written.</s-banner>
@@ -203,13 +258,29 @@ export default function AiConfig() {
                       updateFaq(idx, "question", (e.target as HTMLInputElement).value)
                     }
                   ></s-text-field>
+                  {/* ponytail: cast through unknown — multiline is a valid web-component attr but not in generated TS types */}
                   <s-text-field
+                    {...({ multiline: "" } as Record<string, unknown>)}
                     label="Answer"
                     value={faq.answer}
                     onInput={(e: Event) =>
                       updateFaq(idx, "answer", (e.target as HTMLInputElement).value)
                     }
                   ></s-text-field>
+                  <div style={{ textAlign: "right", marginTop: "2px" }}>
+                    <s-text tone="neutral">{faq.answer.length} characters</s-text>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                    <s-button
+                      variant="tertiary"
+                      onClick={() => {
+                        setTestMessage(faq.question);
+                        playgroundRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                    >
+                      → Test this FAQ
+                    </s-button>
+                  </div>
                   <s-button
                     variant="tertiary"
                     tone="critical"
@@ -239,78 +310,68 @@ export default function AiConfig() {
       </s-section>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Section 2 — Chat Playground                                          */}
+      {/* Section 3 — Chat Playground                                          */}
       {/* ------------------------------------------------------------------ */}
-      <s-section heading="Chat playground">
-        <s-text tone="neutral">
-          Send a test message to the AI assistant and see the live response. Useful for verifying
-          FAQ answers and tone before going live.
-        </s-text>
-        <s-text-field
-          label="Test message"
-          value={testMessage}
-          onInput={(e: Event) => setTestMessage((e.target as HTMLInputElement).value)}
-        ></s-text-field>
-        <s-button
-          variant="primary"
-          onClick={runTest}
-          {...(testLoading ? { loading: true } : {})}
-        >
-          Send test message
-        </s-button>
-        {testLoading ? (
-          <s-text tone="neutral">Waiting for response...</s-text>
-        ) : null}
-        {testResponse && !testLoading ? (
-          <s-box padding="base" background="subdued" borderRadius="base">
-            <s-stack direction="block" gap="base">
-              <s-text tone="neutral">AI response:</s-text>
-              <s-text>{testResponse}</s-text>
-            </s-stack>
-          </s-box>
-        ) : null}
-        {testError && !testLoading ? (
-          <s-box padding="base" background="subdued" borderRadius="base">
-            <s-text tone="critical">{testError}</s-text>
-          </s-box>
-        ) : null}
-      </s-section>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Section 3 — Quick Replies                                            */}
-      {/* ------------------------------------------------------------------ */}
-      <s-section heading="Quick replies">
-        <s-banner tone="info">Up to 5 quick-reply buttons shown to customers at the start of a conversation. Leave blank to skip a slot.</s-banner>
-        {quickReplies.map((reply, i) => (
+      <div ref={playgroundRef}>
+        <s-section heading="Chat playground">
+          <s-text tone="neutral">
+            Send a test message to the AI assistant and see the live response. Useful for verifying
+            FAQ answers and tone before going live.
+          </s-text>
+          {chatHistory.length > 0 && (
+            <div
+              style={{
+                maxHeight: "320px",
+                overflowY: "auto",
+                border: "1px solid var(--color-border)",
+                borderRadius: "8px",
+                padding: "12px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
+              {chatHistory.map((msg, i) => (
+                <div
+                  key={i}
+                  style={{
+                    alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
+                    maxWidth: "80%",
+                    padding: "8px 12px",
+                    borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
+                    background: msg.role === "user" ? "var(--color-primary)" : "var(--color-surface)",
+                    color: msg.role === "user" ? "#fff" : "var(--color-text)",
+                    fontSize: "13px",
+                    border: msg.role === "ai" ? "1px solid var(--color-border)" : "none",
+                  }}
+                >
+                  {msg.text}
+                </div>
+              ))}
+              {isTestLoading && (
+                <div style={{ alignSelf: "flex-start", color: "var(--color-neutral)", fontSize: "13px", padding: "8px 12px" }}>
+                  AI is thinking...
+                </div>
+              )}
+            </div>
+          )}
+          {chatHistory.length > 0 && (
+            <s-button variant="tertiary" onClick={() => setChatHistory([])}>Clear conversation</s-button>
+          )}
           <s-text-field
-            key={i}
-            label={`Button ${i + 1}`}
-            name={`quickReply${i}`}
-            value={reply}
-            placeholder={QUICK_REPLY_PLACEHOLDERS[i]}
-            onInput={(e: Event) => {
-              const next = [...quickReplies];
-              next[i] = (e.target as HTMLInputElement).value;
-              setQuickReplies(next);
-            }}
+            label="Test message"
+            value={testMessage}
+            onInput={(e: Event) => setTestMessage((e.target as HTMLInputElement).value)}
           ></s-text-field>
-        ))}
-        {quickReplies.some(r => r.trim()) && (
-          <s-box padding="base" background="subdued" borderRadius="base">
-            <s-stack direction="block" gap="base">
-              <s-text tone="neutral">Preview — how customers will see these:</s-text>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {quickReplies.filter(r => r.trim()).map((r, i) => (
-                  <s-badge key={i} tone="success">{r}</s-badge>
-                ))}
-              </div>
-            </s-stack>
-          </s-box>
-        )}
-        <s-button variant="primary" onClick={submitQuickReplies}>
-          Save quick replies
-        </s-button>
-      </s-section>
+          <s-button
+            variant="primary"
+            onClick={runTest}
+            {...(isTestLoading ? { loading: true } : {})}
+          >
+            Ask the AI
+          </s-button>
+        </s-section>
+      </div>
     </s-page>
   );
 }

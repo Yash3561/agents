@@ -34,7 +34,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     update: {},
     create: { shopDomain: session.shop },
   });
-  return { merchant, waAppId: process.env.WHATSAPP_APP_ID ?? "" };
+  // Default checkout to excluded for new merchants (showing widget during checkout hurts conversion)
+  const excludedPages: string[] = merchant.excludedPages?.length
+    ? (merchant.excludedPages as string[])
+    : ["checkout"];
+  return { merchant: { ...merchant, excludedPages }, waAppId: process.env.WHATSAPP_APP_ID ?? "" };
 };
 
 const VALID_POSITIONS = new Set(["bottom-right", "bottom-left"]);
@@ -109,7 +113,7 @@ export default function Settings() {
   const [personalizationEnabled, setPersonalizationEnabled] = useState(merchant.personalizationEnabled);
   const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
   const [proactiveEngagementEnabled, setProactiveEngagementEnabled] = useState(merchant.proactiveEngagementEnabled);
-  const [excludedPages, setExcludedPages] = useState(merchant.excludedPages ?? []);
+  const [excludedPages, setExcludedPages] = useState(merchant.excludedPages);
   const [customPathInput, setCustomPathInput] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const customPathFieldRef = useRef<any>(null);
@@ -179,8 +183,9 @@ export default function Settings() {
   };
 
   return (
-    <s-page heading="Widget Settings">
+    <s-page heading="Settings">
       <form ref={formRef} data-save-bar onSubmit={handleSubmit}>
+        {/* ---- Appearance ---- */}
         <s-section heading="Appearance">
           <s-stack direction="block" gap="base">
             <s-text-field
@@ -241,128 +246,15 @@ export default function Settings() {
             <WidgetPreview color={widgetColor} position={widgetPosition} greeting={widgetGreeting} botName={botName} />
           </div>
         </s-section>
-        <s-section heading="AI Behavior">
-          <s-stack direction="block" gap="base">
-            <s-select
-              label="Brand voice"
-              name="brandVoice"
-              value={brandVoice}
-              onChange={(e: Event) => setBrandVoice((e.target as HTMLSelectElement).value)}
-              help-text="Choose the tone and personality your AI assistant should use when talking to customers."
-            >
-              {VOICE_PRESETS.map((p) => (
-                <s-option key={p.value} value={p.value}>{p.label}</s-option>
-              ))}
-            </s-select>
-            <s-switch
-              label="Enable personalized discounts"
-              name="personalizationEnabled"
-              help-text="When enabled, the AI can share discount codes from your Shopify Discounts tab when customers ask, or to recover abandoned carts."
-              checked={personalizationEnabled}
-              onChange={(e: Event) => setPersonalizationEnabled((e.target as HTMLInputElement).checked)}
-            ></s-switch>
-            <div>
-              <s-switch
-                label="Email me when AI escalates to human support"
-                name="escalationEmailEnabled"
-                help-text="Sends an email to your support address when the bot can't resolve a customer issue."
-                checked={escalationEmailEnabled}
-                onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
-              ></s-switch>
-              <s-banner tone="warning">Email notifications are coming soon — no emails are currently sent. We&apos;ll notify you when this is live.</s-banner>
-            </div>
-            <s-checkbox
-              name="proactiveEngagementEnabled"
-              label="Proactive engagement"
-              help-text="When enabled, the widget automatically opens after 30 seconds or when the customer moves to leave the page. Disable for a more passive experience."
-              checked={proactiveEngagementEnabled}
-              onChange={(e: Event) => setProactiveEngagementEnabled((e.target as HTMLInputElement).checked)}
-            ></s-checkbox>
-          </s-stack>
-        </s-section>
-        <s-section heading="Support">
-          <s-stack direction="block" gap="base">
-            <s-email-field
-              label="Support email"
-              name="supportEmail"
-              value={supportEmail}
-              onInput={(e: Event) => setSupportEmail((e.target as HTMLInputElement).value)}
-              help-text="Where escalated conversations and support alerts are sent."
-            ></s-email-field>
-            <s-text-field
-              label="WhatsApp number"
-              name="whatsappNumber"
-              value={whatsappNumber}
-              onInput={(e: Event) => setWhatsappNumber((e.target as HTMLInputElement).value)}
-              help-text="Customers can tap to reach you on WhatsApp when they need human help. Include country code, e.g. +1234567890"
-            ></s-text-field>
-          </s-stack>
-        </s-section>
-        <s-section heading="WhatsApp Business">
-          {searchParams.get("whatsapp") === "connected" && (
-            <div style={{ marginBottom: "16px" }}>
-              <s-banner tone="success">WhatsApp Business connected successfully!</s-banner>
-            </div>
-          )}
-          {searchParams.get("whatsapp") === "error" && (
-            <div style={{ marginBottom: "16px" }}>
-              <s-banner tone="critical">WhatsApp connection failed. Please try again.</s-banner>
-            </div>
-          )}
-          {merchant.waConnectedAt ? (
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-              <s-badge tone="success">Connected</s-badge>
-              <s-text>{merchant.waPhone ?? merchant.waPhoneNumberId}</s-text>
-              <s-button
-                variant="tertiary"
-                tone="critical"
-                onClick={async () => {
-                  await fetch("/api/whatsapp/disconnect", { method: "POST" });
-                  window.location.reload();
-                }}
-              >
-                Disconnect
-              </s-button>
-            </div>
-          ) : (
-            <div>
-              <p style={{ fontSize: "13px", color: "#666", marginBottom: "16px", marginTop: 0 }}>
-                Connect your WhatsApp Business number so customers can chat with your AI assistant on WhatsApp.
-              </p>
-              <s-button
-                type="button"
-                variant="primary"
-                onClick={() => {
-                  type WinWithFBLogin = { FB?: { login: (cb: (r: { authResponse?: { code?: string } }) => void, opts: object) => void } };
-                  const fb = (window as unknown as WinWithFBLogin).FB;
-                  if (!fb || !waAppId) return;
-                  fb.login(
-                    (response) => {
-                      if (response.authResponse?.code) {
-                        window.location.href = `/api/whatsapp/connect?code=${response.authResponse.code}`;
-                      }
-                    },
-                    {
-                      config_id: waAppId,
-                      response_type: "code",
-                      override_default_response_type: true,
-                      extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
-                    },
-                  );
-                }}
-              >
-                Connect WhatsApp Business
-              </s-button>
-            </div>
-          )}
-        </s-section>
+
+        {/* ---- Widget Visibility (moved up; proactive engagement at bottom) ---- */}
         <s-section heading="Widget Visibility">
           <div style={{ marginBottom: "16px" }}>
             <s-box padding="base" background="subdued" borderRadius="base">
               <s-text tone="neutral">Hide the chat widget on these pages to avoid distracting customers during critical flows:</s-text>
             </s-box>
           </div>
-          {['checkout', 'cart', 'account', 'blog'].map((page) => (
+          {["checkout", "cart", "account", "blog"].map((page) => (
             <div key={page} style={{ marginBottom: "12px" }}>
               <s-checkbox
                 name="excludedPages"
@@ -447,13 +339,137 @@ export default function Settings() {
               </div>
             )}
           </div>
+          <div style={{ marginTop: "20px", borderTop: "1px solid #e1e1e1", paddingTop: "16px" }}>
+            <s-checkbox
+              name="proactiveEngagementEnabled"
+              label="Proactive engagement"
+              help-text="When enabled, the widget automatically opens after 30 seconds or when the customer moves to leave the page. Disable for a more passive experience."
+              checked={proactiveEngagementEnabled}
+              onChange={(e: Event) => setProactiveEngagementEnabled((e.target as HTMLInputElement).checked)}
+            ></s-checkbox>
+          </div>
         </s-section>
+
+        {/* ---- AI Behavior (brand voice + personalization only) ---- */}
+        <s-section heading="AI Behavior">
+          <s-stack direction="block" gap="base">
+            <s-select
+              label="Brand voice"
+              name="brandVoice"
+              value={brandVoice}
+              onChange={(e: Event) => setBrandVoice((e.target as HTMLSelectElement).value)}
+              help-text="Choose the tone and personality your AI assistant should use when talking to customers."
+            >
+              {VOICE_PRESETS.map((p) => (
+                <s-option key={p.value} value={p.value}>{p.label}</s-option>
+              ))}
+            </s-select>
+            <s-switch
+              label="Enable personalized discounts"
+              name="personalizationEnabled"
+              help-text="When enabled, the AI can share discount codes from your Shopify Discounts tab when customers ask, or to recover abandoned carts."
+              checked={personalizationEnabled}
+              onChange={(e: Event) => setPersonalizationEnabled((e.target as HTMLInputElement).checked)}
+            ></s-switch>
+          </s-stack>
+        </s-section>
+
+        {/* ---- Support & Escalation ---- */}
+        <s-section heading="Support & Escalation">
+          <s-stack direction="block" gap="base">
+            <div>
+              <s-switch
+                label="Email me when AI escalates to human support"
+                name="escalationEmailEnabled"
+                help-text="Sends an email to your support address when the bot can't resolve a customer issue."
+                checked={escalationEmailEnabled}
+                onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
+              ></s-switch>
+              <s-banner tone="warning">Email notifications are coming soon — no emails are currently sent. We&apos;ll notify you when this is live.</s-banner>
+            </div>
+            <s-email-field
+              label="Support email"
+              name="supportEmail"
+              value={supportEmail}
+              onInput={(e: Event) => setSupportEmail((e.target as HTMLInputElement).value)}
+              help-text="Where escalated conversations and support alerts are sent."
+            ></s-email-field>
+            <s-text-field
+              label="WhatsApp number"
+              name="whatsappNumber"
+              value={whatsappNumber}
+              onInput={(e: Event) => setWhatsappNumber((e.target as HTMLInputElement).value)}
+              help-text="Customers can tap to reach you on WhatsApp when they need human help. Include country code, e.g. +1234567890"
+            ></s-text-field>
+          </s-stack>
+        </s-section>
+
         <div style={{ padding: "16px 0" }}>
           <s-button type="submit" variant="primary" disabled={fetcher.state === "submitting"}>
             {fetcher.state === "submitting" ? "Saving..." : "Save settings"}
           </s-button>
         </div>
       </form>
+
+      {/* ---- Integrations — outside form; connect/disconnect calls fetch() directly ---- */}
+      <s-section heading="Integrations">
+        {searchParams.get("whatsapp") === "connected" && (
+          <div style={{ marginBottom: "16px" }}>
+            <s-banner tone="success">WhatsApp Business connected successfully!</s-banner>
+          </div>
+        )}
+        {searchParams.get("whatsapp") === "error" && (
+          <div style={{ marginBottom: "16px" }}>
+            <s-banner tone="critical">WhatsApp connection failed. Please try again.</s-banner>
+          </div>
+        )}
+        {merchant.waConnectedAt ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            <s-badge tone="success">Connected</s-badge>
+            <s-text>{merchant.waPhone ?? merchant.waPhoneNumberId}</s-text>
+            <s-button
+              variant="tertiary"
+              tone="critical"
+              onClick={async () => {
+                await fetch("/api/whatsapp/disconnect", { method: "POST" });
+                window.location.reload();
+              }}
+            >
+              Disconnect
+            </s-button>
+          </div>
+        ) : (
+          <div>
+            <p style={{ fontSize: "13px", color: "#666", marginBottom: "16px", marginTop: 0 }}>
+              Connect your WhatsApp Business number so customers can chat with your AI assistant on WhatsApp.
+            </p>
+            <s-button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                type WinWithFBLogin = { FB?: { login: (cb: (r: { authResponse?: { code?: string } }) => void, opts: object) => void } };
+                const fb = (window as unknown as WinWithFBLogin).FB;
+                if (!fb || !waAppId) return;
+                fb.login(
+                  (response) => {
+                    if (response.authResponse?.code) {
+                      window.location.href = `/api/whatsapp/connect?code=${response.authResponse.code}`;
+                    }
+                  },
+                  {
+                    config_id: waAppId,
+                    response_type: "code",
+                    override_default_response_type: true,
+                    extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
+                  },
+                );
+              }}
+            >
+              Connect WhatsApp Business
+            </s-button>
+          </div>
+        )}
+      </s-section>
     </s-page>
   );
 }
