@@ -27,6 +27,7 @@ export async function adminGraphql<T = unknown>(
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<T> {
+  if (!shopDomain.endsWith(".myshopify.com")) throw new Error(`Invalid shop domain: ${shopDomain}`);
   const url = `https://${shopDomain}/admin/api/${API_VERSION}/graphql.json`;
 
   let response: Response;

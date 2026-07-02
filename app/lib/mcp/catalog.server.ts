@@ -3,7 +3,10 @@ import { redis } from "~/redis.server";
 
 // Shopify Storefront MCP — public, no auth required for catalog operations.
 // Discovery (/.well-known/ucp) is not implemented on most stores; use /api/mcp directly.
-const endpoint = (shop: string) => ({ endpoint: `https://${shop}/api/mcp` });
+const endpoint = (shop: string) => {
+  if (!shop.endsWith(".myshopify.com")) throw new Error(`Invalid shop domain: ${shop}`);
+  return { endpoint: `https://${shop}/api/mcp` };
+};
 
 const SEARCH_CACHE_TTL = 60; // seconds — balance freshness vs latency
 

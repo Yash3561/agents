@@ -52,6 +52,7 @@ export function runAgentStream(opts: {
     tools: opts.tools,
     maxOutputTokens: opts.maxOutputTokens ?? 600,
     stopWhen: stepCountIs(opts.maxSteps ?? 5),
+    abortSignal: AbortSignal.timeout(25_000),
   });
 }
 
@@ -65,6 +66,7 @@ export async function generateSummary(system: string, prompt: string): Promise<s
     system,
     prompt,
     maxOutputTokens: 200,
+    abortSignal: AbortSignal.timeout(25_000),
   });
   return result.text.trim();
 }

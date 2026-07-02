@@ -412,6 +412,7 @@ export async function runWhatsAppAgent(opts: {
     tools: baseTools,
     maxOutputTokens: 300, // WhatsApp messages are short
     stopWhen: stepCountIs(3),
+    abortSignal: AbortSignal.timeout(25_000),
   }).catch((err) => {
     const is429 =
       String(err).includes("429") ||

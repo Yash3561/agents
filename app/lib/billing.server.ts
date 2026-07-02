@@ -58,8 +58,7 @@ export async function checkAndIncrementUsage(shopDomain: string, sessionId?: str
       const alreadyBilled = await redis.exists(billedKey);
       if (alreadyBilled) {
         // Session already counted — just return current usage without incrementing.
-        const exists = await redis.exists(key);
-        if (!exists) await redis.set(key, String(durableCount));
+        await redis.set(key, String(durableCount), "NX"); // atomic: only sets if not exists
         const liveCount = parseInt((await redis.get(key)) ?? String(durableCount), 10);
         if (liveCount >= limit) {
           return { allowed: false, used: liveCount, limit };
@@ -69,8 +68,7 @@ export async function checkAndIncrementUsage(shopDomain: string, sessionId?: str
     }
 
     // New session (or no sessionId) — check limit and increment.
-    const exists = await redis.exists(key);
-    if (!exists) await redis.set(key, String(durableCount));
+    await redis.set(key, String(durableCount), "NX"); // atomic: only sets if not exists
     const liveCount = parseInt((await redis.get(key)) ?? String(durableCount), 10);
 
     if (liveCount >= limit) {

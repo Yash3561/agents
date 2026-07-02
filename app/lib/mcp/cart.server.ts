@@ -1,7 +1,10 @@
 import { callMcpTool } from "~/lib/mcp/client.server";
 
 // Shopify Cart MCP — anonymous, no auth required.
-const endpoint = (shop: string) => ({ endpoint: `https://${shop}/api/mcp` });
+const endpoint = (shop: string) => {
+  if (!shop.endsWith(".myshopify.com")) throw new Error(`Invalid shop domain: ${shop}`);
+  return { endpoint: `https://${shop}/api/mcp` };
+};
 
 // ---------------------------------------------------------------------------
 // Types
