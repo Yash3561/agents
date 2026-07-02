@@ -351,7 +351,8 @@ export default function InboxFull() {
     };
 
     return () => es.close();
-  }, [lastSeen, selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // lastSeen intentionally excluded: including it causes a reconnect loop (setLastSeen → dep change → reconnect → event → setLastSeen…)
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const allConversations = useMemo<ConvItem[]>(() => {
     if (realtimeConvs.length === 0) return conversations;
@@ -513,7 +514,7 @@ export default function InboxFull() {
           </div>
 
           {/* Conversation rows */}
-          <div ref={listRef} style={{ flex: 1, overflowY: "auto", position: "relative" }}>
+          <div ref={listRef} style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
             {allConversations.length === 0 ? (
               <div style={{ padding: "24px 16px", textAlign: "center" }}>
                 <s-text tone="neutral">No conversations match these filters.</s-text>
