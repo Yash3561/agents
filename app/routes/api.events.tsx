@@ -21,13 +21,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
 
       // Register presence for this tab
-      if (viewerKey) {
+      if (viewerKey && convId) {
         await redis.set(viewerKey, "1", "EX", 35).catch(() => {});
+        await redis.sadd(`presence-set:${shop}:${convId}`, viewerKey).catch(() => {});
+        await redis.expire(`presence-set:${shop}:${convId}`, 3600).catch(() => {});
       }
 
       // Clean up presence key when the client disconnects
       request.signal.addEventListener("abort", () => {
-        if (viewerKey) redis.del(viewerKey).catch(() => {});
+        if (viewerKey && convId) {
+          redis.del(viewerKey).catch(() => {});
+          redis.srem(`presence-set:${shop}:${convId}`, viewerKey).catch(() => {});
+        }
         controller.close();
       });
 
@@ -42,45 +47,50 @@ export async function loader({ request }: LoaderFunctionArgs) {
         if (request.signal.aborted) break;
 
         try {
-          const updated = await prisma.conversation.findMany({
-            where: { shopDomain: shop, lastMessageAt: { gt: lastCheck } },
-            select: {
-              id: true,
-              lastMessageAt: true,
-              resolved: true,
-              escalated: true,
-              firstUserMessage: true,
-              channel: true,
-              customerId: true,
-              cartValue: true,
-              cartId: true,
-              orderId: true,
-              orderRevenueCents: true,
-            },
-            orderBy: { lastMessageAt: "desc" },
-            take: 20,
-          });
+          // Dirty-flag check: skip DB query when no new messages have arrived
+          const dirty = await redis.get(`inbox:dirty:${shop}`).catch(() => "1");
+          if (dirty) {
+            await redis.del(`inbox:dirty:${shop}`).catch(() => {});
+            const updated = await prisma.conversation.findMany({
+              where: { shopDomain: shop, lastMessageAt: { gt: lastCheck } },
+              select: {
+                id: true,
+                lastMessageAt: true,
+                resolved: true,
+                escalated: true,
+                firstUserMessage: true,
+                channel: true,
+                customerId: true,
+                cartValue: true,
+                cartId: true,
+                orderId: true,
+                orderRevenueCents: true,
+              },
+              orderBy: { lastMessageAt: "desc" },
+              take: 20,
+            });
 
-          if (updated.length > 0) {
-            lastCheck = new Date();
-            controller.enqueue(
-              encoder.encode(
-                `event: update\ndata: ${JSON.stringify({ conversations: updated, ts: lastCheck.toISOString() })}\n\n`,
-              ),
-            );
+            if (updated.length > 0) {
+              lastCheck = new Date();
+              controller.enqueue(
+                encoder.encode(
+                  `event: update\ndata: ${JSON.stringify({ conversations: updated, ts: lastCheck.toISOString() })}\n\n`,
+                ),
+              );
+            }
           } else if (iterations % 10 === 0) {
             controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
           }
 
-          // Presence: refresh TTL every poll, but only broadcast when count changes
+          // Presence: refresh TTL every poll, but only broadcast when count changes (cheap Redis ops)
           if (viewerKey && convId) {
             await redis.set(viewerKey, "1", "EX", 35).catch(() => {});
-            const keys = await redis.keys(`presence:${shop}:${convId}:*`).catch(() => [] as string[]);
-            if (keys.length !== lastViewerCount) {
-              lastViewerCount = keys.length;
+            const viewerCount = await redis.scard(`presence-set:${shop}:${convId}`).catch(() => 0);
+            if (viewerCount !== lastViewerCount) {
+              lastViewerCount = viewerCount;
               controller.enqueue(
                 encoder.encode(
-                  `event: presence\ndata: ${JSON.stringify({ conv_id: convId, viewer_count: keys.length })}\n\n`,
+                  `event: presence\ndata: ${JSON.stringify({ conv_id: convId, viewer_count: viewerCount })}\n\n`,
                 ),
               );
             }
@@ -93,7 +103,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       if (!request.signal.aborted) {
         controller.enqueue(encoder.encode("event: reconnect\ndata: {}\n\n"));
       }
-      if (viewerKey) redis.del(viewerKey).catch(() => {});
+      if (viewerKey && convId) {
+        redis.del(viewerKey).catch(() => {});
+        redis.srem(`presence-set:${shop}:${convId}`, viewerKey).catch(() => {});
+      }
       controller.close();
     },
   });

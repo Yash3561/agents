@@ -32,3 +32,6 @@ RUN npm prune --omit=dev && npm cache clean --force
 RUN find ./build -name "*.map" -delete
 
 CMD ["npm", "run", "docker-start"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -qO- http://localhost:3000/api/health || exit 1

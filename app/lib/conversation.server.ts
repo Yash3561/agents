@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import prisma from "~/db.server";
+import { redis } from "~/redis.server";
 import type { ConversationSession } from "~/lib/session.server";
 
 /**
@@ -102,6 +103,9 @@ export async function persistConversationTurn(opts: {
       routeReason: routeReason ?? undefined,
     },
   });
+
+  // Signal SSE pollers that this shop has new data
+  await redis.set(`inbox:dirty:${shopDomain}`, "1", "EX", 30).catch(() => {});
 
   // Fire escalation email if needed — fetch merchant settings to check toggles
   if (escalateToHuman) {
