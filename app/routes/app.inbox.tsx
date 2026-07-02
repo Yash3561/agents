@@ -145,6 +145,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           qaMeta: true,
           aiPaused: true,
           messages: true,
+          agentTrace: true,
+          resolvedAt: true,
+          discountCode: true,
+          startedAt: true,
+          messageCount: true,
         },
       }),
       prisma.conversation.count({ where: countBase }),
@@ -277,14 +282,15 @@ export async function action({ request }: ActionFunctionArgs) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Inbox() {
+  const loaderData = useLoaderData<typeof loader>();
   const {
-    conversations, selected,
+    conversations,
     totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount,
     page, hasMore,
     search, dateRange, statusTab, channel,
     currencyCode, storeHandle,
     quickReplies,
-  } = useLoaderData<typeof loader>();
+  } = loaderData;
 
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -311,9 +317,6 @@ export default function Inbox() {
 
   // Pause/resume AI fetcher
   const pauseFetcher = useFetcher<typeof action>();
-  const isAiPaused = pauseFetcher.formData
-    ? pauseFetcher.formData.get("pause") === "true"
-    : selected?.aiPaused ?? false;
 
   // SSE real-time: track last update time and hold merged updates
   type ConvItem = typeof conversations[number];
@@ -322,8 +325,34 @@ export default function Inbox() {
   const [otherViewers, setOtherViewers] = useState(0);
   // ponytail: sseKey increments to restart the SSE effect on error/reconnect (lastSeen alone can't do this — it's excluded from deps)
   const [sseKey, setSseKey] = useState(0);
+  // ponytail: local state drives instant selection — no loader round-trip on click
+  const [localSelectedId, setLocalSelectedId] = useState<string | null>(loaderData.selected?.id ?? null);
+
+  // Merge SSE updates into loader conversations — must come before selected/selectedId
+  const allConversations = useMemo<ConvItem[]>(() => {
+    if (realtimeConvs.length === 0) return conversations;
+    const map = new Map(conversations.map((c) => [c.id, c]));
+    for (const c of realtimeConvs) {
+      map.set(c.id, { ...map.get(c.id), ...c } as ConvItem);
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.escalated !== b.escalated) return a.escalated ? -1 : 1;
+      return new Date(b.lastMessageAt as unknown as string).getTime() -
+             new Date(a.lastMessageAt as unknown as string).getTime();
+    });
+  }, [conversations, realtimeConvs]);
+
+  // Find selected from already-loaded list — instant, no loader round-trip
+  const selected = useMemo(
+    () => allConversations.find((c) => c.id === localSelectedId) ?? loaderData.selected ?? null,
+    [allConversations, localSelectedId, loaderData.selected],
+  );
 
   const selectedId = selected?.id ?? null;
+
+  const isAiPaused = pauseFetcher.formData
+    ? pauseFetcher.formData.get("pause") === "true"
+    : selected?.aiPaused ?? false;
 
   // One-time: auto-request notification permission on inbox load
   useEffect(() => {
@@ -422,20 +451,6 @@ export default function Inbox() {
   // lastSeen excluded: update events must not cause reconnects (would loop). sseKey triggers reconnects only on error/server-reconnect.
   }, [selectedId, sseKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Merge SSE updates into loader conversations
-  const allConversations = useMemo<ConvItem[]>(() => {
-    if (realtimeConvs.length === 0) return conversations;
-    const map = new Map(conversations.map((c) => [c.id, c]));
-    for (const c of realtimeConvs) {
-      map.set(c.id, { ...map.get(c.id), ...c } as ConvItem);
-    }
-    return Array.from(map.values()).sort((a, b) => {
-      if (a.escalated !== b.escalated) return a.escalated ? -1 : 1;
-      return new Date(b.lastMessageAt as unknown as string).getTime() -
-             new Date(a.lastMessageAt as unknown as string).getTime();
-    });
-  }, [conversations, realtimeConvs]);
-
   const listRef = useRef<HTMLDivElement>(null);
   const rowVirtualizer = useVirtualizer({
     count: allConversations.length,
@@ -471,10 +486,11 @@ export default function Inbox() {
   }
 
   function selectConversation(id: string) {
+    setLocalSelectedId(id);
+    setOtherViewers(0);
     const next = new URLSearchParams(searchParams);
     next.set("id", id);
-    setOtherViewers(0);
-    setSearchParams(next);
+    setSearchParams(next, { replace: true });
   }
 
   function nextPage() {
