@@ -14,7 +14,6 @@ import { adminGraphql } from "../lib/mcp/admin.server";
 import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
 import { runQAJudge } from "../lib/agents/merchant-analyst.server";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { MessageBubble } from "~/components/MessageBubble";
 import { FilterButtonGroup } from "~/components/FilterButtonGroup";
 import { JourneyFunnel } from "~/components/JourneyFunnel";
@@ -468,11 +467,10 @@ export default function InboxFull() {
       {/* ui-title-bar registers the heading in the app window chrome */}
       <ui-title-bar title="Inbox" />
 
-      <PanelGroup orientation="horizontal" style={{ height: "100vh" }}>
+      <div style={{ display: "flex", height: "100vh" }}>
 
         {/* ── Left Panel ───────────────────────────────────────────────────── */}
-        <Panel defaultSize={22} minSize={15} maxSize={35}>
-        <div style={{ height: "100%", borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ width: 300, flexShrink: 0, borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
           {/* Summary bar */}
           <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
@@ -633,15 +631,9 @@ export default function InboxFull() {
             )}
           </div>
         </div>
-        </Panel>
-
-        <PanelResizeHandle style={{ width: 4, background: "transparent", cursor: "col-resize", flexShrink: 0, position: "relative" }}>
-          <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: 2, background: "var(--color-border)", transition: "background 0.15s" }} />
-        </PanelResizeHandle>
 
         {/* ── Center Panel: Transcript ──────────────────────────────────────── */}
-        <Panel defaultSize={52} minSize={35}>
-        <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
           {!selected ? (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#8c9196", fontSize: "14px" }}>
               Select a conversation to view the transcript
@@ -860,15 +852,9 @@ export default function InboxFull() {
             </>
           )}
         </div>
-        </Panel>
-
-        <PanelResizeHandle style={{ width: 4, background: "transparent", cursor: "col-resize", flexShrink: 0, position: "relative" }}>
-          <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: 2, background: "var(--color-border)", transition: "background 0.15s" }} />
-        </PanelResizeHandle>
 
         {/* ── Right Panel: Customer Sidebar ─────────────────────────────────── */}
-        <Panel defaultSize={26} minSize={18} maxSize={40}>
-        <div style={{ height: "100%", overflowY: "auto", padding: "16px", borderLeft: "1px solid var(--color-border)" }}>
+        <div style={{ width: 280, flexShrink: 0, overflowY: "auto", padding: "16px", borderLeft: "1px solid var(--color-border)" }}>
           {!selected ? (
             <div style={{ fontSize: "13px", color: "#8c9196" }}>No conversation selected</div>
           ) : (
@@ -1037,9 +1023,8 @@ export default function InboxFull() {
             </div>
           )}
         </div>
-        </Panel>
 
-      </PanelGroup>
+      </div>
     </>
   );
 }
