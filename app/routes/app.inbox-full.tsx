@@ -1,3 +1,8 @@
+// Full-screen inbox overlay — rendered inside <s-app-window> via /app/inbox-full.
+// No <s-page> wrapper; <ui-title-bar> registers the admin chrome heading.
+// ponytail: loader/action are direct copies of app.inbox.tsx; no shared abstraction
+// needed until a third consumer appears.
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, useFetcher, useLoaderData, useRouteError, useSearchParams, useNavigation } from "react-router";
@@ -33,7 +38,7 @@ const TOOL_LABELS: Record<string, string | null> = {
   search_policies_and_faqs: "📋 Checked store policies",
   get_order: "📦 Looked up order",
   get_customer_orders: "📦 Fetched order history",
-  unified: null, // internal routing — skip
+  unified: null,
 };
 
 const DATE_OPTIONS = [
@@ -49,7 +54,7 @@ const CHANNEL_OPTS = [
   { value: "whatsapp", label: "💚 WhatsApp" },
 ] as const;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function relTime(d: Date | string) {
   const s = (Date.now() - new Date(d).getTime()) / 1000;
@@ -65,7 +70,7 @@ function formatPhone(sessionId: string) {
   return raw.slice(0, 2) + " •••• " + raw.slice(-4);
 }
 
-// ─── Loader ───────────────────────────────────────────────────────────────────
+// ─── Loader ──────────────────────────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -82,7 +87,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
 
-  // Build main where clause
   const where: Prisma.ConversationWhereInput = { shopDomain: shop };
 
   if (dateRange !== "all") {
@@ -109,12 +113,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   } else if (statusTab === "resolved") {
     where.resolved = true;
   } else {
-    // pending = AI handling or waiting on customer
     where.escalated = false;
     where.resolved = false;
   }
 
-  // Summary counts use global shop scope (not filtered by date/outcome/channel)
   const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
 
   const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant] =
@@ -229,10 +231,7 @@ export async function action({ request }: ActionFunctionArgs) {
       : { role: "assistant", content: `[Merchant] ${message}`, timestamp: Date.now() };
     await prisma.conversation.update({
       where: { id: conversationId },
-      data: {
-        messages: [...existing, newMsg],
-        lastMessageAt: new Date(),
-      },
+      data: { messages: [...existing, newMsg], lastMessageAt: new Date() },
     });
   } else if (intent === "resolve") {
     await prisma.conversation.update({
@@ -269,11 +268,9 @@ export async function action({ request }: ActionFunctionArgs) {
   return null;
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function Inbox() {
+export default function InboxFull() {
   const {
     conversations, selected,
     totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount,
@@ -290,42 +287,23 @@ export default function Inbox() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Reply mode: "reply" sends to customer, "note" saves as internal note
   const [replyMode, setReplyMode] = useState<"reply" | "note">("reply");
-
-  // Status tab (Open / Pending / Resolved)
   const [activeTab, setActiveTab] = useState(statusTab ?? "pending");
-
-  // Controlled reply textarea + macro overlay
   const [replyText, setReplyText] = useState("");
   const [showMacros, setShowMacros] = useState(false);
   const [macroQuery, setMacroQuery] = useState("");
 
-  // Browser notification permission state
-  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
-    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "denied",
-  );
-
-  // Pause/resume AI fetcher
   const pauseFetcher = useFetcher<typeof action>();
   const isAiPaused = pauseFetcher.formData
     ? pauseFetcher.formData.get("pause") === "true"
     : selected?.aiPaused ?? false;
 
-  // SSE real-time: track last update time and hold merged updates
   type ConvItem = typeof conversations[number];
   const [lastSeen, setLastSeen] = useState(() => new Date().toISOString());
   const [realtimeConvs, setRealtimeConvs] = useState<ConvItem[]>([]);
   const [otherViewers, setOtherViewers] = useState(0);
 
   const selectedId = selected?.id ?? null;
-
-  // One-time: auto-request notification permission on inbox load
-  useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission().then(setNotifPermission).catch(() => {});
-    }
-  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams({ since: lastSeen });
@@ -347,49 +325,6 @@ export default function Inbox() {
                    new Date(a.lastMessageAt as unknown as string).getTime();
           });
         });
-
-        // Browser notification + audio ping when tab is not focused
-        if (
-          typeof document !== "undefined" &&
-          document.visibilityState === "hidden" &&
-          data.conversations.length > 0
-        ) {
-          // Visual notification
-          if ("Notification" in window && Notification.permission === "granted") {
-            const newest = data.conversations[0];
-            const body = newest.firstUserMessage
-              ? newest.firstUserMessage.slice(0, 100)
-              : "New message received";
-            const notif = new Notification("NeonPing — New message", {
-              body,
-              icon: "/favicon.ico",
-              tag: `conv-${newest.id}`, // dedupes — same conv won't double-notify
-              silent: false,
-            });
-            setTimeout(() => notif.close(), 5000);
-            notif.onclick = () => {
-              window.focus();
-              notif.close();
-              selectConversation(newest.id);
-            };
-          }
-
-          // Audio ping via Web Audio API — no external file needed
-          try {
-            const AudioCtx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-            const ctx = new AudioCtx();
-            const oscillator = ctx.createOscillator();
-            const gain = ctx.createGain();
-            oscillator.connect(gain);
-            gain.connect(ctx.destination);
-            oscillator.type = "sine";
-            oscillator.frequency.setValueAtTime(880, ctx.currentTime);
-            gain.gain.setValueAtTime(0.1, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-            oscillator.start(ctx.currentTime);
-            oscillator.stop(ctx.currentTime + 0.3);
-          } catch { /* Web Audio not available — silent fail */ }
-        }
       } catch { /* ignore parse errors */ }
     });
 
@@ -415,7 +350,6 @@ export default function Inbox() {
     return () => es.close();
   }, [lastSeen, selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Merge SSE updates into loader conversations
   const allConversations = useMemo<ConvItem[]>(() => {
     if (realtimeConvs.length === 0) return conversations;
     const map = new Map(conversations.map((c) => [c.id, c]));
@@ -429,7 +363,6 @@ export default function Inbox() {
     });
   }, [conversations, realtimeConvs]);
 
-  // Clear textarea and reset mode after submission
   useEffect(() => {
     if (prevNavState.current === "submitting" && navigation.state === "idle") {
       if (replyRef.current) replyRef.current.value = "";
@@ -439,7 +372,6 @@ export default function Inbox() {
     prevNavState.current = navigation.state;
   }, [navigation.state]);
 
-  // Sync search input when URL param changes (e.g. after filter reset)
   useEffect(() => {
     if (searchInputRef.current) searchInputRef.current.value = search;
   }, [search]);
@@ -486,14 +418,6 @@ export default function Inbox() {
     r.toLowerCase().includes(macroQuery.toLowerCase()),
   );
 
-  const requestNotifPermission = async () => {
-    if ("Notification" in window) {
-      const result = await Notification.requestPermission();
-      setNotifPermission(result);
-    }
-  };
-
-  // Selected conversation data
   const msgs = selected && Array.isArray(selected.messages)
     ? (selected.messages as unknown as ChatMessage[])
     : [];
@@ -507,21 +431,14 @@ export default function Inbox() {
     .filter((a): a is string => a !== null);
 
   return (
-    <s-page heading="Inbox">
-      {/* ponytail: s-app-window is a Shopify web component; show() opens full-viewport overlay */}
-      <s-app-window id="inbox-win" src="/app/inbox-full" />
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr 280px", gap: "0", height: "calc(100vh - 120px)", minHeight: "600px" }}>
+    <>
+      {/* ui-title-bar registers the heading in the app window chrome */}
+      <ui-title-bar title="Inbox" />
 
-        {/* ── Left Panel: Conversation List ────────────────────────────────── */}
+      <div style={{ height: "100vh", overflow: "hidden", display: "grid", gridTemplateColumns: "300px 1fr 280px" }}>
+
+        {/* ── Left Panel ───────────────────────────────────────────────────── */}
         <div style={{ borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-
-          {/* Notification permission prompt */}
-          {notifPermission === "default" && (
-            <div style={{ padding: "8px 12px", background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <s-text tone="neutral">Enable notifications to get alerted when customers message</s-text>
-              <s-button variant="tertiary" onClick={requestNotifPermission}>Enable</s-button>
-            </div>
-          )}
 
           {/* Summary bar */}
           <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
@@ -530,17 +447,9 @@ export default function Inbox() {
             {inCartCount > 0 && <span style={{ color: "var(--color-primary)" }}>● {inCartCount} in cart</span>}
             {escalatedCount > 0 && <span style={{ color: "var(--color-critical)" }}>● {escalatedCount} escalated</span>}
             {liveCount > 0 && <span style={{ color: "#22c55e", fontWeight: 600 }}>⬤ {liveCount} live</span>}
-            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
-                <span style={{ fontSize: "11px", color: "var(--color-neutral)" }}>Live</span>
-              </span>
-              <button
-                onClick={() => (document.getElementById("inbox-win") as unknown as { show(): void })?.show()}
-                style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer" }}
-              >
-                ⛶ Full screen
-              </button>
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "4px" }}>
+              <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
+              <span style={{ fontSize: "11px", color: "var(--color-neutral)" }}>Live</span>
             </span>
           </div>
 
@@ -623,7 +532,6 @@ export default function Inbox() {
                     minHeight: 60,
                   }}
                 >
-                  {/* Row 1: unread dot + channel icon + name + time */}
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {isUnread
                       ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />
@@ -638,7 +546,6 @@ export default function Inbox() {
                       {relTime(conv.lastMessageAt)}
                     </span>
                   </div>
-                  {/* Row 2: message preview + badges */}
                   <div style={{ display: "flex", alignItems: "center", gap: 5, paddingLeft: 14 }}>
                     <span style={{ fontSize: 12, color: "var(--color-neutral)", opacity: 0.75, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {conv.firstUserMessage?.slice(0, 60) ?? "No message"}
@@ -709,7 +616,7 @@ export default function Inbox() {
                 )}
               </div>
 
-              {/* Collision banner — another browser tab or team member has this convo open */}
+              {/* Collision banner */}
               {otherViewers > 0 && (
                 <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)" }}>
                   <s-banner tone="warning">
@@ -802,10 +709,9 @@ export default function Inbox() {
                 })}
               </div>
 
-              {/* Reply box (escalated only) or status hint */}
+              {/* Reply box */}
               {selected.escalated && !selected.resolved ? (
                 <div style={{ borderTop: "1px solid var(--color-border)", background: "#fff" }}>
-                  {/* Mode tabs */}
                   <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)" }}>
                     <button
                       type="button"
@@ -823,87 +729,87 @@ export default function Inbox() {
                     </button>
                   </div>
                   <div style={{ padding: "12px 16px" }}>
-                  <Form method="post">
-                    <input type="hidden" name="intent" value="reply" />
-                    <input type="hidden" name="conversationId" value={selected.id} />
-                    <input type="hidden" name="isNote" value={replyMode === "note" ? "true" : "false"} />
-                    <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
-                      <div style={{ flex: 1, position: "relative" }}>
-                        {showMacros && filteredMacros.length > 0 && (
-                          <div style={{ position: "absolute", bottom: "100%", left: 0, right: 0, zIndex: 20, background: "#fff", border: "1px solid var(--color-border)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 180, overflowY: "auto", marginBottom: 4 }}>
-                            {filteredMacros.slice(0, 6).map((r, i) => (
-                              <div
-                                key={i}
-                                role="option"
-                                aria-selected={false}
-                                tabIndex={0}
-                                onClick={() => { setReplyText(r); setShowMacros(false); }}
-                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { setReplyText(r); setShowMacros(false); } }}
-                                style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: i < filteredMacros.length - 1 ? "1px solid var(--color-border)" : "none" }}
-                                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--color-surface)"; }}
-                                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ""; }}
-                              >
-                                {r}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <textarea
-                          ref={replyRef}
-                          name="message"
-                          value={replyText}
-                          placeholder={replyMode === "note" ? "Leave an internal note (customer won't see this)…" : "Reply as store… (type / for quick replies, ⌘↵ to send)"}
-                          rows={2}
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="reply" />
+                      <input type="hidden" name="conversationId" value={selected.id} />
+                      <input type="hidden" name="isNote" value={replyMode === "note" ? "true" : "false"} />
+                      <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
+                        <div style={{ flex: 1, position: "relative" }}>
+                          {showMacros && filteredMacros.length > 0 && (
+                            <div style={{ position: "absolute", bottom: "100%", left: 0, right: 0, zIndex: 20, background: "#fff", border: "1px solid var(--color-border)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 180, overflowY: "auto", marginBottom: 4 }}>
+                              {filteredMacros.slice(0, 6).map((r, i) => (
+                                <div
+                                  key={i}
+                                  role="option"
+                                  aria-selected={false}
+                                  tabIndex={0}
+                                  onClick={() => { setReplyText(r); setShowMacros(false); }}
+                                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { setReplyText(r); setShowMacros(false); } }}
+                                  style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: i < filteredMacros.length - 1 ? "1px solid var(--color-border)" : "none" }}
+                                  onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--color-surface)"; }}
+                                  onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ""; }}
+                                >
+                                  {r}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <textarea
+                            ref={replyRef}
+                            name="message"
+                            value={replyText}
+                            placeholder={replyMode === "note" ? "Leave an internal note…" : "Reply as store… (type / for quick replies, ⌘↵ to send)"}
+                            rows={2}
+                            style={{
+                              width: "100%", padding: "8px 10px", borderRadius: "6px",
+                              border: `1px solid ${replyMode === "note" ? "#fde68a" : "var(--color-border)"}`,
+                              fontSize: "13px", resize: "none", fontFamily: "inherit",
+                              background: replyMode === "note" ? "#fffbeb" : "#fff",
+                              boxSizing: "border-box",
+                            }}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setReplyText(val);
+                              if (val.startsWith("/")) {
+                                setMacroQuery(val.slice(1));
+                                setShowMacros(true);
+                              } else {
+                                setShowMacros(false);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                                e.preventDefault();
+                                (e.currentTarget.form as HTMLFormElement).requestSubmit();
+                              }
+                              if (e.key === "Escape") setShowMacros(false);
+                              if (e.key === "Enter" && !e.shiftKey && !showMacros) {
+                                e.preventDefault();
+                                (e.currentTarget.form as HTMLFormElement).requestSubmit();
+                              }
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={isSubmitting}
                           style={{
-                            width: "100%", padding: "8px 10px", borderRadius: "6px",
-                            border: `1px solid ${replyMode === "note" ? "#fde68a" : "var(--color-border)"}`,
-                            fontSize: "13px", resize: "none", fontFamily: "inherit",
-                            background: replyMode === "note" ? "#fffbeb" : "#fff",
-                            boxSizing: "border-box",
+                            padding: "8px 16px",
+                            background: isSubmitting ? "var(--color-neutral)" : replyMode === "note" ? "#d97706" : "var(--color-primary)",
+                            color: "#fff", border: "none",
+                            borderRadius: "var(--radius-sm)",
+                            cursor: isSubmitting ? "wait" : "pointer",
+                            fontSize: "13px", fontWeight: 600, flexShrink: 0,
+                            transition: "background 0.1s ease",
                           }}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setReplyText(val);
-                            if (val.startsWith("/")) {
-                              setMacroQuery(val.slice(1));
-                              setShowMacros(true);
-                            } else {
-                              setShowMacros(false);
-                            }
-                          }}
-                          onKeyDown={(e) => {
-                            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                              e.preventDefault();
-                              (e.currentTarget.form as HTMLFormElement).requestSubmit();
-                            }
-                            if (e.key === "Escape") setShowMacros(false);
-                            if (e.key === "Enter" && !e.shiftKey && !showMacros) {
-                              e.preventDefault();
-                              (e.currentTarget.form as HTMLFormElement).requestSubmit();
-                            }
-                          }}
-                        />
+                        >
+                          {isSubmitting ? "Saving…" : replyMode === "note" ? "Save Note" : "Send"}
+                        </button>
                       </div>
-                      <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        style={{
-                          padding: "8px 16px",
-                          background: isSubmitting ? "var(--color-neutral)" : replyMode === "note" ? "#d97706" : "var(--color-primary)",
-                          color: "#fff", border: "none",
-                          borderRadius: "var(--radius-sm)",
-                          cursor: isSubmitting ? "wait" : "pointer",
-                          fontSize: "13px", fontWeight: 600, flexShrink: 0,
-                          transition: "background 0.1s ease",
-                        }}
-                      >
-                        {isSubmitting ? "Saving…" : replyMode === "note" ? "Save Note" : "Send"}
-                      </button>
-                    </div>{/* end flex row */}
-                    <div style={{ fontSize: "11px", color: "#8c9196", marginTop: "4px" }}>
-                      {replyMode === "note" ? "Internal only — not sent to customer or AI" : selected.channel === "whatsapp" ? "Sends via WhatsApp to customer" : "Stored in conversation — AI picks up on next reply"}
-                    </div>
-                  </Form>
+                      <div style={{ fontSize: "11px", color: "#8c9196", marginTop: "4px" }}>
+                        {replyMode === "note" ? "Internal only — not sent to customer or AI" : selected.channel === "whatsapp" ? "Sends via WhatsApp to customer" : "Stored in conversation — AI picks up on next reply"}
+                      </div>
+                    </Form>
                   </div>
                 </div>
               ) : selected && !selected.resolved ? (
@@ -921,7 +827,6 @@ export default function Inbox() {
             <div style={{ fontSize: "13px", color: "#8c9196" }}>No conversation selected</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {/* Channel */}
               <div>
                 <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Channel</div>
                 <s-badge tone={selected.channel === "whatsapp" ? "success" : "info"}>
@@ -929,7 +834,6 @@ export default function Inbox() {
                 </s-badge>
               </div>
 
-              {/* Customer */}
               <div>
                 <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Customer</div>
                 {selected.customerId ? (
@@ -944,7 +848,6 @@ export default function Inbox() {
                 )}
               </div>
 
-              {/* Phone (WhatsApp only) */}
               {selected.channel === "whatsapp" && (
                 <div>
                   <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Phone</div>
@@ -954,7 +857,6 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Cart value */}
               {selected.cartValue != null && (
                 <div>
                   <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Cart Value</div>
@@ -964,7 +866,6 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Order card */}
               {selected.orderId && (
                 <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", padding: "10px 12px" }}>
                   <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 8 }}>Order</div>
@@ -986,7 +887,6 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Discount code */}
               {selected.discountCode && (
                 <div>
                   <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Discount Used</div>
@@ -994,7 +894,6 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* AI Actions — collapsed by default */}
               {aiActions.length > 0 && (
                 <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
                   <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "var(--color-neutral)", textTransform: "uppercase", letterSpacing: "0.4px", listStyle: "none", display: "flex", alignItems: "center", gap: 4 }}>
@@ -1008,7 +907,6 @@ export default function Inbox() {
                 </details>
               )}
 
-              {/* Details */}
               <div>
                 <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Details</div>
                 <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: "12px" }}>
@@ -1044,7 +942,6 @@ export default function Inbox() {
                 </div>
               </div>
 
-              {/* Train from this — visible on flagged conversations */}
               {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
                 <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: "12px" }}>
                   <s-banner tone="warning">
@@ -1075,7 +972,6 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Actions */}
               <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
                 {!selected.resolved && (
                   <Form method="post">
@@ -1097,7 +993,7 @@ export default function Inbox() {
         </div>
 
       </div>
-    </s-page>
+    </>
   );
 }
 
