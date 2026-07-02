@@ -56,6 +56,7 @@ export async function persistConversationTurn(opts: {
   shopDomain: string;
   sessionId: string;
   customerId?: string;
+  customerName?: string;
   session: ConversationSession;
   checkoutUrl?: string;
   discountCode?: string;
@@ -64,7 +65,7 @@ export async function persistConversationTurn(opts: {
   routeReason?: string;
   cartValueCents?: number;
 }): Promise<void> {
-  const { shopDomain, sessionId, customerId, session, checkoutUrl, discountCode, escalateToHuman, agentTrace, routeReason, cartValueCents } = opts;
+  const { shopDomain, sessionId, customerId, customerName, session, checkoutUrl, discountCode, escalateToHuman, agentTrace, routeReason, cartValueCents } = opts;
   const checkoutToken = extractCheckoutToken(checkoutUrl);
   const cartValue = cartValueCents != null ? cartValueCents / 100 : undefined;
 
@@ -74,6 +75,7 @@ export async function persistConversationTurn(opts: {
       shopDomain,
       sessionId,
       customerId,
+      ...(customerName ? { customerName } : {}),
       messages: session.conversation_history as unknown as Prisma.InputJsonValue,
       messageCount: session.conversation_history.length,
       firstUserMessage: (

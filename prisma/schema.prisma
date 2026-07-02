@@ -62,6 +62,7 @@ model Conversation {
   qualityScore      Float?
   qaMeta            Json?
   customerEmail     String?
+  customerName      String?
   resolvedAt        DateTime?
   startedAt         DateTime @default(now())
   lastMessageAt     DateTime @updatedAt

@@ -43,15 +43,6 @@ const DATE_OPTIONS = [
   { value: "30d", label: "30d" },
 ] as const;
 
-const OUTCOME_OPTIONS = [
-  { value: "all", label: "All" },
-  { value: "live", label: "🟢 Live" },
-  { value: "purchased", label: "Purchased" },
-  { value: "incart", label: "In Cart" },
-  { value: "escalated", label: "Escalated" },
-  { value: "ended", label: "Ended" },
-] as const;
-
 const CHANNEL_OPTS = [
   { value: "all", label: "All" },
   { value: "web", label: "🌐 Web" },
@@ -60,13 +51,18 @@ const CHANNEL_OPTS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function relativeTime(date: string | Date): string {
-  const diff = Date.now() - new Date(date).getTime();
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-  return new Date(date).toLocaleDateString("en", { month: "short", day: "numeric" });
+function relTime(d: Date | string) {
+  const s = (Date.now() - new Date(d).getTime()) / 1000;
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+function formatPhone(sessionId: string) {
+  const raw = sessionId.replace(/^whatsapp_/, "");
+  if (raw.length < 6) return raw;
+  return raw.slice(0, 2) + " •••• " + raw.slice(-4);
 }
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -78,7 +74,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const selectedId = url.searchParams.get("id") ?? null;
   const channel = url.searchParams.get("channel") ?? "all";
-  const outcome = url.searchParams.get("outcome") ?? "all";
+  const statusTab = url.searchParams.get("statusTab") ?? "pending";
   const dateRange = url.searchParams.get("dateRange") ?? "all";
   const search = url.searchParams.get("search") ?? "";
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1"));
@@ -107,25 +103,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     where.NOT = { channel: "whatsapp" };
   }
 
-  if (outcome === "live") {
-    where.lastMessageAt = { gte: fiveMinAgo };
-    where.resolved = false;
-  } else if (outcome === "purchased") {
-    where.orderId = { not: null };
-  } else if (outcome === "incart") {
-    where.cartId = { not: null };
-    where.orderId = null;
-  } else if (outcome === "escalated") {
+  if (statusTab === "open") {
     where.escalated = true;
     where.resolved = false;
-  } else if (outcome === "ended") {
+  } else if (statusTab === "resolved") {
     where.resolved = true;
+  } else {
+    // pending = AI handling or waiting on customer
+    where.escalated = false;
+    where.resolved = false;
   }
 
   // Summary counts use global shop scope (not filtered by date/outcome/channel)
   const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
 
-  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount] =
+  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant] =
     await Promise.all([
       prisma.conversation.findMany({
         where,
@@ -141,6 +133,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           escalated: true,
           resolved: true,
           customerId: true,
+          customerName: true,
           cartValue: true,
           cartId: true,
           orderRevenueCents: true,
@@ -148,6 +141,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           qualityScore: true,
           qaMeta: true,
           aiPaused: true,
+          messages: true,
         },
       }),
       prisma.conversation.count({ where: countBase }),
@@ -155,6 +149,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       prisma.conversation.count({ where: { ...countBase, cartId: { not: null }, orderId: null } }),
       prisma.conversation.count({ where: { ...countBase, escalated: true, resolved: false } }),
       prisma.conversation.count({ where: { ...countBase, lastMessageAt: { gte: fiveMinAgo }, resolved: false } }),
+      prisma.conversation.count({ where: { ...countBase, escalated: false, resolved: false } }),
+      prisma.conversation.count({ where: { ...countBase, resolved: true } }),
+      prisma.merchant.findUnique({ where: { shopDomain: shop }, select: { quickReplies: true } }),
     ]);
 
   let selected = null;
@@ -178,11 +175,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     conversations,
     selected,
-    totalCount, purchasedCount, inCartCount, escalatedCount, liveCount,
+    totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount,
     page, hasMore: conversations.length === 50,
-    search, dateRange, outcome, channel,
+    search, dateRange, statusTab, channel,
     currencyCode,
     storeHandle,
+    quickReplies: merchant?.quickReplies ?? [],
   };
 }
 
@@ -273,23 +271,16 @@ export async function action({ request }: ActionFunctionArgs) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatusDot({ escalated, resolved, lastMessageAt }: { escalated: boolean; resolved: boolean; lastMessageAt: Date | string }) {
-  const isActive = new Date(lastMessageAt) > new Date(Date.now() - 10 * 60 * 1000);
-  if (escalated && !resolved) return <span aria-label="Escalated" title="Escalated" style={{ color: "var(--color-critical)", fontSize: "10px" }}>●</span>;
-  if (isActive) return <span aria-label="Active now" title="Active now" style={{ color: "var(--color-warning)", fontSize: "10px" }}>●</span>;
-  if (resolved) return <span aria-label="Resolved" title="Resolved" style={{ color: "#9ca3af", fontSize: "10px" }}>●</span>;
-  return <span aria-label="Inactive" title="Inactive" style={{ color: "#6b7280", fontSize: "10px" }}>●</span>;
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Inbox() {
   const {
     conversations, selected,
-    totalCount, purchasedCount, inCartCount, escalatedCount, liveCount,
+    totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount,
     page, hasMore,
-    search, dateRange, outcome, channel,
+    search, dateRange, statusTab, channel,
     currencyCode, storeHandle,
+    quickReplies,
   } = useLoaderData<typeof loader>();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -301,6 +292,14 @@ export default function Inbox() {
 
   // Reply mode: "reply" sends to customer, "note" saves as internal note
   const [replyMode, setReplyMode] = useState<"reply" | "note">("reply");
+
+  // Status tab (Open / Pending / Resolved)
+  const [activeTab, setActiveTab] = useState(statusTab ?? "pending");
+
+  // Controlled reply textarea + macro overlay
+  const [replyText, setReplyText] = useState("");
+  const [showMacros, setShowMacros] = useState(false);
+  const [macroQuery, setMacroQuery] = useState("");
 
   // Browser notification permission state
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
@@ -434,6 +433,7 @@ export default function Inbox() {
   useEffect(() => {
     if (prevNavState.current === "submitting" && navigation.state === "idle") {
       if (replyRef.current) replyRef.current.value = "";
+      setReplyText("");
       setReplyMode("reply");
     }
     prevNavState.current = navigation.state;
@@ -481,6 +481,10 @@ export default function Inbox() {
 
   const fmtMoney = (dollars: number) =>
     new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(dollars);
+
+  const filteredMacros = (quickReplies as string[]).filter((r) =>
+    r.toLowerCase().includes(macroQuery.toLowerCase()),
+  );
 
   const requestNotifPermission = async () => {
     if ("Notification" in window) {
@@ -542,10 +546,37 @@ export default function Inbox() {
             />
           </div>
 
+          {/* Status tabs */}
+          <div style={{ display: "flex", borderBottom: "2px solid var(--color-border)" }}>
+            {([
+              { key: "open", label: "Open", count: escalatedCount, activeColor: "#c2410c", activeBg: "#fff7ed" },
+              { key: "pending", label: "Pending", count: pendingCount, activeColor: "var(--color-primary)", activeBg: "#eff6ff" },
+              { key: "resolved", label: "Resolved", count: resolvedCount, activeColor: "var(--color-neutral)", activeBg: "#f3f4f6" },
+            ] as const).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => { setActiveTab(tab.key); setFilter("statusTab", tab.key); }}
+                style={{
+                  flex: 1, padding: "8px 4px", border: "none", background: "none", cursor: "pointer",
+                  fontSize: 12, fontWeight: activeTab === tab.key ? 600 : 400,
+                  color: activeTab === tab.key ? tab.activeColor : "var(--color-neutral)",
+                  borderBottom: activeTab === tab.key ? `2px solid ${tab.activeColor}` : "2px solid transparent",
+                  marginBottom: -2, display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                }}
+              >
+                {tab.label}
+                {tab.count > 0 && (
+                  <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: activeTab === tab.key ? tab.activeBg : "#f3f4f6", color: activeTab === tab.key ? tab.activeColor : "var(--color-neutral)" }}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
           {/* Filters */}
           <div style={{ padding: "6px 12px", borderBottom: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: "4px" }}>
             <FilterButtonGroup options={DATE_OPTIONS} value={dateRange} onChange={(v) => setFilter("dateRange", v)} />
-            <FilterButtonGroup options={OUTCOME_OPTIONS} value={outcome} onChange={(v) => setFilter("outcome", v)} />
             <FilterButtonGroup options={CHANNEL_OPTS} value={channel} onChange={(v) => setFilter("channel", v)} />
           </div>
 
@@ -556,9 +587,12 @@ export default function Inbox() {
                 <s-text tone="neutral">No conversations match these filters.</s-text>
               </div>
             ) : allConversations.map((conv) => {
-              const isSelected = selected?.id === conv.id;
-              const isEscalated = conv.escalated && !conv.resolved;
-              const isFlagged = conv.qaMeta && (conv.qaMeta as { flagged?: boolean }).flagged === true;
+              const isWA = conv.channel === "whatsapp";
+              const convMsgs = Array.isArray(conv.messages) ? (conv.messages as Array<{ role: string }>) : [];
+              const lastRole = convMsgs.length > 0 ? convMsgs[convMsgs.length - 1]?.role : null;
+              const isUnread = conv.escalated && !conv.resolved && lastRole === "user";
+              const customerDisplay = (conv as typeof conv & { customerName?: string | null }).customerName
+                ?? (isWA ? formatPhone(conv.sessionId) : "Visitor");
               return (
                 <div
                   key={conv.id}
@@ -571,43 +605,47 @@ export default function Inbox() {
                     padding: "10px 12px",
                     borderBottom: "1px solid var(--color-border)",
                     cursor: "pointer",
-                    background: isSelected ? "#f0f4ff" : "transparent",
-                    borderLeft: isEscalated
-                      ? "3px solid var(--color-critical)"
-                      : isSelected
-                      ? "3px solid var(--color-primary)"
-                      : "3px solid transparent",
+                    background: selected?.id === conv.id ? "#eff6ff" : "#fff",
+                    borderLeft: selected?.id === conv.id ? "3px solid var(--color-primary)" : "3px solid transparent",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                    minHeight: 60,
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
-                    <span style={{ fontWeight: 600, fontSize: "13px", color: "var(--color-text)" }}>
-                      {conv.customerId ? "Customer" : "Anonymous"}
-                    </span>
-                    <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      {isFlagged && <span title="AI quality flagged" style={{ fontSize: "11px" }}>🔍</span>}
-                      <StatusDot escalated={conv.escalated} resolved={conv.resolved} lastMessageAt={conv.lastMessageAt} />
-                      <span style={{ fontSize: "11px", color: "var(--color-neutral)" }}>
-                        {relativeTime(conv.lastMessageAt)}
-                      </span>
+                  {/* Row 1: unread dot + channel icon + name + time */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {isUnread
+                      ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />
+                      : <span style={{ width: 8, flexShrink: 0 }} />}
+                    <div style={{ width: 18, height: 18, borderRadius: "50%", background: isWA ? "#25D366" : "var(--color-primary)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {isWA ? "W" : "C"}
                     </div>
+                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--color-text)" }}>
+                      {customerDisplay}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--color-neutral)", opacity: 0.65, flexShrink: 0 }}>
+                      {relTime(conv.lastMessageAt)}
+                    </span>
                   </div>
-                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", marginBottom: "4px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {conv.firstUserMessage ?? "No message"}
-                  </div>
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                    {conv.channel === "whatsapp" && <s-badge tone="success">WhatsApp</s-badge>}
-                    {conv.orderId && conv.orderRevenueCents != null && (
-                      <span style={{ fontSize: "11px", color: "var(--color-success)", fontWeight: 600 }}>
-                        ${(conv.orderRevenueCents / 100).toFixed(0)} order
-                      </span>
-                    )}
-                    {!conv.orderId && conv.cartId && conv.cartValue != null && (
-                      <span style={{ fontSize: "11px", color: "var(--color-primary)", fontWeight: 600 }}>
-                        ${conv.cartValue.toFixed(0)} in cart
-                      </span>
-                    )}
-                    {isEscalated && <s-badge tone="critical">Escalated</s-badge>}
-                    {conv.resolved && <s-badge tone="neutral">Resolved</s-badge>}
+                  {/* Row 2: message preview + badges */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, paddingLeft: 14 }}>
+                    <span style={{ fontSize: 12, color: "var(--color-neutral)", opacity: 0.75, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {conv.firstUserMessage?.slice(0, 60) ?? "No message"}
+                    </span>
+                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      {conv.resolved && !conv.escalated && (
+                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#d1fae5", color: "#065f46", fontWeight: 600 }}>AI ✓</span>
+                      )}
+                      {conv.escalated && !conv.resolved && (
+                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fff7ed", color: "#c2410c", fontWeight: 600 }}>⚡</span>
+                      )}
+                      {conv.orderRevenueCents != null && (
+                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>
+                          ${Math.round(conv.orderRevenueCents / 100)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -631,6 +669,36 @@ export default function Inbox() {
             </div>
           ) : (
             <>
+              {/* Conversation header */}
+              <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", gap: 10, background: "#fff", flexShrink: 0 }}>
+                <div style={{ width: 24, height: 24, borderRadius: "50%", background: selected.channel === "whatsapp" ? "#25D366" : "var(--color-primary)", color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {selected.channel === "whatsapp" ? "W" : "C"}
+                </div>
+                <span style={{ fontWeight: 600, fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {(selected as typeof selected & { customerName?: string | null }).customerName
+                    ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
+                </span>
+                {selected.resolved ? (
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#f3f4f6", color: "var(--color-neutral)", fontWeight: 500 }}>Resolved</span>
+                ) : selected.escalated ? (
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#fff7ed", color: "#c2410c", fontWeight: 600 }}>⚡ Needs reply</span>
+                ) : isAiPaused ? (
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>⏸ AI paused</span>
+                ) : (
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#eff6ff", color: "var(--color-primary)" }}>Pending</span>
+                )}
+                {!selected.resolved && (
+                  <pauseFetcher.Form method="POST" style={{ display: "inline" }}>
+                    <input type="hidden" name="intent" value="pause-ai" />
+                    <input type="hidden" name="conversationId" value={selected.id} />
+                    <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
+                    <button type="submit" style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer", color: isAiPaused ? "var(--color-warning)" : "var(--color-neutral)" }}>
+                      {isAiPaused ? "▶ Resume" : "⏸ Pause AI"}
+                    </button>
+                  </pauseFetcher.Form>
+                )}
+              </div>
+
               {/* Collision banner — another browser tab or team member has this convo open */}
               {otherViewers > 0 && (
                 <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)" }}>
@@ -669,24 +737,6 @@ export default function Inbox() {
               {selected.escalated && !selected.resolved && (
                 <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
                   <s-banner tone="critical">Merchant reply enabled — use the box below to respond directly.</s-banner>
-                </div>
-              )}
-
-              {/* AI pause/resume toggle */}
-              {!selected.resolved && (
-                <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-                  <pauseFetcher.Form method="POST" style={{ display: "inline" }}>
-                    <input type="hidden" name="intent" value="pause-ai" />
-                    <input type="hidden" name="conversationId" value={selected.id} />
-                    <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
-                    <s-button
-                      type="submit"
-                      variant={isAiPaused ? "primary" : "secondary"}
-                      tone={isAiPaused ? "critical" : undefined}
-                    >
-                      {isAiPaused ? "▶ Resume AI" : "⏸ Pause AI"}
-                    </s-button>
-                  </pauseFetcher.Form>
                 </div>
               )}
 
@@ -768,24 +818,62 @@ export default function Inbox() {
                     <input type="hidden" name="conversationId" value={selected.id} />
                     <input type="hidden" name="isNote" value={replyMode === "note" ? "true" : "false"} />
                     <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
-                      <textarea
-                        ref={replyRef}
-                        name="message"
-                        placeholder={replyMode === "note" ? "Leave an internal note (customer won't see this)…" : "Reply as store (customer will see this)…"}
-                        rows={2}
-                        style={{
-                          flex: 1, padding: "8px 10px", borderRadius: "6px",
-                          border: `1px solid ${replyMode === "note" ? "#fde68a" : "var(--color-border)"}`,
-                          fontSize: "13px", resize: "none", fontFamily: "inherit",
-                          background: replyMode === "note" ? "#fffbeb" : "#fff",
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            (e.currentTarget.form as HTMLFormElement).requestSubmit();
-                          }
-                        }}
-                      />
+                      <div style={{ flex: 1, position: "relative" }}>
+                        {showMacros && filteredMacros.length > 0 && (
+                          <div style={{ position: "absolute", bottom: "100%", left: 0, right: 0, zIndex: 20, background: "#fff", border: "1px solid var(--color-border)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 180, overflowY: "auto", marginBottom: 4 }}>
+                            {filteredMacros.slice(0, 6).map((r, i) => (
+                              <div
+                                key={i}
+                                role="option"
+                                aria-selected={false}
+                                tabIndex={0}
+                                onClick={() => { setReplyText(r); setShowMacros(false); }}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { setReplyText(r); setShowMacros(false); } }}
+                                style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: i < filteredMacros.length - 1 ? "1px solid var(--color-border)" : "none" }}
+                                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--color-surface)"; }}
+                                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ""; }}
+                              >
+                                {r}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <textarea
+                          ref={replyRef}
+                          name="message"
+                          value={replyText}
+                          placeholder={replyMode === "note" ? "Leave an internal note (customer won't see this)…" : "Reply as store… (type / for quick replies, ⌘↵ to send)"}
+                          rows={2}
+                          style={{
+                            width: "100%", padding: "8px 10px", borderRadius: "6px",
+                            border: `1px solid ${replyMode === "note" ? "#fde68a" : "var(--color-border)"}`,
+                            fontSize: "13px", resize: "none", fontFamily: "inherit",
+                            background: replyMode === "note" ? "#fffbeb" : "#fff",
+                            boxSizing: "border-box",
+                          }}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setReplyText(val);
+                            if (val.startsWith("/")) {
+                              setMacroQuery(val.slice(1));
+                              setShowMacros(true);
+                            } else {
+                              setShowMacros(false);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                              e.preventDefault();
+                              (e.currentTarget.form as HTMLFormElement).requestSubmit();
+                            }
+                            if (e.key === "Escape") setShowMacros(false);
+                            if (e.key === "Enter" && !e.shiftKey && !showMacros) {
+                              e.preventDefault();
+                              (e.currentTarget.form as HTMLFormElement).requestSubmit();
+                            }
+                          }}
+                        />
+                      </div>
                       <button
                         type="submit"
                         disabled={isSubmitting}
@@ -801,7 +889,7 @@ export default function Inbox() {
                       >
                         {isSubmitting ? "Saving…" : replyMode === "note" ? "Save Note" : "Send"}
                       </button>
-                    </div>
+                    </div>{/* end flex row */}
                     <div style={{ fontSize: "11px", color: "#8c9196", marginTop: "4px" }}>
                       {replyMode === "note" ? "Internal only — not sent to customer or AI" : selected.channel === "whatsapp" ? "Sends via WhatsApp to customer" : "Stored in conversation — AI picks up on next reply"}
                     </div>
@@ -866,21 +954,25 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Order */}
+              {/* Order card */}
               {selected.orderId && (
-                <div>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Order</div>
-                  <s-link
-                    href={`https://admin.shopify.com/store/${storeHandle}/orders/${selected.orderId}`}
-                    target="_blank"
-                  >
-                    {selected.orderId} →
-                  </s-link>
-                  {selected.orderRevenueCents != null && (
-                    <div style={{ fontSize: "12px", color: "var(--color-success)", marginTop: "2px" }}>
-                      {fmtMoney(selected.orderRevenueCents / 100)}
+                <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", padding: "10px 12px" }}>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 8 }}>Order</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)" }}>
+                        {selected.orderRevenueCents != null ? fmtMoney(selected.orderRevenueCents / 100) : "Order placed"}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--color-success)", marginTop: 2 }}>Revenue attributed ✓</div>
                     </div>
-                  )}
+                    <a
+                      href={`https://${storeHandle}.myshopify.com/admin/orders/${selected.orderId.replace("gid://shopify/Order/", "")}`}
+                      target="_top"
+                      style={{ fontSize: 12, color: "var(--color-primary)", textDecoration: "none", fontWeight: 500 }}
+                    >
+                      View →
+                    </a>
+                  </div>
                 </div>
               )}
 
@@ -892,16 +984,18 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* AI Actions */}
+              {/* AI Actions — collapsed by default */}
               {aiActions.length > 0 && (
-                <div>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>AI Actions</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
+                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "var(--color-neutral)", textTransform: "uppercase", letterSpacing: "0.4px", listStyle: "none", display: "flex", alignItems: "center", gap: 4 }}>
+                    ▸ AI tool calls ({aiActions.length})
+                  </summary>
+                  <div style={{ padding: "4px 12px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
                     {aiActions.map((a, i) => (
-                      <div key={i} style={{ fontSize: "12px", color: "var(--color-neutral)" }}>{a}</div>
+                      <div key={i} style={{ fontSize: 12, color: "var(--color-neutral)" }}>{a}</div>
                     ))}
                   </div>
-                </div>
+                </details>
               )}
 
               {/* Details */}

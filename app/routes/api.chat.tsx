@@ -466,6 +466,7 @@ function buildSseStream(opts: {
           shopDomain: shop,
           sessionId: session_id,
           customerId: customer_id,
+          customerName: customer_first_name,
           session: updatedSession,
           checkoutUrl: effectiveCheckoutUrl,
           discountCode: result.discount_code,
