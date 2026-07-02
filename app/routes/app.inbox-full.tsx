@@ -27,17 +27,17 @@ interface ChatMessage {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const TOOL_LABELS: Record<string, string | null> = {
-  search_catalog: "🔍 Searched product catalog",
-  lookup_catalog: "🔍 Looked up product details",
-  get_product: "🔍 Fetched product info",
-  create_cart: "🛒 Created cart",
-  update_cart: "🛒 Updated cart",
-  get_cart: "🛒 Checked cart contents",
-  get_checkout_url: "✓ Generated checkout link",
-  offer_discount: "🏷 Offered discount code",
-  search_policies_and_faqs: "📋 Checked store policies",
-  get_order: "📦 Looked up order",
-  get_customer_orders: "📦 Fetched order history",
+  search_catalog: "Searched product catalog",
+  lookup_catalog: "Looked up product details",
+  get_product: "Fetched product info",
+  create_cart: "Created cart",
+  update_cart: "Updated cart",
+  get_cart: "Checked cart contents",
+  get_checkout_url: "Generated checkout link",
+  offer_discount: "Offered discount code",
+  search_policies_and_faqs: "Checked store policies",
+  get_order: "Looked up order",
+  get_customer_orders: "Fetched order history",
   unified: null,
 };
 
@@ -50,8 +50,8 @@ const DATE_OPTIONS = [
 
 const CHANNEL_OPTS = [
   { value: "all", label: "All" },
-  { value: "web", label: "🌐 Web" },
-  { value: "whatsapp", label: "💚 WhatsApp" },
+  { value: "web", label: "Web" },
+  { value: "whatsapp", label: "WhatsApp" },
 ] as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -525,7 +525,13 @@ export default function InboxFull() {
                     borderBottom: "1px solid var(--color-border)",
                     cursor: "pointer",
                     background: selected?.id === conv.id ? "#eff6ff" : "#fff",
-                    borderLeft: selected?.id === conv.id ? "3px solid var(--color-primary)" : "3px solid transparent",
+                    borderLeft: selected?.id === conv.id
+                      ? "3px solid var(--color-primary)"
+                      : conv.escalated && !conv.resolved
+                      ? "3px solid #f59e0b"
+                      : conv.resolved
+                      ? "3px solid #9ca3af"
+                      : "3px solid transparent",
                     display: "flex",
                     flexDirection: "column",
                     gap: 4,
@@ -536,9 +542,8 @@ export default function InboxFull() {
                     {isUnread
                       ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />
                       : <span style={{ width: 8, flexShrink: 0 }} />}
-                    <div style={{ width: 18, height: 18, borderRadius: "50%", background: isWA ? "#25D366" : "var(--color-primary)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {isWA ? "W" : "C"}
-                    </div>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: isWA ? "#25D366" : "#6366f1", flexShrink: 0, display: "inline-block" }} />
+                    <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: isWA ? "#15803d" : "#4338ca" }}>{isWA ? "WA" : "Web"}</span>
                     <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--color-text)" }}>
                       {customerDisplay}
                     </span>
@@ -552,10 +557,10 @@ export default function InboxFull() {
                     </span>
                     <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                       {conv.resolved && !conv.escalated && (
-                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#d1fae5", color: "#065f46", fontWeight: 600 }}>AI ✓</span>
+                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#d1fae5", color: "#065f46", fontWeight: 600 }}>AI</span>
                       )}
                       {conv.escalated && !conv.resolved && (
-                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fff7ed", color: "#c2410c", fontWeight: 600 }}>⚡</span>
+                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fef3c7", color: "#b45309", fontWeight: 600 }}>Needs reply</span>
                       )}
                       {conv.orderRevenueCents != null && (
                         <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>
@@ -588,9 +593,8 @@ export default function InboxFull() {
             <>
               {/* Conversation header */}
               <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", gap: 10, background: "#fff", flexShrink: 0 }}>
-                <div style={{ width: 24, height: 24, borderRadius: "50%", background: selected.channel === "whatsapp" ? "#25D366" : "var(--color-primary)", color: "#fff", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  {selected.channel === "whatsapp" ? "W" : "C"}
-                </div>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: selected.channel === "whatsapp" ? "#25D366" : "#6366f1", flexShrink: 0, display: "inline-block" }} />
+                <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: selected.channel === "whatsapp" ? "#15803d" : "#4338ca", flexShrink: 0 }}>{selected.channel === "whatsapp" ? "WA" : "Web"}</span>
                 <span style={{ fontWeight: 600, fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {(selected as typeof selected & { customerName?: string | null }).customerName
                     ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
@@ -598,9 +602,9 @@ export default function InboxFull() {
                 {selected.resolved ? (
                   <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#f3f4f6", color: "var(--color-neutral)", fontWeight: 500 }}>Resolved</span>
                 ) : selected.escalated ? (
-                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#fff7ed", color: "#c2410c", fontWeight: 600 }}>⚡ Needs reply</span>
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#fef3c7", color: "#b45309", fontWeight: 600 }}>Needs reply</span>
                 ) : isAiPaused ? (
-                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>⏸ AI paused</span>
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>AI paused</span>
                 ) : (
                   <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#eff6ff", color: "var(--color-primary)" }}>Pending</span>
                 )}
@@ -672,7 +676,7 @@ export default function InboxFull() {
                   if (msg.role === "note") {
                     return (
                       <div key={i} style={{ margin: "8px 0", padding: "8px 12px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "8px", borderLeft: "3px solid var(--color-warning)" }}>
-                        <div style={{ fontSize: "11px", color: "var(--color-warning)", fontWeight: 600, marginBottom: "4px" }}>🔒 Internal note</div>
+                        <div style={{ fontSize: "11px", color: "var(--color-warning)", fontWeight: 600, marginBottom: "4px" }}>Internal note</div>
                         <div style={{ fontSize: "13px", color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{msg.content}</div>
                         {msg.timestamp && (
                           <div style={{ fontSize: "10px", color: "#aaa", marginTop: "4px" }}>
@@ -725,7 +729,7 @@ export default function InboxFull() {
                       onClick={() => setReplyMode("note")}
                       style={{ padding: "6px 16px", border: "none", background: "none", cursor: "pointer", fontSize: "13px", fontWeight: replyMode === "note" ? 600 : 400, color: replyMode === "note" ? "var(--color-warning)" : "var(--color-neutral)", borderBottom: replyMode === "note" ? "2px solid var(--color-warning)" : "2px solid transparent" }}
                     >
-                      🔒 Note
+                      Note
                     </button>
                   </div>
                   <div style={{ padding: "12px 16px" }}>
@@ -828,14 +832,14 @@ export default function InboxFull() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <div>
-                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Channel</div>
+                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Channel</div>
                 <s-badge tone={selected.channel === "whatsapp" ? "success" : "info"}>
                   {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
                 </s-badge>
               </div>
 
               <div>
-                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Customer</div>
+                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Customer</div>
                 {selected.customerId ? (
                   <s-link
                     href={`https://admin.shopify.com/store/${storeHandle}/customers/${selected.customerId.replace("gid://shopify/Customer/", "")}`}
@@ -850,7 +854,7 @@ export default function InboxFull() {
 
               {selected.channel === "whatsapp" && (
                 <div>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Phone</div>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Phone</div>
                   <span style={{ fontSize: "13px", color: "#202223" }}>
                     {"****" + selected.sessionId.replace("whatsapp_", "").slice(-4)}
                   </span>
@@ -859,7 +863,7 @@ export default function InboxFull() {
 
               {selected.cartValue != null && (
                 <div>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Cart Value</div>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Cart Value</div>
                   <span style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-primary)" }}>
                     {fmtMoney(selected.cartValue)}
                   </span>
@@ -868,7 +872,7 @@ export default function InboxFull() {
 
               {selected.orderId && (
                 <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", padding: "10px 12px" }}>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 8 }}>Order</div>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Order</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)" }}>
@@ -889,15 +893,15 @@ export default function InboxFull() {
 
               {selected.discountCode && (
                 <div>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Discount Used</div>
+                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Discount Used</div>
                   <s-badge>{selected.discountCode}</s-badge>
                 </div>
               )}
 
               {aiActions.length > 0 && (
                 <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
-                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "var(--color-neutral)", textTransform: "uppercase", letterSpacing: "0.4px", listStyle: "none", display: "flex", alignItems: "center", gap: 4 }}>
-                    ▸ AI tool calls ({aiActions.length})
+                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", listStyle: "none", display: "flex", alignItems: "center", gap: 4 }}>
+                    Tool calls · {aiActions.length}
                   </summary>
                   <div style={{ padding: "4px 12px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
                     {aiActions.map((a, i) => (
@@ -908,7 +912,7 @@ export default function InboxFull() {
               )}
 
               <div>
-                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: "6px" }}>Details</div>
+                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Details</div>
                 <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: "12px" }}>
                   <span style={{ color: "#6d7175" }}>Started</span>
                   <span>{new Date(selected.startedAt as unknown as string).toLocaleDateString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
