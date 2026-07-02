@@ -33,6 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
       let lastCheck = sinceDate;
       let iterations = 0;
+      let lastViewerCount = -1; // ponytail: diff check — only send presence when count changes
       const MAX_ITERATIONS = 600; // ponytail: 30-min ceiling; upgrade to WS if needed
 
       while (iterations < MAX_ITERATIONS && !request.signal.aborted) {
@@ -71,15 +72,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
             controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
           }
 
-          // Presence: refresh TTL and broadcast viewer count every poll
+          // Presence: refresh TTL every poll, but only broadcast when count changes
           if (viewerKey && convId) {
             await redis.set(viewerKey, "1", "EX", 35).catch(() => {});
             const keys = await redis.keys(`presence:${shop}:${convId}:*`).catch(() => [] as string[]);
-            controller.enqueue(
-              encoder.encode(
-                `event: presence\ndata: ${JSON.stringify({ conv_id: convId, viewer_count: keys.length })}\n\n`,
-              ),
-            );
+            if (keys.length !== lastViewerCount) {
+              lastViewerCount = keys.length;
+              controller.enqueue(
+                encoder.encode(
+                  `event: presence\ndata: ${JSON.stringify({ conv_id: convId, viewer_count: keys.length })}\n\n`,
+                ),
+              );
+            }
           }
         } catch {
           controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));

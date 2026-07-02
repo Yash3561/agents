@@ -320,6 +320,8 @@ export default function Inbox() {
   const [lastSeen, setLastSeen] = useState(() => new Date().toISOString());
   const [realtimeConvs, setRealtimeConvs] = useState<ConvItem[]>([]);
   const [otherViewers, setOtherViewers] = useState(0);
+  // ponytail: sseKey increments to restart the SSE effect on error/reconnect (lastSeen alone can't do this — it's excluded from deps)
+  const [sseKey, setSseKey] = useState(0);
 
   const selectedId = selected?.id ?? null;
 
@@ -407,17 +409,18 @@ export default function Inbox() {
 
     es.addEventListener("reconnect", () => {
       es.close();
-      setTimeout(() => setLastSeen(new Date().toISOString()), 1000);
+      // ponytail: setSseKey (not setLastSeen) — sseKey IS in the dep array so this actually restarts the effect
+      setTimeout(() => setSseKey((k) => k + 1), 1000);
     });
 
     es.onerror = () => {
       es.close();
-      setTimeout(() => setLastSeen(new Date().toISOString()), 5000);
+      setTimeout(() => setSseKey((k) => k + 1), 5000);
     };
 
     return () => es.close();
-  // lastSeen intentionally excluded: including it causes a reconnect loop (setLastSeen → dep change → reconnect → event → setLastSeen…)
-  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // lastSeen excluded: update events must not cause reconnects (would loop). sseKey triggers reconnects only on error/server-reconnect.
+  }, [selectedId, sseKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Merge SSE updates into loader conversations
   const allConversations = useMemo<ConvItem[]>(() => {
