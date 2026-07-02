@@ -8,6 +8,7 @@ import prisma from "../db.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
 import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
 import { runQAJudge } from "../lib/agents/merchant-analyst.server";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { FilterButtonGroup } from "~/components/FilterButtonGroup";
 import { JourneyFunnel } from "~/components/JourneyFunnel";
 
@@ -429,6 +430,15 @@ export default function Inbox() {
     });
   }, [conversations, realtimeConvs]);
 
+  const listRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: allConversations.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 80,
+    overscan: 5,
+    measureElement: (el) => el.getBoundingClientRect().height,
+  });
+
   // Clear textarea and reset mode after submission
   useEffect(() => {
     if (prevNavState.current === "submitting" && navigation.state === "idle") {
@@ -591,80 +601,97 @@ export default function Inbox() {
           </div>
 
           {/* Conversation rows */}
-          <div style={{ flex: 1, overflowY: "auto" }}>
+          <div ref={listRef} style={{ flex: 1, overflowY: "auto", position: "relative" }}>
             {allConversations.length === 0 ? (
               <div style={{ padding: "24px 16px", textAlign: "center" }}>
                 <s-text tone="neutral">No conversations match these filters.</s-text>
               </div>
-            ) : allConversations.map((conv) => {
-              const isWA = conv.channel === "whatsapp";
-              const convMsgs = Array.isArray(conv.messages) ? (conv.messages as Array<{ role: string }>) : [];
-              const lastRole = convMsgs.length > 0 ? convMsgs[convMsgs.length - 1]?.role : null;
-              const isUnread = conv.escalated && !conv.resolved && lastRole === "user";
-              const customerDisplay = (conv as typeof conv & { customerName?: string | null }).customerName
-                ?? (isWA ? formatPhone(conv.sessionId) : "Visitor");
-              return (
-                <div
-                  key={conv.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={conv.firstUserMessage ?? "Conversation"}
-                  onClick={() => selectConversation(conv.id)}
-                  onKeyDown={(e) => e.key === "Enter" && selectConversation(conv.id)}
-                  style={{
-                    padding: "10px 12px",
-                    borderBottom: "1px solid var(--color-border)",
-                    cursor: "pointer",
-                    background: selected?.id === conv.id ? "#eff6ff" : "#fff",
-                    borderLeft: selected?.id === conv.id
-                      ? "3px solid var(--color-primary)"
-                      : conv.escalated && !conv.resolved
-                      ? "3px solid #f59e0b"
-                      : conv.resolved
-                      ? "3px solid #9ca3af"
-                      : "3px solid transparent",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    minHeight: 60,
-                  }}
-                >
-                  {/* Row 1: unread dot + channel indicator + name + time */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {isUnread
-                      ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />
-                      : <span style={{ width: 8, flexShrink: 0 }} />}
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: isWA ? "#25D366" : "#6366f1", flexShrink: 0, display: "inline-block" }} />
-                    <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: isWA ? "#15803d" : "#4338ca" }}>{isWA ? "WA" : "Web"}</span>
-                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--color-text)" }}>
-                      {customerDisplay}
-                    </span>
-                    <span style={{ fontSize: 11, color: "var(--color-neutral)", opacity: 0.65, flexShrink: 0 }}>
-                      {relTime(conv.lastMessageAt)}
-                    </span>
-                  </div>
-                  {/* Row 2: message preview + badges */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, paddingLeft: 14 }}>
-                    <span style={{ fontSize: 12, color: "var(--color-neutral)", opacity: 0.75, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {conv.firstUserMessage?.slice(0, 60) ?? "No message"}
-                    </span>
-                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                      {conv.resolved && !conv.escalated && (
-                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#d1fae5", color: "#065f46", fontWeight: 600 }}>AI</span>
-                      )}
-                      {conv.escalated && !conv.resolved && (
-                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fef3c7", color: "#b45309", fontWeight: 600 }}>Needs reply</span>
-                      )}
-                      {conv.orderRevenueCents != null && (
-                        <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>
-                          ${Math.round(conv.orderRevenueCents / 100)}
-                        </span>
-                      )}
+            ) : (
+              <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const conv = allConversations[virtualRow.index];
+                  const isWA = conv.channel === "whatsapp";
+                  const convMsgs = Array.isArray(conv.messages) ? (conv.messages as Array<{ role: string }>) : [];
+                  const lastRole = convMsgs.length > 0 ? convMsgs[convMsgs.length - 1]?.role : null;
+                  const isUnread = conv.escalated && !conv.resolved && lastRole === "user";
+                  const customerDisplay = (conv as typeof conv & { customerName?: string | null }).customerName
+                    ?? (isWA ? formatPhone(conv.sessionId) : "Visitor");
+                  return (
+                    <div
+                      key={conv.id}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    >
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label={conv.firstUserMessage ?? "Conversation"}
+                        onClick={() => selectConversation(conv.id)}
+                        onKeyDown={(e) => e.key === "Enter" && selectConversation(conv.id)}
+                        style={{
+                          padding: "10px 12px",
+                          borderBottom: "1px solid var(--color-border)",
+                          cursor: "pointer",
+                          background: selected?.id === conv.id ? "#eff6ff" : "#fff",
+                          borderLeft: selected?.id === conv.id
+                            ? "3px solid var(--color-primary)"
+                            : conv.escalated && !conv.resolved
+                            ? "3px solid #f59e0b"
+                            : conv.resolved
+                            ? "3px solid #9ca3af"
+                            : "3px solid transparent",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                          minHeight: 60,
+                        }}
+                      >
+                        {/* Row 1: unread dot + channel indicator + name + time */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {isUnread
+                            ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />
+                            : <span style={{ width: 8, flexShrink: 0 }} />}
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: isWA ? "#25D366" : "#6366f1", flexShrink: 0, display: "inline-block" }} />
+                          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: isWA ? "#15803d" : "#4338ca" }}>{isWA ? "WA" : "Web"}</span>
+                          <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--color-text)" }}>
+                            {customerDisplay}
+                          </span>
+                          <span style={{ fontSize: 11, color: "var(--color-neutral)", opacity: 0.65, flexShrink: 0 }}>
+                            {relTime(conv.lastMessageAt)}
+                          </span>
+                        </div>
+                        {/* Row 2: message preview + badges */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 5, paddingLeft: 14 }}>
+                          <span style={{ fontSize: 12, color: "var(--color-neutral)", opacity: 0.75, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {conv.firstUserMessage?.slice(0, 60) ?? "No message"}
+                          </span>
+                          <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                            {conv.resolved && !conv.escalated && (
+                              <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#d1fae5", color: "#065f46", fontWeight: 600 }}>AI</span>
+                            )}
+                            {conv.escalated && !conv.resolved && (
+                              <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fef3c7", color: "#b45309", fontWeight: 600 }}>Needs reply</span>
+                            )}
+                            {conv.orderRevenueCents != null && (
+                              <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>
+                                ${Math.round(conv.orderRevenueCents / 100)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
 
             {hasMore && (
               <div style={{ padding: "12px", textAlign: "center" }}>
