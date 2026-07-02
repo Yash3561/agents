@@ -10,6 +10,7 @@ import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
 import { runQAJudge } from "../lib/agents/merchant-analyst.server";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
+import { MessageBubble } from "~/components/MessageBubble";
 import { FilterButtonGroup } from "~/components/FilterButtonGroup";
 import { JourneyFunnel } from "~/components/JourneyFunnel";
 
@@ -814,29 +815,8 @@ export default function Inbox() {
                       </div>
                     );
                   }
-                  const isUser = msg.role === "user";
-                  const isMerchant = msg.content?.startsWith("[Merchant]");
                   return (
-                    <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start" }}>
-                      {!isUser && (
-                        <span style={{ fontSize: "10px", color: "#555", marginBottom: "2px", marginLeft: "4px" }}>
-                          {isMerchant ? "You (Merchant)" : "NeonPing AI"}
-                        </span>
-                      )}
-                      <div style={{
-                        background: isUser ? "#f0f0f0" : isMerchant ? "#e8ffe8" : "#e8f4fd",
-                        padding: "7px 10px", margin: "2px", borderRadius: "8px",
-                        maxWidth: "75%", whiteSpace: "pre-wrap", wordBreak: "break-word",
-                        fontSize: "13px",
-                      }}>
-                        {isMerchant ? msg.content.replace("[Merchant] ", "") : msg.content}
-                      </div>
-                      {msg.timestamp && (
-                        <div style={{ fontSize: "10px", color: "#aaa", marginTop: "1px", textAlign: isUser ? "right" : "left" }}>
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </div>
-                      )}
-                    </div>
+                    <MessageBubble key={i} role={msg.role} content={msg.content} timestamp={msg.timestamp} />
                   );
                 })}
               </div>
