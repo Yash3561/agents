@@ -9,6 +9,7 @@ import { adminGraphql } from "../lib/mcp/admin.server";
 import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
 import { runQAJudge } from "../lib/agents/merchant-analyst.server";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 import { FilterButtonGroup } from "~/components/FilterButtonGroup";
 import { JourneyFunnel } from "~/components/JourneyFunnel";
 
@@ -520,10 +521,11 @@ export default function Inbox() {
     <s-page heading="Inbox">
       {/* ponytail: s-app-window is a Shopify web component; show() opens full-viewport overlay */}
       <s-app-window id="inbox-win" src="/app/inbox-full" />
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr 280px", gap: "0", height: "calc(100vh - 120px)", minHeight: "600px" }}>
+      <PanelGroup orientation="horizontal" style={{ height: "calc(100vh - 120px)", minHeight: "600px" }}>
 
         {/* ── Left Panel: Conversation List ────────────────────────────────── */}
-        <div style={{ borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <Panel defaultSize={22} minSize={15} maxSize={35}>
+        <div style={{ height: "100%", borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
           {/* Notification permission prompt */}
           {notifPermission === "default" && (
@@ -702,9 +704,15 @@ export default function Inbox() {
             )}
           </div>
         </div>
+        </Panel>
+
+        <PanelResizeHandle style={{ width: 4, background: "transparent", cursor: "col-resize", flexShrink: 0, position: "relative" }}>
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: 2, background: "var(--color-border)", transition: "background 0.15s" }} />
+        </PanelResizeHandle>
 
         {/* ── Center Panel: Transcript ──────────────────────────────────────── */}
-        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
+        <Panel defaultSize={52} minSize={35}>
+        <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
           {!selected ? (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#8c9196", fontSize: "14px" }}>
               Select a conversation to view the transcript
@@ -945,9 +953,15 @@ export default function Inbox() {
             </>
           )}
         </div>
+        </Panel>
+
+        <PanelResizeHandle style={{ width: 4, background: "transparent", cursor: "col-resize", flexShrink: 0, position: "relative" }}>
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%", transform: "translateX(-50%)", width: 2, background: "var(--color-border)", transition: "background 0.15s" }} />
+        </PanelResizeHandle>
 
         {/* ── Right Panel: Customer Sidebar ─────────────────────────────────── */}
-        <div style={{ overflowY: "auto", padding: "16px" }}>
+        <Panel defaultSize={26} minSize={18} maxSize={40}>
+        <div style={{ height: "100%", overflowY: "auto", padding: "16px", borderLeft: "1px solid var(--color-border)" }}>
           {!selected ? (
             <div style={{ fontSize: "13px", color: "#8c9196" }}>No conversation selected</div>
           ) : (
@@ -1126,8 +1140,9 @@ export default function Inbox() {
             </div>
           )}
         </div>
+        </Panel>
 
-      </div>
+      </PanelGroup>
     </s-page>
   );
 }
