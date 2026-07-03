@@ -381,11 +381,11 @@ export default function Settings() {
               help-text="Where escalated conversations and support alerts are sent."
             ></s-email-field>
             <s-text-field
-              label="WhatsApp number"
+              label="Human handoff number"
               name="whatsappNumber"
               value={whatsappNumber}
               onInput={(e: Event) => setWhatsappNumber((e.target as HTMLInputElement).value)}
-              help-text="Customers can tap to reach you on WhatsApp when they need human help. Include country code, e.g. +1234567890"
+              help-text="When AI escalates, customers are told to contact this number directly. Include country code, e.g. +1234567890"
             ></s-text-field>
           </s-stack>
         </s-section>
@@ -410,24 +410,46 @@ export default function Settings() {
           </div>
         )}
         {merchant.waConnectedAt ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-            <s-badge tone="success">Connected</s-badge>
-            <s-text>{merchant.waPhone ?? merchant.waPhoneNumberId}</s-text>
-            <s-button
-              variant="tertiary"
-              tone="critical"
-              onClick={async () => {
-                await fetch("/api/whatsapp/disconnect", { method: "POST" });
-                window.location.reload();
-              }}
-            >
-              Disconnect
-            </s-button>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+              <s-badge tone="success">Connected</s-badge>
+              <s-text>{merchant.waPhone ?? merchant.waPhoneNumberId}</s-text>
+              <s-button
+                variant="tertiary"
+                tone="critical"
+                onClick={async () => {
+                  await fetch("/api/whatsapp/disconnect", { method: "POST" });
+                  window.location.reload();
+                }}
+              >
+                Disconnect
+              </s-button>
+            </div>
+            {merchant.waPhone && (
+              <div style={{ marginTop: 8, padding: "8px 12px", background: "#f9fafb", border: "1px solid var(--color-border)", borderRadius: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "#6d7175" }}>Share:</span>
+                <code style={{ fontSize: 12, flex: 1 }}>wa.me/{merchant.waPhone.replace(/\D/g, "")}</code>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(`https://wa.me/${merchant.waPhone!.replace(/\D/g, "")}`)}
+                  style={{ fontSize: 11, padding: "3px 8px", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", background: "white" }}
+                >
+                  Copy
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div>
             <p style={{ fontSize: "13px", color: "#666", marginBottom: "16px", marginTop: 0 }}>
               Connect your WhatsApp Business number so customers can chat with your AI assistant on WhatsApp.
+            </p>
+            <p style={{ fontSize: 12, color: "#6d7175", margin: "0 0 12px" }}>
+              Don&apos;t have a WhatsApp Business Account?{" "}
+              <a href="https://business.facebook.com/wa/manage/home/" target="_blank" rel="noreferrer" style={{ color: "#2c6ecb" }}>
+                Set one up on Meta →
+              </a>{" "}
+              (free, takes ~10 minutes)
             </p>
             <s-button
               type="button"

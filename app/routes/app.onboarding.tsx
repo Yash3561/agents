@@ -50,7 +50,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(params ? `/app?${params}` : "/app");
   }
 
-  return { shop, merchant, appUrl: process.env.SHOPIFY_APP_URL ?? "" };
+  return { shop, merchant, appUrl: process.env.SHOPIFY_APP_URL ?? "", waAppId: process.env.WHATSAPP_APP_ID ?? "" };
 };
 
 const VALID_VOICES_ONBOARDING = new Set([
@@ -342,7 +342,7 @@ function OnboardingPlanCard({ plan, onChoose, isLoading, choosingPlan }: Onboard
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function Onboarding() {
-  const { shop, merchant, appUrl } = useLoaderData<typeof loader>();
+  const { shop, merchant, appUrl, waAppId } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
@@ -641,6 +641,45 @@ export default function Onboarding() {
           <s-text tone="neutral">
             In the theme editor: click <strong>Add block</strong> → find <strong>NeonPing Chat Widget</strong> → click <strong>Save</strong>. That{"'"}s it — the widget is live on your store.
           </s-text>
+          {/* WhatsApp channel prompt */}
+          {!merchant.waConnectedAt && (
+            <div style={{ marginBottom: 24, padding: 16, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#25d366", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700, fontSize: 16 }}>W</div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>Add WhatsApp (optional)</div>
+                  <div style={{ fontSize: 12, color: "#6d7175" }}>Reach customers on WhatsApp with the same AI</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!waAppId) return;
+                  const redirectUri = encodeURIComponent(`${appUrl}/api/whatsapp/connect`);
+                  const scope = encodeURIComponent("whatsapp_business_management,whatsapp_business_messaging");
+                  const extras = encodeURIComponent(JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
+                  const url = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${waAppId}&display=popup&extras=${extras}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${encodeURIComponent(merchant.shopDomain)}`;
+                  const popup = window.open(url, "waConnect", "width=660,height=750,scrollbars=yes");
+                  const timer = setInterval(() => {
+                    if (popup?.closed) { clearInterval(timer); window.location.reload(); }
+                  }, 500);
+                }}
+                style={{ background: "#25d366", color: "white", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+              >
+                Connect WhatsApp Business
+              </button>
+              <span style={{ fontSize: 12, color: "#6d7175", marginLeft: 10 }}>Takes ~2 minutes · Can skip for now</span>
+            </div>
+          )}
+
+          {/* If already connected, show a success badge instead */}
+          {merchant.waConnectedAt && merchant.waPhone && (
+            <div style={{ marginBottom: 24, padding: 12, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ color: "#25d366", fontWeight: 700 }}>✓</span>
+              <span style={{ fontSize: 13, color: "#027a48" }}>WhatsApp connected — {merchant.waPhone}</span>
+            </div>
+          )}
+
           <s-checkbox
             label="I've added the widget to my theme"
             checked={themeConfirmed}

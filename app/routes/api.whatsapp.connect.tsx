@@ -10,7 +10,7 @@
 
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
-import { encryptToken } from "~/lib/whatsapp.server";
+import { encryptToken, sendTextMessage } from "~/lib/whatsapp.server";
 
 const close = (msg: string) =>
   new Response(
@@ -77,5 +77,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
-  return close("Connected! You can close this window.");
+  // Send a test message so merchant knows the connection works
+  const displayPhone = (phoneData as { display_phone_number?: string }).display_phone_number;
+  if (phoneNumberId && displayPhone) {
+    try {
+      const testNumber = displayPhone.replace(/\D/g, "");
+      await sendTextMessage(
+        phoneNumberId,
+        tokenData.access_token,
+        testNumber,
+        "✅ NeonPing connected! Your AI assistant is now live on WhatsApp. Customers who message this number will get instant AI-powered replies.\n\nReply to this message to test it.",
+      );
+    } catch { /* non-fatal, don't block the connect flow */ }
+  }
+
+  const phone = displayPhone ?? "";
+  return new Response(
+    `<!DOCTYPE html><html><body><script>if(window.opener){window.opener.postMessage({type:'WA_CONNECTED',phone:'${phone}'},'*');}window.close();</script><p>Connected! Closing...</p></body></html>`,
+    { headers: { "Content-Type": "text/html" } },
+  );
 }
