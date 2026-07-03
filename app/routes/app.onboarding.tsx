@@ -46,7 +46,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (merchant.onboardedAt) {
-    throw redirect("/app");
+    const params = new URL(request.url).searchParams.toString();
+    throw redirect(params ? `/app?${params}` : "/app");
   }
 
   return { shop, merchant, appUrl: process.env.SHOPIFY_APP_URL ?? "" };
@@ -66,9 +67,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (formData.get("intent") === "save-step") {
     try {
+      const updateData: Record<string, unknown> = { onboardingStep: Number(formData.get("step")) || 1 };
+      const botName = formData.get("botName");
+      const widgetGreeting = formData.get("widgetGreeting");
+      const widgetColor = formData.get("widgetColor");
+      const brandVoice = formData.get("brandVoice");
+      if (botName) updateData.botName = String(botName);
+      if (widgetGreeting) updateData.widgetGreeting = String(widgetGreeting);
+      if (widgetColor) updateData.widgetColor = String(widgetColor);
+      if (brandVoice) updateData.brandVoice = String(brandVoice);
       await prisma.merchant.update({
         where: { shopDomain: session.shop },
-        data: { onboardingStep: Number(formData.get("step")) || 1 },
+        data: updateData,
       });
     } catch {
       return { error: "Failed to save settings. Please try again." };
@@ -86,7 +96,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const isTest = process.env.BILLING_TEST_MODE === "true";
     const shopHandle = session.shop.replace(".myshopify.com", "");
     // Return merchant to Step 4 (Go Live) after Shopify billing confirmation
-    const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}?step=4`;
+    const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}`;
 
     try {
       const response = await admin.graphql(
@@ -375,9 +385,9 @@ export default function Onboarding() {
 
   const selectedPreset = VOICE_PRESETS.find((p) => p.value === brandVoice);
 
-  const goToStep = (nextStep: number) => {
+  const goToStep = (nextStep: number, extraData: Record<string, string> = {}) => {
     setStep(nextStep);
-    fetcher.submit({ intent: "save-step", step: String(nextStep) }, { method: "POST" });
+    fetcher.submit({ intent: "save-step", step: String(nextStep), ...extraData }, { method: "POST" });
   };
 
   const choosePlan = (planKey: OnboardingPlanKey) => {
@@ -469,7 +479,7 @@ export default function Onboarding() {
           ></s-color-field>
           <WidgetPreview color={widgetColor} greeting={widgetGreeting} botName={botName} position="bottom-right" />
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => goToStep(2)} variant="primary">
+            <s-button onClick={() => goToStep(2, { botName, widgetGreeting, widgetColor, brandVoice })} variant="primary">
               Next
             </s-button>
           </s-stack>
@@ -616,7 +626,7 @@ export default function Onboarding() {
             <s-button onClick={() => goToStep(3)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={finish} variant="primary" disabled={!themeConfirmed}>
+            <s-button onClick={finish} variant="primary" disabled={!themeConfirmed || fetcher.state !== "idle"}>
               Finish
             </s-button>
           </s-stack>
