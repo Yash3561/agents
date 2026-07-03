@@ -38,7 +38,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const excludedPages: string[] = merchant.excludedPages?.length
     ? (merchant.excludedPages as string[])
     : ["checkout"];
-  return { merchant: { ...merchant, excludedPages }, waAppId: process.env.WHATSAPP_APP_ID ?? "" };
+  return { merchant: { ...merchant, excludedPages }, waAppId: process.env.WHATSAPP_APP_ID ?? "", appUrl: process.env.SHOPIFY_APP_URL ?? "" };
 };
 
 const VALID_POSITIONS = new Set(["bottom-right", "bottom-left"]);
@@ -97,7 +97,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Settings() {
-  const { merchant, waAppId } = useLoaderData<typeof loader>();
+  const { merchant, waAppId, appUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const formRef = useRef<HTMLFormElement>(null);
@@ -117,8 +117,6 @@ export default function Settings() {
   const [customPathInput, setCustomPathInput] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const customPathFieldRef = useRef<any>(null);
-  // Captures waba_id / phone_number_id from Meta Embedded Signup postMessage
-  const waSessionRef = useRef<{ wabaId: string; phoneNumberId: string }>({ wabaId: "", phoneNumberId: "" });
 
   const addCustomPath = () => {
     const path = customPathInput.trim();
@@ -151,35 +149,6 @@ export default function Settings() {
     }
   }, [fetcher.data, shopify]);
 
-  // Load FB SDK for Meta Embedded Signup + capture WABA info from postMessage
-  useEffect(() => {
-    type WinWithFB = { FB?: { init: (opts: object) => void } };
-    const win = window as unknown as WinWithFB;
-
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") return;
-      try {
-        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        if (data?.type === "WA_EMBEDDED_SIGNUP" && data?.event === "FINISH") {
-          waSessionRef.current.wabaId = data.data?.waba_id ?? "";
-          waSessionRef.current.phoneNumberId = data.data?.phone_number_id ?? "";
-        }
-      } catch { /* ignore malformed messages */ }
-    };
-    window.addEventListener("message", onMessage);
-
-    if (!waAppId || win.FB) return () => window.removeEventListener("message", onMessage);
-    const script = document.createElement("script");
-    script.src = "https://connect.facebook.net/en_US/sdk.js";
-    script.async = true;
-    script.defer = true;
-    document.body.appendChild(script);
-    script.onload = () => {
-      (window as unknown as WinWithFB).FB?.init({ appId: waAppId, version: "v19.0" });
-    };
-
-    return () => window.removeEventListener("message", onMessage);
-  }, [waAppId]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -464,26 +433,17 @@ export default function Settings() {
               type="button"
               variant="primary"
               onClick={() => {
-                type WinWithFBLogin = { FB?: { login: (cb: (r: { authResponse?: { code?: string } }) => void, opts: object) => void } };
-                const fb = (window as unknown as WinWithFBLogin).FB;
-                if (!fb || !waAppId) return;
-                fb.login(
-                  (response) => {
-                    if (response.authResponse?.code) {
-                      const { wabaId, phoneNumberId } = waSessionRef.current;
-                      const params = new URLSearchParams({ code: response.authResponse.code });
-                      if (wabaId) params.set("waba_id", wabaId);
-                      if (phoneNumberId) params.set("phone_number_id", phoneNumberId);
-                      window.location.href = `/api/whatsapp/connect?${params.toString()}`;
-                    }
-                  },
-                  {
-                    config_id: waAppId,
-                    response_type: "code",
-                    override_default_response_type: true,
-                    extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
-                  },
-                );
+                if (!waAppId) return;
+                const redirectUri = encodeURIComponent(`${appUrl}/api/whatsapp/connect`);
+                const scope = encodeURIComponent("whatsapp_business_management,whatsapp_business_messaging");
+                const extras = encodeURIComponent(JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
+                const state = encodeURIComponent(merchant.shopDomain);
+                const url = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${waAppId}&display=popup&extras=${extras}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${state}`;
+                const popup = window.open(url, "waConnect", "width=660,height=750,scrollbars=yes");
+                // ponytail: poll until popup closes, then reload to pick up waConnectedAt from DB
+                const timer = setInterval(() => {
+                  if (popup?.closed) { clearInterval(timer); window.location.reload(); }
+                }, 500);
               }}
             >
               Connect WhatsApp Business
