@@ -742,23 +742,33 @@ export default function Inbox() {
             </div>
           ) : (
             <>
-              {/* Conversation header */}
+              {/* Conversation header — Phase 6: circle channel icon, 3-state badge, resolve + pause in header */}
               <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", gap: 10, background: "#fff", flexShrink: 0 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: selected.channel === "whatsapp" ? "#25D366" : "#6366f1", flexShrink: 0, display: "inline-block" }} />
-                <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: selected.channel === "whatsapp" ? "#15803d" : "#4338ca", flexShrink: 0 }}>{selected.channel === "whatsapp" ? "WA" : "Web"}</span>
+                {/* Circle channel icon */}
+                <div style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, background: selected.channel === "whatsapp" ? "#25d366" : "#2c6ecb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "white", fontWeight: 700 }}>
+                  {selected.channel === "whatsapp" ? "W" : "C"}
+                </div>
+                {/* Customer name */}
                 <span style={{ fontWeight: 600, fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {(selected as typeof selected & { customerName?: string | null }).customerName
-                    ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
+                  {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
                 </span>
+                {/* Status badge — 3 states; isAiPaused conveyed by Resume button label */}
                 {selected.resolved ? (
-                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#f3f4f6", color: "var(--color-neutral)", fontWeight: 500 }}>Resolved</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "#027a48", background: "#d1fae5", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px" }}>Resolved</span>
                 ) : selected.escalated ? (
-                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#fef3c7", color: "#b45309", fontWeight: 600 }}>Needs reply</span>
-                ) : isAiPaused ? (
-                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>AI paused</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "#b54708", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 4, padding: "2px 8px" }}>Needs Reply</span>
                 ) : (
-                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "#eff6ff", color: "var(--color-primary)" }}>Pending</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: "#2c6ecb", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 4, padding: "2px 8px" }}>AI Handling</span>
                 )}
+                {/* Resolve — moved from sidebar */}
+                {!selected.resolved && (
+                  <Form method="post" style={{ display: "inline" }}>
+                    <input type="hidden" name="intent" value="resolve" />
+                    <input type="hidden" name="conversationId" value={selected.id} />
+                    <button type="submit" style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer" }}>✓ Resolve</button>
+                  </Form>
+                )}
+                {/* Pause AI */}
                 {!selected.resolved && (
                   <pauseFetcher.Form method="POST" style={{ display: "inline" }}>
                     <input type="hidden" name="intent" value="pause-ai" />
@@ -961,27 +971,22 @@ export default function Inbox() {
           {!selected ? (
             <div style={{ fontSize: "13px", color: "#8c9196" }}>No conversation selected</div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              {/* Channel */}
-              <div>
-                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Channel</div>
-                <s-badge tone={selected.channel === "whatsapp" ? "success" : "info"}>
-                  {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
-                </s-badge>
-              </div>
-
-              {/* Customer */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>{/* Phase 5: Customer → Phone → Cart → Order → Discount → Escalate → AI trace → Details → Train → Channel */}
+              {/* Customer — name at top, Shopify link below */}
               <div>
                 <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Customer</div>
-                {selected.customerId ? (
-                  <s-link
-                    href={`https://admin.shopify.com/store/${storeHandle}/customers/${selected.customerId.replace("gid://shopify/Customer/", "")}`}
-                    target="_blank"
-                  >
-                    View in Shopify →
-                  </s-link>
-                ) : (
-                  <span style={{ fontSize: "13px", color: "#6d7175" }}>Anonymous</span>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a" }}>
+                  {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
+                </div>
+                {selected.customerId && (
+                  <div style={{ marginTop: 4 }}>
+                    <s-link
+                      href={`https://admin.shopify.com/store/${storeHandle}/customers/${selected.customerId.replace("gid://shopify/Customer/", "")}`}
+                      target="_blank"
+                    >
+                      View in Shopify →
+                    </s-link>
+                  </div>
                 )}
               </div>
 
@@ -1035,7 +1040,18 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* AI Actions — collapsed by default */}
+              {/* Quick Actions — Resolve moved to center header; Escalate stays here */}
+              {!selected.escalated && !selected.resolved && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
+                  <Form method="post">
+                    <input type="hidden" name="intent" value="escalate" />
+                    <input type="hidden" name="conversationId" value={selected.id} />
+                    <div style={{ width: "100%" }}><s-button type="submit" tone="critical">Escalate — Enable Reply</s-button></div>
+                  </Form>
+                </div>
+              )}
+
+              {/* AI tool trace — collapsed by default */}
               {aiActions.length > 0 && (
                 <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
                   <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", listStyle: "none", display: "flex", alignItems: "center", gap: 4 }}>
@@ -1116,22 +1132,12 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Actions */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
-                {!selected.resolved && (
-                  <Form method="post">
-                    <input type="hidden" name="intent" value="resolve" />
-                    <input type="hidden" name="conversationId" value={selected.id} />
-                    <div style={{ width: "100%" }}><s-button type="submit" variant="secondary">Mark as Resolved</s-button></div>
-                  </Form>
-                )}
-                {!selected.escalated && !selected.resolved && (
-                  <Form method="post">
-                    <input type="hidden" name="intent" value="escalate" />
-                    <input type="hidden" name="conversationId" value={selected.id} />
-                    <div style={{ width: "100%" }}><s-button type="submit" tone="critical">Escalate — Enable Reply</s-button></div>
-                  </Form>
-                )}
+              {/* Channel */}
+              <div>
+                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Channel</div>
+                <s-badge tone={selected.channel === "whatsapp" ? "success" : "info"}>
+                  {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
+                </s-badge>
               </div>
             </div>
           )}
