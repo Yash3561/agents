@@ -57,6 +57,7 @@ interface InboundMessage {
   customer_id?: string;
   customer_access_token?: string;
   customer_first_name?: string;
+  customer_last_name?: string;
   cart_total_cents?: number;
   cartAction?: CartAction;
 }
@@ -81,7 +82,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
-  const { session_id, shop, message, customer_id, customer_access_token, customer_first_name, cart_total_cents, cartAction } = body;
+  const { session_id, shop, message, customer_id, customer_access_token, customer_first_name, customer_last_name, cart_total_cents, cartAction } = body;
 
   if (!session_id || !shop || !message?.trim()) {
     return new Response(JSON.stringify({ error: "missing_fields" }), {
@@ -182,6 +183,7 @@ export async function action({ request }: ActionFunctionArgs) {
     customer_id,
     customer_access_token,
     customer_first_name,
+    customerName: [customer_first_name, customer_last_name].filter(Boolean).join(" ") || undefined,
     cart_total_cents,
     cartAction,
   });
@@ -229,6 +231,7 @@ function buildSseStream(opts: {
   customer_id?: string;
   customer_access_token?: string;
   customer_first_name?: string;
+  customerName?: string;
   cart_total_cents?: number;
   cartAction?: CartAction;
 }): ReadableStream<Uint8Array> {
@@ -241,6 +244,7 @@ function buildSseStream(opts: {
     customer_id,
     customer_access_token,
     customer_first_name,
+    customerName,
     cart_total_cents,
     cartAction,
   } = opts;
@@ -466,7 +470,7 @@ function buildSseStream(opts: {
           shopDomain: shop,
           sessionId: session_id,
           customerId: customer_id,
-          customerName: customer_first_name,
+          customerName,
           session: updatedSession,
           checkoutUrl: effectiveCheckoutUrl,
           discountCode: result.discount_code,
