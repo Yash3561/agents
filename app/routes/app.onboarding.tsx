@@ -426,7 +426,7 @@ export default function Onboarding() {
   };
 
   const storeHandle = shop.replace(".myshopify.com", "");
-  const themeEditorUrl = `https://admin.shopify.com/store/${storeHandle}/themes`;
+  const themeEditorUrl = `https://admin.shopify.com/store/${storeHandle}/themes/current/editor?context=apps`;
   const isBillingLoading = fetcher.state !== "idle" && choosingPlan !== null;
 
   return (
@@ -595,15 +595,23 @@ export default function Onboarding() {
 
       {step === 4 && (
         <s-section heading="Step 4 of 4 — Go live">
-          {/* Warning banner if no active plan */}
+          {/* Plan status banner at step 4 */}
           {!isActivePlan && (
             <div style={{ marginBottom: "16px" }}>
-              <s-banner tone="warning">
-                No active plan — customers won&apos;t be able to chat until you subscribe.{" "}
-                <button type="button" onClick={() => goToStep(3)} style={{ background: "none", border: "none", color: "inherit", fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: "inherit" }}>
-                  Choose a plan →
-                </button>
-              </s-banner>
+              {merchant.onboardingStep >= 4 ? (
+                /* ponytail: merchant returned from billing but webhook hasn't fired yet — show pending state, not "no plan" warning */
+                <div style={{ textAlign: "center", padding: "24px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
+                  <p style={{ fontWeight: 600, fontSize: 14, color: "#1e40af", marginBottom: 4 }}>Your trial is being confirmed…</p>
+                  <p style={{ color: "#3b82f6", fontSize: 13, margin: 0 }}>Shopify is activating your subscription. Refresh if this persists.</p>
+                </div>
+              ) : (
+                <s-banner tone="warning">
+                  No active plan — customers won&apos;t be able to chat until you subscribe.{" "}
+                  <button type="button" onClick={() => goToStep(3)} style={{ background: "none", border: "none", color: "inherit", fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: "inherit" }}>
+                    Choose a plan →
+                  </button>
+                </s-banner>
+              )}
             </div>
           )}
 
@@ -611,9 +619,25 @@ export default function Onboarding() {
             Enable the NeonPing chat widget on your storefront by opening your theme editor
             and turning on the App Embed.
           </s-paragraph>
-          <s-link href={themeEditorUrl} target="_blank">
-            Open Theme Editor → Add Widget
-          </s-link>
+          <div style={{ margin: "12px 0" }}>
+            <a
+              href={themeEditorUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: "inline-block",
+                padding: "10px 20px",
+                background: "#1a1a1a",
+                color: "#ffffff",
+                borderRadius: "8px",
+                fontWeight: 700,
+                fontSize: "14px",
+                textDecoration: "none",
+              }}
+            >
+              Open Theme Editor →
+            </a>
+          </div>
           <s-text tone="neutral">
             In the theme editor: click <strong>Add block</strong> → find <strong>NeonPing Chat Widget</strong> → click <strong>Save</strong>. That{"'"}s it — the widget is live on your store.
           </s-text>

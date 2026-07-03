@@ -117,6 +117,8 @@ export default function Settings() {
   const [customPathInput, setCustomPathInput] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const customPathFieldRef = useRef<any>(null);
+  // Captures waba_id / phone_number_id from Meta Embedded Signup postMessage
+  const waSessionRef = useRef<{ wabaId: string; phoneNumberId: string }>({ wabaId: "", phoneNumberId: "" });
 
   const addCustomPath = () => {
     const path = customPathInput.trim();
@@ -149,11 +151,24 @@ export default function Settings() {
     }
   }, [fetcher.data, shopify]);
 
-  // Load FB SDK for Meta Embedded Signup
+  // Load FB SDK for Meta Embedded Signup + capture WABA info from postMessage
   useEffect(() => {
     type WinWithFB = { FB?: { init: (opts: object) => void } };
     const win = window as unknown as WinWithFB;
-    if (!waAppId || win.FB) return;
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") return;
+      try {
+        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (data?.type === "WA_EMBEDDED_SIGNUP" && data?.event === "FINISH") {
+          waSessionRef.current.wabaId = data.data?.waba_id ?? "";
+          waSessionRef.current.phoneNumberId = data.data?.phone_number_id ?? "";
+        }
+      } catch { /* ignore malformed messages */ }
+    };
+    window.addEventListener("message", onMessage);
+
+    if (!waAppId || win.FB) return () => window.removeEventListener("message", onMessage);
     const script = document.createElement("script");
     script.src = "https://connect.facebook.net/en_US/sdk.js";
     script.async = true;
@@ -162,6 +177,8 @@ export default function Settings() {
     script.onload = () => {
       (window as unknown as WinWithFB).FB?.init({ appId: waAppId, version: "v19.0" });
     };
+
+    return () => window.removeEventListener("message", onMessage);
   }, [waAppId]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -453,7 +470,11 @@ export default function Settings() {
                 fb.login(
                   (response) => {
                     if (response.authResponse?.code) {
-                      window.location.href = `/api/whatsapp/connect?code=${response.authResponse.code}`;
+                      const { wabaId, phoneNumberId } = waSessionRef.current;
+                      const params = new URLSearchParams({ code: response.authResponse.code });
+                      if (wabaId) params.set("waba_id", wabaId);
+                      if (phoneNumberId) params.set("phone_number_id", phoneNumberId);
+                      window.location.href = `/api/whatsapp/connect?${params.toString()}`;
                     }
                   },
                   {
