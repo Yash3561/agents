@@ -536,6 +536,16 @@ export default function Onboarding() {
                 </s-button>
               </s-stack>
             </div>
+          ) : merchant.onboardingStep >= 4 ? (
+            /* ponytail: pending state — step advanced but webhook hasn't fired yet; prevents duplicate subscription */
+            <div style={{ textAlign: "center", padding: "48px 24px" }}>
+              <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
+              <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 8 }}>Verifying your subscription…</p>
+              <p style={{ color: "#6d7175", fontSize: 14 }}>
+                Your Shopify subscription is being confirmed. This usually takes a few seconds.
+                Refresh the page if this message persists.
+              </p>
+            </div>
           ) : (
             /* Show plan selection cards */
             <div>
