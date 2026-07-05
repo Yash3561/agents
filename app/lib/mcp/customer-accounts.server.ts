@@ -28,14 +28,6 @@ export interface CustomerOrder {
   line_items: CustomerOrderLine[];
 }
 
-export interface CustomerAccount {
-  id: string;
-  email?: string;
-  tags: string[];         // VIP detection lives here
-  order_count: number;
-  first_name?: string;
-}
-
 // ---------------------------------------------------------------------------
 // Tools
 // ---------------------------------------------------------------------------
@@ -69,28 +61,3 @@ export async function getCustomerOrders(
   );
 }
 
-/**
- * Get account details including tags (used for VIP detection).
- * Requires a valid customer OAuth access token.
- * Reserved for future VIP detection / account profile features — not yet wired into the unified agent.
- */
-export async function getAccountDetails(
-  shopDomain: string,
-  customerAccessToken: string,
-): Promise<CustomerAccount> {
-  if (!customerAccessToken) {
-    throw new McpError("Customer access token required for account details", 401);
-  }
-
-  const result = await callMcpTool<CustomerAccount>(
-    {
-      endpoint: await getMcpEndpoint(shopDomain),
-      agentProfileUrl: AGENT_PROFILE,
-      auth: { type: "bearer", token: customerAccessToken },
-    },
-    "get_account_details",
-    {},
-  );
-
-  return result.structuredContent;
-}

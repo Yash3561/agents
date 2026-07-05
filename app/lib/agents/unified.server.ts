@@ -13,7 +13,6 @@ import {
   buildSupportPrompt,
   type CustomerMemory,
 } from "~/lib/prompt.server";
-import { assertCartNotEmpty } from "~/lib/guardrails.server";
 import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.server";
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
 import { searchPoliciesAndFaqs } from "~/lib/mcp/policy.server";
@@ -261,7 +260,7 @@ export async function runUnifiedAgent(opts: {
       }),
       execute: async (input) => {
         onToolStart?.("create_cart");
-        assertCartNotEmpty(input.lineItems);
+        if (!input.lineItems?.length) throw new Error("Cannot checkout with an empty cart");
         toolsCalled.push("create_cart");
         const result = await createCart(shopDomain, input.lineItems, {
           currency: input.currency,

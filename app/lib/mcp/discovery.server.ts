@@ -30,11 +30,6 @@ export async function getMcpEndpoint(shopDomain: string): Promise<string> {
   return endpoint;
 }
 
-/** Busts the cached endpoint — call if a merchant migrates their MCP URL. */
-export async function bustMcpEndpointCache(shopDomain: string): Promise<void> {
-  await redis.del(CACHE_KEY(shopDomain)).catch(() => null);
-}
-
 async function fetchEndpoint(shopDomain: string): Promise<string> {
   const fallback = `https://${shopDomain}/api/mcp`;
 
