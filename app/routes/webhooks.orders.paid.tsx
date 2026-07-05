@@ -20,9 +20,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       | string
       | undefined;
 
-    // Flag this checkout as paid so the QStash cart-recovery job skips it
-    if (cartToken) {
-      void redis.set(`wa:abcart:paid:${cartToken}`, 1, "EX", 86400).catch(() => null);
+    // Flag this checkout as paid so the QStash cart-recovery job skips it.
+    // Keyed by checkout_id (numeric), matching the id the checkouts/create
+    // webhook uses to build the same `wa:abcart:paid:` key — cart_token/
+    // checkout_token are a different, opaque value and never match it.
+    const checkoutId = payload.checkout_id != null ? String(payload.checkout_id) : undefined;
+    if (checkoutId) {
+      void redis.set(`wa:abcart:paid:${checkoutId}`, 1, "EX", 86400).catch(() => null);
     }
 
     const totalPrice = payload.total_price as string | undefined;
