@@ -714,7 +714,7 @@ export default function Index() {
                     })}
                   </div>
                 </div>
-                <s-link href={`/app/conversations/${e.id}`}>Review</s-link>
+                <s-link href={`/app/inbox?id=${e.id}&statusTab=open`}>Review</s-link>
               </div>
             ))}
           </div>

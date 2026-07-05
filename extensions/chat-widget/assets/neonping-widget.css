@@ -48,3 +48,4 @@
 #np-send{width:40px;height:40px;border-radius:50%;background:var(--np-color);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s}
 #np-send:disabled{opacity:.45;cursor:default}
 #np-send svg{width:18px;height:18px;fill:#fff}
+@media(max-width:480px){#np-panel{left:0!important;right:0!important;bottom:0!important;width:100%!important;max-width:100%!important;border-radius:16px 16px 0 0;height:85vh;max-height:85vh}#np-launcher{right:16px!important;left:auto!important;bottom:16px}}
