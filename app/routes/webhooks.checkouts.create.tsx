@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { writeAbandonedCart } from "~/lib/agents/memory.server";
-import { decryptToken, normalizePhone, sendTextMessage } from "~/lib/whatsapp.server";
+import { normalizePhone } from "~/lib/whatsapp.server";
 
 /**
  * POST /webhooks/checkouts/create
@@ -71,7 +71,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customerGid = `gid://shopify/Customer/${customerId}`;
     await writeAbandonedCart(shop, session.accessToken, customerGid, items, totalCents);
 
-    // WhatsApp abandoned cart recovery — fire-and-forget
+    // Enqueue delayed WhatsApp cart recovery via QStash (fires 30 min later)
     void (async () => {
       try {
         const merchant = await prisma.merchant.findFirst({ where: { shopDomain: shop } });
@@ -88,17 +88,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         const checkoutId = String((payload as Record<string, unknown>).id ?? "");
         const isNew = await redis.set(`wa:abcart:${checkoutId}`, 1, "EX", 86400, "NX");
-        if (isNew === null) return;
+        if (isNew === null) return; // already enqueued
 
-        const waAccessToken = decryptToken(merchant.waAccessToken);
-        const storeName = shop.replace(".myshopify.com", "");
+        const qstashToken = process.env.QSTASH_TOKEN;
+        if (!qstashToken) return; // not configured
+
+        const callbackUrl = `${process.env.SHOPIFY_APP_URL}/api/whatsapp/cart-recovery`;
         const checkoutUrl = (payload as Record<string, unknown>).abandoned_checkout_url as string | undefined
           ?? (payload as Record<string, unknown>).checkout_url as string | undefined;
+        const storeName = shop.replace(".myshopify.com", "");
 
-        const itemLines = items.slice(0, 3).map((i) => `• ${i.title} ×${i.quantity}`).join("\n");
-        const message = `Hey! You left something in your cart at ${storeName}:\n\n${itemLines}\n\nYour cart is saved:\n${checkoutUrl ?? `https://${shop}`}\n\nReply STOP to unsubscribe.`;
+        const body = {
+          shop,
+          phone,
+          checkoutId,
+          checkoutUrl: checkoutUrl ?? `https://${shop}`,
+          storeName,
+          waPhoneNumberId: merchant.waPhoneNumberId,
+          waAccessToken: merchant.waAccessToken, // already encrypted
+          items: items.slice(0, 3).map((i) => `${i.title} ×${i.quantity}`),
+        };
 
-        await sendTextMessage(merchant.waPhoneNumberId, waAccessToken, phone, message);
+        await fetch(`https://qstash.upstash.io/v2/publish/${encodeURIComponent(callbackUrl)}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${qstashToken}`,
+            "Content-Type": "application/json",
+            "Upstash-Delay": "1800s",
+          },
+          body: JSON.stringify(body),
+        });
       } catch {
         // best-effort — never throw
       }

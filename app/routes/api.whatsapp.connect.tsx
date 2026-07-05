@@ -10,7 +10,7 @@
 
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
-import { encryptToken, sendTextMessage } from "~/lib/whatsapp.server";
+import { encryptToken, sendTextMessage, registerDefaultTemplates } from "~/lib/whatsapp.server";
 
 const close = (msg: string) =>
   new Response(
@@ -76,6 +76,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       waConnectedAt: new Date(),
     },
   });
+
+  // Register default message templates on the merchant's WABA (fire-and-forget)
+  if (wabaId) {
+    void registerDefaultTemplates(wabaId, tokenData.access_token).catch(() => null);
+  }
 
   // Send a test message so merchant knows the connection works
   const displayPhone = (phoneData as { display_phone_number?: string }).display_phone_number;

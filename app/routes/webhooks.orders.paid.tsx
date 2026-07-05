@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { clearAbandonedCart } from "~/lib/agents/memory.server";
+import { redis } from "~/redis.server";
 
 /**
  * Matches a completed order back to the conversation that produced it, using
@@ -18,6 +19,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const cartToken = (payload.cart_token ?? payload.checkout_token) as
       | string
       | undefined;
+
+    // Flag this checkout as paid so the QStash cart-recovery job skips it
+    if (cartToken) {
+      void redis.set(`wa:abcart:paid:${cartToken}`, 1, "EX", 86400).catch(() => null);
+    }
+
     const totalPrice = payload.total_price as string | undefined;
     const orderId = payload.id != null ? String(payload.id) : undefined;
 

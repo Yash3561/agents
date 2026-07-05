@@ -278,3 +278,77 @@ export async function sendListMessage(
     throw new Error(`Meta sendListMessage failed: ${res.status} ${err}`);
   }
 }
+
+export async function sendTemplate(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  templateName: string,
+  languageCode: string,
+  components: Array<{ type: string; parameters: Array<{ type: string; text?: string }> }>,
+): Promise<void> {
+  const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "template",
+      template: { name: templateName, language: { code: languageCode }, components },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Meta sendTemplate failed: ${res.status} ${err}`);
+  }
+}
+
+export async function registerDefaultTemplates(wabaId: string, accessToken: string): Promise<void> {
+  const templates = [
+    {
+      name: "neonping_cart_recovery",
+      category: "UTILITY",
+      language: "en",
+      components: [
+        {
+          type: "BODY",
+          text: "Hi {{1}}, you left {{2}} in your cart. Complete your order here: {{3}}",
+          example: { body_text: [["there", "Blue Sneakers", "https://example.com/cart"]] },
+        },
+        { type: "FOOTER", text: "Reply STOP to unsubscribe" },
+      ],
+    },
+    {
+      name: "neonping_cod_confirm",
+      category: "UTILITY",
+      language: "en",
+      components: [
+        {
+          type: "BODY",
+          text: "Hi {{1}}, your order {{2}} (COD ₹{{3}}) is confirmed! We'll update you when it ships.",
+          example: { body_text: [["there", "#1001", "999"]] },
+        },
+      ],
+    },
+  ];
+
+  for (const tpl of templates) {
+    try {
+      const res = await fetch(`${META_BASE}/${wabaId}/message_templates`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(tpl),
+      });
+      if (!res.ok) {
+        const body = await res.json() as { error?: { error_user_msg?: string; message?: string } };
+        if (body.error?.error_user_msg?.includes("same name") || body.error?.message?.includes("duplicate")) continue;
+        console.warn(`[wa-templates] Failed to register ${tpl.name}:`, body.error);
+      }
+    } catch (e) {
+      console.warn(`[wa-templates] Error registering ${tpl.name}:`, e);
+    }
+  }
+}

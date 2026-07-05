@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { decryptToken, normalizePhone, sendTextMessage, sendReplyButtons } from "~/lib/whatsapp.server";
+import { decryptToken, normalizePhone, sendTextMessage, sendReplyButtons, sendTemplate } from "~/lib/whatsapp.server";
 import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
 
 const COD_GATEWAYS = ["cash_on_delivery", "cod", "pay_on_delivery", "manual"];
@@ -30,13 +30,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const isCod = COD_GATEWAYS.some((g) => gateway.includes(g));
     const orderStatusUrl = payload.order_status_url as string | undefined;
 
-    // Order confirmation
-    await sendTextMessage(
-      merchant.waPhoneNumberId,
-      accessToken,
-      phone,
-      `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
-    );
+    // Order confirmation — use template for COD (works outside 24h window), text for prepaid
+    if (isCod) {
+      try {
+        const totalStr = String(Math.round(parseFloat((payload.total_price as string | undefined) ?? "0")));
+        await sendTemplate(
+          merchant.waPhoneNumberId,
+          accessToken,
+          phone,
+          "neonping_cod_confirm",
+          "en",
+          [{ type: "body", parameters: [{ type: "text", text: storeName }, { type: "text", text: orderName }, { type: "text", text: totalStr }] }],
+        );
+      } catch {
+        await sendTextMessage(
+          merchant.waPhoneNumberId,
+          accessToken,
+          phone,
+          `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
+        );
+      }
+    } else {
+      await sendTextMessage(
+        merchant.waPhoneNumberId,
+        accessToken,
+        phone,
+        `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
+      );
+    }
 
     // COD prepaid nudge — delayed interactive message (fire-and-forget)
     if (isCod && orderStatusUrl) {
