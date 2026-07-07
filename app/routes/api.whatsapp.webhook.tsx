@@ -30,6 +30,19 @@ function logGuardrail(event: string, type: string, phone: string, shopDomain: st
   console.log(JSON.stringify({ event, type, phone_hash: h, shop: shopDomain, ts: Date.now() }));
 }
 
+/**
+ * Payment options offered after add-to-cart. "Cash on Delivery" is store-specific —
+ * only shown when the merchant has explicitly confirmed (via Settings) that their
+ * store actually supports it, since offering it otherwise leads to a checkout dead-end.
+ */
+export function buildPaymentButtons(codEnabled: boolean): Array<{ id: string; title: string }> {
+  return [
+    { id: "pay_prepaid", title: "💳 Pay Online" },
+    ...(codEnabled ? [{ id: "pay_cod", title: "💵 Cash on Delivery" }] : []),
+    { id: "post_checkout_shop", title: "🛍️ Keep Shopping" },
+  ];
+}
+
 const JAILBREAK_RE = [
   /ignore\s+(previous|all|your)\s+(instructions?|prompt|rules?)/i,
   /you\s+are\s+now\s+(a\s+)?(different|new|an?)\s+(ai|bot|assistant)/i,
@@ -361,11 +374,7 @@ export async function action({ request }: ActionFunctionArgs) {
           await redis.set(`wa:pending_checkout:${from}`, checkoutUrl, "EX", 1800).catch(() => null);
           await sendReplyButtons(phoneNumberId, accessToken, from,
             "How would you like to pay?",
-            [
-              { id: "pay_prepaid", title: "💳 Pay Online" },
-              { id: "pay_cod", title: "💵 Cash on Delivery" },
-              { id: "post_checkout_shop", title: "🛍️ Keep Shopping" },
-            ],
+            buildPaymentButtons(merchant.codEnabled),
           ).catch(() => null);
         } catch {
           await sendTextMessage(phoneNumberId, accessToken, from, "Couldn't add to cart. Visit the store to complete your purchase.").catch(() => null);
@@ -479,11 +488,7 @@ export async function action({ request }: ActionFunctionArgs) {
           await redis.set(`wa:pending_checkout:${from}`, checkoutUrl, "EX", 1800).catch(() => null);
           await sendReplyButtons(phoneNumberId, accessToken, from,
             "How would you like to pay?",
-            [
-              { id: "pay_prepaid", title: "💳 Pay Online" },
-              { id: "pay_cod", title: "💵 Cash on Delivery" },
-              { id: "post_checkout_shop", title: "🛍️ Keep Shopping" },
-            ],
+            buildPaymentButtons(merchant.codEnabled),
           ).catch(() => null);
         } catch {
           await sendTextMessage(phoneNumberId, accessToken, from, "Couldn't add to cart. Please try again.").catch(() => null);

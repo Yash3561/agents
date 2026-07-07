@@ -55,6 +55,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const personalizationEnabled = formData.get("personalizationEnabled") === "true";
   const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
   const proactiveEngagementEnabled = formData.get("proactiveEngagementEnabled") === "true";
+  const codEnabled = formData.get("codEnabled") === "true";
   const hardcodedExcluded = (formData.getAll("excludedPages") as string[]).filter((p) => HARDCODED_PAGES.includes(p));
   const customPaths = (formData.getAll("customExcludedPaths") as string[]).filter(
     (p) => CUSTOM_PATH_RE.test(p) && p.length <= 200,
@@ -86,6 +87,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         personalizationEnabled,
         escalationEmailEnabled,
         proactiveEngagementEnabled,
+        codEnabled,
         excludedPages,
       },
     });
@@ -113,6 +115,7 @@ export default function Settings() {
   const [personalizationEnabled, setPersonalizationEnabled] = useState(merchant.personalizationEnabled);
   const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
   const [proactiveEngagementEnabled, setProactiveEngagementEnabled] = useState(merchant.proactiveEngagementEnabled);
+  const [codEnabled, setCodEnabled] = useState(merchant.codEnabled);
   const [excludedPages, setExcludedPages] = useState(merchant.excludedPages);
   const [customPathInput, setCustomPathInput] = useState("");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -163,6 +166,7 @@ export default function Settings() {
     formData.append("personalizationEnabled", String(personalizationEnabled));
     formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
     formData.append("proactiveEngagementEnabled", String(proactiveEngagementEnabled));
+    formData.append("codEnabled", String(codEnabled));
     excludedPages.filter((p) => HARDCODED_PAGES.includes(p)).forEach((page) => formData.append("excludedPages", page));
     excludedPages.filter((p) => !HARDCODED_PAGES.includes(p)).forEach((path) => formData.append("customExcludedPaths", path));
     fetcher.submit(formData, { method: "POST" });
@@ -438,6 +442,15 @@ export default function Settings() {
                 </button>
               </div>
             )}
+            <div style={{ marginTop: 16 }}>
+              <s-switch
+                label="Accept Cash on Delivery"
+                name="codEnabled"
+                help-text="Only turn this on if your store actually offers a Cash on Delivery / manual payment option at checkout. When off, the AI only ever offers Pay Online."
+                checked={codEnabled}
+                onChange={(e: Event) => setCodEnabled((e.target as HTMLInputElement).checked)}
+              ></s-switch>
+            </div>
           </div>
         ) : (
           <div>
