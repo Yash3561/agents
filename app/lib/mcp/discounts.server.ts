@@ -7,6 +7,8 @@ export interface ActiveDiscount {
   summary: string;
   type: "percentage" | "fixed_amount" | "free_shipping" | "buy_x_get_y";
   value: number;
+  /** minimum cart subtotal (cents) required to unlock this code — free-shipping codes only */
+  minSubtotalCents?: number;
 }
 
 const DISCOUNT_CACHE_TTL = 300; // 5 minutes — discounts change rarely
@@ -49,6 +51,10 @@ export async function getActiveDiscounts(
                 amount?: { amount: string; currencyCode: string };
               };
             };
+            minimumRequirement?: {
+              __typename: string;
+              greaterThanOrEqualToSubtotal?: { amount: string };
+            };
           };
         }>;
       };
@@ -78,6 +84,10 @@ export async function getActiveDiscounts(
                 status
                 endsAt
                 codes(first: 1) { nodes { code } }
+                minimumRequirement {
+                  __typename
+                  ... on DiscountMinimumSubtotal { greaterThanOrEqualToSubtotal { amount } }
+                }
               }
               ... on DiscountCodeBxgy {
                 title
@@ -129,15 +139,24 @@ export async function getActiveDiscounts(
         value = 0;
       }
 
-      results.push({ code, title, summary, type, value });
+      const minSubtotal = d.minimumRequirement?.greaterThanOrEqualToSubtotal?.amount;
+      const minSubtotalCents = minSubtotal ? Math.round(parseFloat(minSubtotal) * 100) : undefined;
+
+      results.push({ code, title, summary, type, value, ...(minSubtotalCents ? { minSubtotalCents } : {}) });
     }
 
-    // Sort ascending by value: cheapest offer first, most generous last
+    // Sort ascending by value: cheapest offer first, most generous last.
+    // percentage (0-100) and fixed_amount (cents) aren't directly comparable without a real
+    // cart total, which this function doesn't have — normalize fixed_amount to a percentage-
+    // equivalent assuming a $50 reference cart so a $5-off code doesn't outrank a 20%-off code.
+    // ponytail: heuristic, not exact — exact ranking needs cart total plumbed in from the caller.
+    const REFERENCE_CART_CENTS = 5000;
     results.sort((a, b) => {
       const score = (d: ActiveDiscount) => {
-        if (d.type === "free_shipping") return 50;
-        if (d.type === "buy_x_get_y") return 40;
-        return d.value;
+        if (d.type === "free_shipping") return 1000;
+        if (d.type === "buy_x_get_y") return 900;
+        if (d.type === "fixed_amount") return (d.value / REFERENCE_CART_CENTS) * 100;
+        return d.value; // percentage, already 0-100
       };
       return score(a) - score(b);
     });

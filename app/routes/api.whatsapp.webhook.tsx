@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
 import { checkAndIncrementUsage } from "~/lib/billing.server";
-import { extractCheckoutToken } from "~/lib/conversation.server";
+import { extractCheckoutToken, sendEscalationEmail } from "~/lib/conversation.server";
 import {
   verifyWebhookSignature,
   decryptToken,
@@ -21,7 +21,7 @@ import {
 import { getSession, setSession, appendMessage, deleteSession } from "~/lib/session.server";
 import { runWhatsAppAgent } from "~/lib/agents/whatsapp.server";
 import { formatCarousel } from "~/lib/agents/whatsapp-formatter.server";
-import { lookupCustomerByPhone, fetchProductRatings } from "~/lib/mcp/admin.server";
+import { lookupCustomerByPhone, fetchProductRatings, adminGraphql } from "~/lib/mcp/admin.server";
 import { createCart, updateCart } from "~/lib/mcp/cart.server";
 import { fetchWhatsAppMemory, updateWhatsAppMemory } from "~/lib/agents/memory.server";
 
@@ -395,6 +395,38 @@ export async function action({ request }: ActionFunctionArgs) {
           `No problem! Your COD order ${name} is confirmed. We'll notify you before delivery.`
         ).catch(() => null);
         return new Response("OK", { status: 200 });
+      } else if (buttonReplyPayload.startsWith("addupsell|")) {
+        const orderId = buttonReplyPayload.slice("addupsell|".length);
+        const raw = await redis.get(`wa:upsell:${orderId}`).catch(() => null);
+        if (!raw) {
+          await sendTextMessage(phoneNumberId, accessToken, from, "Sorry, that offer has expired.").catch(() => null);
+        } else {
+          await redis.del(`wa:upsell:${orderId}`).catch(() => null); // one-shot, no replay
+          try {
+            const rec = JSON.parse(raw) as { variantId: string; title: string };
+            const session = await prisma.session.findFirst({ where: { shop: shopDomain, isOnline: false }, select: { accessToken: true } });
+            if (!session?.accessToken) throw new Error("no offline session");
+            const draft = await adminGraphql<{
+              draftOrderCreate: { draftOrder?: { invoiceUrl: string }; userErrors?: Array<{ message: string }> };
+            }>(
+              shopDomain,
+              session.accessToken,
+              `mutation($input: DraftOrderInput!) { draftOrderCreate(input: $input) { draftOrder { invoiceUrl } userErrors { message } } }`,
+              { input: { lineItems: [{ variantId: rec.variantId, quantity: 1 }] } },
+            );
+            const url = draft.draftOrderCreate.draftOrder?.invoiceUrl;
+            if (url) {
+              await sendTextMessage(phoneNumberId, accessToken, from, `Here's your link to add ${rec.title}: ${url}`).catch(() => null);
+            } else {
+              throw new Error("no invoiceUrl");
+            }
+          } catch {
+            await sendTextMessage(phoneNumberId, accessToken, from, "Sorry, couldn't add that item — please visit the store to order it separately.").catch(() => null);
+          }
+        }
+        return new Response("OK", { status: 200 });
+      } else if (buttonReplyPayload === "skip|") {
+        return new Response("OK", { status: 200 });
       } else if (buttonReplyPayload.startsWith("review_good|")) {
         await sendTextMessage(
           phoneNumberId, accessToken, from,
@@ -584,6 +616,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // 9. Run WhatsApp agent (no streaming — memory handled internally)
     const result = await runWhatsAppAgent({
       shopDomain,
+      sessionId,
       customerPhone: from,
       customerId: shopifyCustomer?.id,
       agentMessage: agentInput,
@@ -594,9 +627,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const replyText = result.text?.trim() || "I'm not sure how to help with that. Could you rephrase?";
 
-    // Human handoff detection — if AI can't help, offer an escape hatch
+    // Human handoff detection — the escalate_human tool is the reliable signal (fires on an
+    // explicit "talk to a human" ask); the regex is a fallback net for replies that read as
+    // stuck/unhelpful even when the model didn't call the tool.
     const NEEDS_HUMAN_RE = /contact support|order not found|unable to help|i['u2019]m not sure/i;
-    const needsHuman = NEEDS_HUMAN_RE.test(replyText);
+    const needsHuman = !!result.escalate_to_human || NEEDS_HUMAN_RE.test(replyText);
 
     // Output safety filter + PII scrub before any send
     const filteredReply = (
@@ -755,6 +790,9 @@ export async function action({ request }: ActionFunctionArgs) {
       timestamp: Date.now(),
     });
     const updatedSession = await getSession(shopDomain, sessionId);
+    // Persist the full post-turn negotiation state — covers successful offers
+    // AND blocked/not-applicable attempts, not just the last successful code.
+    updatedSession.discount_negotiation = result.discount_negotiation;
     await setSession(shopDomain, sessionId, updatedSession);
 
     // 12. Persist to DB (fire-and-forget)
@@ -762,6 +800,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const customerEmail = (contactName?.profile as Record<string, string> | undefined)?.email ?? null;
 
     const waCheckoutToken = result.checkout_url ? extractCheckoutToken(result.checkout_url) : undefined;
+    const escalated = !!result.escalate_to_human;
 
     void prisma.conversation.upsert({
       where: { shopDomain_sessionId: { shopDomain, sessionId } },
@@ -776,6 +815,7 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(result.cart_id ? { cartId: result.cart_id } : {}),
         ...(result.cart_value_cents != null ? { cartValue: result.cart_value_cents / 100 } : {}),
         ...(waCheckoutToken ? { checkoutToken: waCheckoutToken } : {}),
+        ...(escalated ? { escalated: true } : {}),
       },
       create: {
         shopDomain,
@@ -789,9 +829,19 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(result.route_reason ? { routeReason: result.route_reason } : {}),
         ...(result.cart_id ? { cartId: result.cart_id } : {}),
         ...(result.cart_value_cents != null ? { cartValue: result.cart_value_cents / 100 } : {}),
+        escalated,
         ...(waCheckoutToken ? { checkoutToken: waCheckoutToken } : {}),
       },
     }).catch((err) => console.error("[wa-webhook] conversation persist failed:", err));
+
+    if (escalated && merchant.escalationEmailEnabled && merchant.supportEmail) {
+      sendEscalationEmail(
+        merchant.supportEmail,
+        sessionId,
+        updatedSession.conversation_history,
+        shopDomain,
+      ).catch((err) => console.error("[wa-webhook] escalation email failed:", err));
+    }
 
     // Log for dedup — Meta may resend if we're slow; idempotency by messageId would require Redis key
     console.log(`[wa-webhook] handled msg ${messageId} from ${from} on ${shopDomain}`);

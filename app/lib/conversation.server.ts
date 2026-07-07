@@ -18,7 +18,7 @@ export function extractCheckoutToken(checkoutUrl?: string): string | undefined {
  * customer issue and escalates to human support. Fire-and-forget — graceful
  * no-op if RESEND_API_KEY is not configured.
  */
-async function sendEscalationEmail(
+export async function sendEscalationEmail(
   toEmail: string,
   sessionId: string,
   messages: unknown[],

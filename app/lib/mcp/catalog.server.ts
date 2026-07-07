@@ -10,9 +10,12 @@ const endpoint = (shop: string) => {
 
 const SEARCH_CACHE_TTL = 60; // seconds — balance freshness vs latency
 
-function searchCacheKey(shop: string, query: string, maxPriceCents?: number): string {
+function searchCacheKey(shop: string, query: string, maxPriceCents?: number, intent?: string): string {
   const price = maxPriceCents != null ? String(maxPriceCents) : "any";
-  return `search:${shop}:${query.toLowerCase().trim()}:${price}`;
+  // intent changes the actual query sent to Shopify (context.intent) and reorders results —
+  // omitting it would let a gift-intent search serve cached results from a plain search (or vice versa).
+  const intentKey = intent ? intent.toLowerCase().trim() : "none";
+  return `search:${shop}:${query.toLowerCase().trim()}:${price}:${intentKey}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +142,7 @@ export async function searchCatalog(
   };
 
   // Cache check — eliminates 700ms Shopify MCP call on repeated searches
-  const cacheKey = searchCacheKey(shopDomain, cleanQuery, maxPriceCents);
+  const cacheKey = searchCacheKey(shopDomain, cleanQuery, maxPriceCents, intent);
   try {
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(String(cached)) as CatalogSearchResult;

@@ -448,16 +448,12 @@ function buildSseStream(opts: {
           // and clear the abandoned_cart signal. It checks for presence, not a specific format.
           updatedSession.checkout_id = effectiveCheckoutUrl;
         }
-        if (result.discount_code) {
-          const neg = updatedSession.discount_negotiation;
-          if (!neg.offered_codes.includes(result.discount_code)) {
-            neg.offered_codes.push(result.discount_code);
-          }
-          neg.level = Math.min(neg.level + 1, 3);
-          updatedSession.discount_negotiation = neg;
-        }
+        // Persist the full post-turn negotiation state — covers successful offers
+        // AND blocked/not-applicable attempts, not just the last successful code.
+        updatedSession.discount_negotiation = result.discount_negotiation;
         // Also track if customer applied their own code via update_cart
-        const cartDiscounts = (effectiveCart as { discountCodes?: unknown[] } | undefined)?.discountCodes;
+        const cartDiscounts = (effectiveCart as { discountCodes?: unknown[]; discount_codes?: unknown[] } | undefined)?.discountCodes
+          ?? (effectiveCart as { discount_codes?: unknown[] } | undefined)?.discount_codes;
         if (cartDiscounts && (cartDiscounts as unknown[]).length > 0) {
           const neg = updatedSession.discount_negotiation;
           neg.level = 3; // cap negotiation — they've used a code

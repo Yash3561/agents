@@ -85,6 +85,10 @@ export async function fetchCustomerMemory(
 /**
  * Extract signals from the completed turn and persist to customer metafields.
  * Called async after the response is sent — never blocks the user.
+ * ponytail: read-modify-write on the metafield, no locking — concurrent turns
+ * for the same customer (two open tabs) can lose a write. Fire-and-forget/
+ * best-effort already, so impact is soft data loss, not a crash; add a lock
+ * only if this is observed to actually matter.
  */
 export async function updateCustomerMemory(
   shopDomain: string,

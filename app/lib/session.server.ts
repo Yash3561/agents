@@ -26,6 +26,8 @@ export interface ConversationSession {
   checkout_id?: string;
   checkout_token?: string;    // real Shopify cart/checkout token (parsed from checkout_url), used to match orders/paid webhooks
   discount_negotiation: DiscountNegotiationState;
+  /** one-shot cap — set true after the first in-session cart-assist suggestion (free-shipping nudge or passive assist) */
+  cart_assist_shown?: boolean;
 }
 
 const DEFAULT_SESSION = (): ConversationSession => ({
@@ -35,6 +37,11 @@ const DEFAULT_SESSION = (): ConversationSession => ({
 
 // ---------------------------------------------------------------------------
 // R/W
+// ponytail: getSession → mutate → setSession is a read-modify-write with no
+// lock/CAS. Two overlapping turns for the same sessionId (double-tap send, or
+// a slow LLM call still in flight when a retry lands) can clobber each other's
+// writes. Add an optimistic version check (or a short Redis lock) if this is
+// ever observed in practice — not worth the complexity pre-emptively.
 // ---------------------------------------------------------------------------
 
 /** Load session from Redis. Returns a fresh default if key doesn't exist. */

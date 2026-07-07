@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { decryptToken, normalizePhone, sendTextMessage, sendReplyButtons, sendTemplate } from "~/lib/whatsapp.server";
 import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
+import { getProductRecommendation } from "~/lib/mcp/admin.server";
 
 const COD_GATEWAYS = ["cash_on_delivery", "cod", "pay_on_delivery", "manual"];
 
@@ -57,6 +58,45 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         phone,
         `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
       );
+    }
+
+    // Post-purchase upsell — immediate, rides the free-form session window the
+    // confirmation template/message just opened, so it costs zero extra Meta fees.
+    // One-shot (30 min "ADD" window, enforced via redis key TTL, handled in
+    // api/whatsapp/webhook's addupsell| branch).
+    const lineItems = (payload.line_items as Array<{ product_id?: number }> | undefined) ?? [];
+    const mainProductId = lineItems[0]?.product_id != null ? String(lineItems[0].product_id) : undefined;
+    const orderId = payload.id != null ? String(payload.id) : undefined;
+
+    if (mainProductId && orderId) {
+      // ponytail: capture narrowed string before IIFE so tsc is happy inside the closure
+      const waPhoneNumberId = merchant.waPhoneNumberId;
+      void (async () => {
+        try {
+          const session = await prisma.session.findFirst({
+            where: { shop, isOnline: false },
+            select: { accessToken: true },
+          });
+          if (!session?.accessToken) return;
+
+          const rec = await getProductRecommendation(shop, session.accessToken, mainProductId).catch(() => null);
+          if (!rec) return;
+
+          await redis.set(`wa:upsell:${orderId}`, JSON.stringify(rec), "EX", 1800);
+          await sendReplyButtons(
+            waPhoneNumberId,
+            accessToken,
+            phone,
+            `People who bought this also loved ${rec.title} for $${(rec.priceCents / 100).toFixed(2)}. Add it to your order?`,
+            [
+              { id: `addupsell|${orderId}`, title: "➕ Yes, add it" },
+              { id: "skip|", title: "No thanks" },
+            ],
+          );
+        } catch {
+          // best-effort — never throw
+        }
+      })();
     }
 
     // COD prepaid nudge — delayed interactive message (fire-and-forget)

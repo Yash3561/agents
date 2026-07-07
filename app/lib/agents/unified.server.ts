@@ -37,6 +37,10 @@ export interface UnifiedAgentOutput {
   agent_trace: string[];
   last_search_query?: string;
   route_reason?: string;
+  /** Full post-turn discount-negotiation state — always returned (even when no
+   *  code was successfully offered) so the caller can persist failed/blocked
+   *  attempts too, not just successes. See offer_discount tool. */
+  discount_negotiation: { offered_codes: string[]; level: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +110,7 @@ ${supportPart}
 ---
 
 ## ESCALATION
-If the customer explicitly asks to speak to a human, live agent, real person, or support staff (e.g. "talk to a person", "connect me with someone", "I want a human", "speak to support", "real agent"), do NOT call any tools. Set escalate_to_human in your output and reply warmly: "I've let our support team know you need help — someone will be with you shortly. You can also reach us directly using the options below." Do not try to resolve the issue yourself after the customer has asked for a human.
+If the customer explicitly asks to speak to a human, live agent, real person, or support staff (e.g. "talk to a person", "connect me with someone", "I want a human", "speak to support", "real agent"), call the escalate_human tool, then reply warmly: "I've let our support team know you need help — someone will be with you shortly. You can also reach us directly using the options below." Do not try to resolve the issue yourself after the customer has asked for a human.
 
 ---
 
@@ -114,6 +118,7 @@ If the customer explicitly asks to speak to a human, live agent, real person, or
 You handle shopping, support, AND personalization yourself — pick the right tools.
 - Shopping: search_catalog, get_product, lookup_catalog, create_cart, get_cart, update_cart, get_checkout_url
 - Support: search_policies_and_faqs, get_order, get_customer_orders (READ-ONLY — never modify orders)
+- Intent: set_intent — call once after understanding what the customer needs
 - Greetings/small talk/off-topic: respond directly without calling any tool
 - If intent is unclear (confidence < 0.6): ask the customer to rephrase; offer quick options${discountGuidanceLine}
 ${discountSection}`;
@@ -156,6 +161,7 @@ export async function runUnifiedAgent(opts: {
   let lastSearchQuery: string | undefined;
   let discountCode: string | undefined;
   let escalateToHuman = false;
+  let routeReason: string | undefined;
 
   // Discount state from session
   const { offered_codes, level: discountLevel } = session.discount_negotiation;
@@ -260,8 +266,10 @@ export async function runUnifiedAgent(opts: {
       }),
       execute: async (input) => {
         onToolStart?.("create_cart");
-        if (!input.lineItems?.length) throw new Error("Cannot checkout with an empty cart");
         toolsCalled.push("create_cart");
+        if (!input.lineItems?.length) {
+          return { error: "empty_cart", message: "No items were provided — ask the customer which product they'd like to add." };
+        }
         const result = await createCart(shopDomain, input.lineItems, {
           currency: input.currency,
         });
@@ -352,10 +360,12 @@ export async function runUnifiedAgent(opts: {
         try {
           return await getOrder(shopDomain, input.orderId);
         } catch {
-          escalateToHuman = true;
+          // Not found is often just a typo — let the model ask the customer to double-check
+          // rather than forcing escalation. Real "I want a human" requests go through
+          // the dedicated escalate_human tool instead.
           return {
             error: "Order not found",
-            message: "Please contact support for assistance with this order.",
+            message: "I couldn't find that order — could you double-check the order number?",
           };
         }
       },
@@ -376,6 +386,32 @@ export async function runUnifiedAgent(opts: {
       },
     }),
 
+    // Lightweight intent classifier — side-effect only, no extra token cost beyond the tool call.
+    // Feeds route_reason, which the merchant dashboard groups conversations by (app._index.tsx) —
+    // keep the enum in sync with whatsapp.server.ts's identical tool.
+    set_intent: tool({
+      description: "Call once after understanding what the customer needs to classify their intent.",
+      inputSchema: z.object({
+        intent: z.enum(["product_question", "order_tracking", "discount_request", "cart_help", "general"]),
+      }),
+      execute: async (input) => {
+        onToolStart?.("set_intent");
+        toolsCalled.push("set_intent");
+        routeReason = input.intent;
+        return { ok: true };
+      },
+    }),
+
+    escalate_human: tool({
+      description: "Call when the customer explicitly asks to speak with a human, live agent, real person, or support staff. Never call for any other reason.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        onToolStart?.("escalate_human");
+        toolsCalled.push("escalate_human");
+        escalateToHuman = true;
+        return { ok: true };
+      },
+    }),
   };
 
   // Conditionally add offer_discount only when there are fresh codes available
@@ -456,6 +492,20 @@ export async function runUnifiedAgent(opts: {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, 1000 * attempt)); // 1s, 2s
+      // A previous attempt may have partially executed tool calls before hitting the
+      // 429 (e.g. create_cart succeeded, then a later step got rate-limited) — reset
+      // so the retry can't return a merged mix of two attempts (duplicate cart/discount).
+      toolsCalled.length = 0;
+      products = undefined;
+      cart = undefined;
+      checkoutUrl = undefined;
+      lastSearchQuery = undefined;
+      discountCode = undefined;
+      escalateToHuman = false;
+      routeReason = undefined;
+      offered_codes_local.length = 0;
+      offered_codes_local.push(...offered_codes);
+      discountLevel_local = discountLevel;
     }
     try {
       const stream = runAgentStream({
@@ -489,9 +539,15 @@ export async function runUnifiedAgent(opts: {
       String(lastErr).includes("429") ||
       String(lastErr).toLowerCase().includes("rate") ||
       (lastErr as { statusCode?: number })?.statusCode === 429;
+    // A tool call earlier in this same turn (cart created, discount applied) can succeed
+    // before a later step fails — don't show a blind "sorry" when there's real state to see;
+    // the customer should notice the checkout link/discount chip the UI still renders below.
+    const hasCartOrDiscount = !!(checkoutUrl || discountCode);
     text = is429
       ? "Our assistant is briefly busy — please send your message again in a moment."
-      : "I'm having trouble with that right now. Please try again in a moment.";
+      : hasCartOrDiscount
+        ? "Sorry, I had trouble finishing that reply — but here's what I've got so far, see below."
+        : "I'm having trouble with that right now. Please try again in a moment.";
     onToken?.(text); // emit error text so caller doesn't receive silence
   }
 
@@ -515,7 +571,8 @@ export async function runUnifiedAgent(opts: {
     escalate_to_human: escalateToHuman || undefined,
     agent_trace: [...agentTrace, ...toolsCalled],
     last_search_query: lastSearchQuery,
-    route_reason: "unified",
+    route_reason: routeReason ?? "unified",
+    discount_negotiation: { offered_codes: offered_codes_local, level: discountLevel_local },
   };
 }
 

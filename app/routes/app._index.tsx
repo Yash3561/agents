@@ -100,13 +100,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const rawRouting = await prisma.$queryRaw<Array<{ route: string; count: bigint }>>`
     SELECT
-      SPLIT_PART("agentTrace"::json->>0, ':', 2) as route,
+      "agentTrace"::json->>0 as route,
       COUNT(*) as count
     FROM "Conversation"
     WHERE "shopDomain" = ${shop}
       AND "startedAt" >= ${since}
       AND "agentTrace" IS NOT NULL
-      AND "agentTrace"::json->>0 LIKE 'orchestrator:%'
       ${channelSql}
     GROUP BY 1
     ORDER BY count DESC
@@ -118,14 +117,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const rawConversionByRoute = await prisma.$queryRaw<Array<{ route: string; converted: bigint; total: bigint }>>`
     SELECT
-      SPLIT_PART("agentTrace"::json->>0, ':', 2) as route,
+      "agentTrace"::json->>0 as route,
       COUNT(CASE WHEN "orderId" IS NOT NULL THEN 1 END) as converted,
       COUNT(*) as total
     FROM "Conversation"
     WHERE "shopDomain" = ${shop}
       AND "startedAt" >= ${since}
       AND "agentTrace" IS NOT NULL
-      AND "agentTrace"::json->>0 LIKE 'orchestrator:%'
       ${channelSql}
     GROUP BY 1
   `;

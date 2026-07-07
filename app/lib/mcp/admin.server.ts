@@ -81,11 +81,23 @@ export async function adminGraphql<T = unknown>(
   return json.data;
 }
 
+/**
+ * Called on every inbound WhatsApp message to resolve the sender to a Shopify
+ * customer — cached 5 min in Redis (including a "none" sentinel for non-customers)
+ * so a burst of messages from the same phone doesn't hit the Admin API each time.
+ */
 export async function lookupCustomerByPhone(
   shopDomain: string,
   accessToken: string,
   phone: string,
 ): Promise<{ id: string; firstName?: string; displayName?: string; numberOfOrders?: number } | null> {
+  const { redis } = await import("~/redis.server");
+  const cacheKey = `wa:custlookup:${shopDomain}:${phone}`;
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) return cached === "none" ? null : JSON.parse(cached);
+  } catch { /* fall through to live fetch */ }
+
   try {
     const data = await adminGraphql<{
       customers: { edges: Array<{ node: { id: string; firstName?: string; displayName?: string; numberOfOrders?: number } }> };
@@ -95,7 +107,9 @@ export async function lookupCustomerByPhone(
       `query($q: String!) { customers(query: $q, first: 1) { edges { node { id firstName displayName numberOfOrders } } } }`,
       { q: `phone:"${phone.replace(/"/g, "")}"` },
     );
-    return data.customers?.edges?.[0]?.node ?? null;
+    const customer = data.customers?.edges?.[0]?.node ?? null;
+    await redis.set(cacheKey, customer ? JSON.stringify(customer) : "none", "EX", 300).catch(() => null);
+    return customer;
   } catch {
     return null;
   }
@@ -179,6 +193,66 @@ export async function fetchProductRatings(
   } catch { /* best-effort */ }
 
   return result;
+}
+
+/**
+ * Top complementary-product recommendation for the given product, via Shopify's
+ * Admin REST "Product Recommendations" endpoint (no Storefront token needed —
+ * reuses the offline admin token every webhook already has). Cached 1h in Redis.
+ */
+export async function getProductRecommendation(
+  shopDomain: string,
+  accessToken: string,
+  productId: string,
+): Promise<{ id: string; title: string; variantId: string; priceCents: number } | null> {
+  const { redis } = await import("~/redis.server");
+  const cacheKey = `productrec:${shopDomain}:${productId}`;
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) return cached === "none" ? null : (JSON.parse(cached) as { id: string; title: string; variantId: string; priceCents: number });
+  } catch { /* fall through to live fetch */ }
+
+  try {
+    const res = await fetch(
+      `https://${shopDomain}/admin/api/${API_VERSION}/recommendations/products.json?product_id=${encodeURIComponent(productId)}&intent=complementary`,
+      { headers: { "X-Shopify-Access-Token": accessToken }, signal: AbortSignal.timeout(10_000) },
+    );
+    if (!res.ok) {
+      await redis.set(cacheKey, "none", "EX", 3600).catch(() => null);
+      return null;
+    }
+    const data = (await res.json()) as { recommendations?: Array<{ id: number }> };
+    const top = data.recommendations?.[0];
+    if (!top) {
+      await redis.set(cacheKey, "none", "EX", 3600).catch(() => null);
+      return null;
+    }
+
+    const variantData = await adminGraphql<{
+      product: { title: string; variants: { nodes: Array<{ id: string; price: string; title: string }> } } | null;
+    }>(
+      shopDomain,
+      accessToken,
+      `query($id: ID!) { product(id: $id) { title variants(first: 1) { nodes { id price title } } } }`,
+      { id: `gid://shopify/Product/${top.id}` },
+    );
+    const v = variantData.product?.variants.nodes[0];
+    if (!v || !variantData.product) {
+      await redis.set(cacheKey, "none", "EX", 3600).catch(() => null);
+      return null;
+    }
+
+    const rec = {
+      id: String(top.id),
+      title: v.title === "Default Title" ? variantData.product.title : `${variantData.product.title} (${v.title})`,
+      variantId: v.id,
+      priceCents: Math.round(parseFloat(v.price) * 100),
+    };
+    await redis.set(cacheKey, JSON.stringify(rec), "EX", 3600).catch(() => null);
+    return rec;
+  } catch {
+    return null;
+  }
 }
 
 export async function getCustomerOrdersAdmin(
