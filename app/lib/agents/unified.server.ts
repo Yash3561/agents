@@ -223,7 +223,12 @@ export async function runUnifiedAgent(opts: {
           intent: input.intent,
         });
         const sliced = input.maxResults ? result.products.slice(0, input.maxResults) : result.products;
-        products = sliced;
+        // Accumulate across multiple search_catalog calls in the same turn (e.g. "show me
+        // featured and popular products" triggers two searches) — a later, narrower search
+        // that finds nothing must not wipe out real results an earlier search already found.
+        const priorProducts = (products ?? []) as Array<{ id: string }>;
+        const seen = new Set(priorProducts.map((p) => p.id));
+        products = [...priorProducts, ...sliced.filter((p) => !seen.has(p.id))];
         return { ...result, products: sliced, total: sliced.length };
       },
     }),

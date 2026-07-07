@@ -38,7 +38,8 @@ vi.mock("~/lib/mcp/cart.server", () => ({
   updateCart: (...args: unknown[]) => updateCartMock(...args),
 }));
 
-vi.mock("~/lib/mcp/catalog.server", () => ({ searchCatalog: vi.fn(), getProduct: vi.fn(), lookupCatalog: vi.fn() }));
+const searchCatalogMock = vi.fn();
+vi.mock("~/lib/mcp/catalog.server", () => ({ searchCatalog: (...args: unknown[]) => searchCatalogMock(...args), getProduct: vi.fn(), lookupCatalog: vi.fn() }));
 vi.mock("~/lib/mcp/policy.server", () => ({ searchPoliciesAndFaqs: vi.fn() }));
 vi.mock("~/lib/mcp/order.server", () => ({ getOrder: vi.fn() }));
 
@@ -56,7 +57,7 @@ vi.mock("~/lib/agents/memory.server", () => ({
   fetchCustomerMemory: vi.fn().mockResolvedValue({}),
   updateCustomerMemory: vi.fn(),
   fetchWhatsAppMemory: (...args: unknown[]) => fetchWhatsAppMemoryMock(...args),
-  updateWhatsAppMemory: vi.fn(),
+  updateWhatsAppMemory: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/lib/session.server", () => ({ setSession: vi.fn().mockResolvedValue(undefined) }));
@@ -199,5 +200,26 @@ describe("create_cart empty-lineItems guard (Fix #7 — consistency with unified
 
     await expect(runWhatsAppAgent({ ...baseOpts, session: makeSession() })).resolves.toBeDefined();
     expect(createCartMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("BUG FIX — a second search_catalog call that finds nothing no longer wipes out an earlier real result", () => {
+  it("keeps products from the first search when a later search in the same turn returns empty", async () => {
+    // Reproduces a real production symptom reported as 'no catalogs in WhatsApp':
+    // customer asked "show me your featured and popular products" -> the model called
+    // search_catalog twice (agentTrace showed ["whatsapp","search_catalog","search_catalog"]).
+    // The first call found real products (the reply text even named them); the second,
+    // for "popular", found nothing. `products = sliced` overwrote the closure each call,
+    // so the final structured output had zero products and no carousel was ever sent.
+    searchCatalogMock
+      .mockResolvedValueOnce({ products: [{ id: "gid://Product/1", title: "Face Mask" }], total: 1 })
+      .mockResolvedValueOnce({ products: [], total: 0 });
+    scriptedCalls = [
+      { name: "search_catalog", input: { query: "featured" } },
+      { name: "search_catalog", input: { query: "popular" } },
+    ];
+
+    const output = await runWhatsAppAgent({ ...baseOpts, session: makeSession() });
+    expect(output.products).toEqual([{ id: "gid://Product/1", title: "Face Mask" }]);
   });
 });

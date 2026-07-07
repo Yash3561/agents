@@ -37,7 +37,8 @@ vi.mock("~/lib/mcp/cart.server", () => ({
   updateCart: (...args: unknown[]) => updateCartMock(...args),
 }));
 
-vi.mock("~/lib/mcp/catalog.server", () => ({ searchCatalog: vi.fn(), getProduct: vi.fn(), lookupCatalog: vi.fn() }));
+const searchCatalogMock = vi.fn();
+vi.mock("~/lib/mcp/catalog.server", () => ({ searchCatalog: (...args: unknown[]) => searchCatalogMock(...args), getProduct: vi.fn(), lookupCatalog: vi.fn() }));
 vi.mock("~/lib/mcp/policy.server", () => ({ searchPoliciesAndFaqs: vi.fn() }));
 vi.mock("~/lib/mcp/order.server", () => ({ getOrder: vi.fn().mockRejectedValue(new Error("not found")) }));
 vi.mock("~/lib/mcp/customer-accounts.server", () => ({ getCustomerOrders: vi.fn() }));
@@ -192,5 +193,41 @@ describe("Fix #6 — 429 retry resets closures instead of merging stale state", 
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("BUG FIX — a second search_catalog call that finds nothing no longer wipes out an earlier real result", () => {
+  it("keeps products from the first search when a later search in the same turn returns empty", async () => {
+    // Reproduces: customer asks "show me featured and popular products" — the model
+    // searches "featured" (finds real products) then "popular" (finds nothing, since
+    // the store has no popular tag). Before the fix, `products = sliced` overwrote the
+    // closure on every call, so the final turn output silently had zero products even
+    // though the reply text named real items — no carousel/cards ever got sent.
+    searchCatalogMock
+      .mockResolvedValueOnce({ products: [{ id: "gid://Product/1", title: "Face Mask" }], total: 1 })
+      .mockResolvedValueOnce({ products: [], total: 0 });
+
+    streamImpl = async function* (tools) {
+      await tools.search_catalog.execute({ query: "featured" });
+      await tools.search_catalog.execute({ query: "popular" });
+      yield "ok";
+    };
+
+    const output = await runUnifiedAgent({ ...baseOpts, session: makeSession() });
+    expect(output.products).toEqual([{ id: "gid://Product/1", title: "Face Mask" }]);
+  });
+
+  it("dedupes when the same product shows up in two searches", async () => {
+    const product = { id: "gid://Product/1", title: "Face Mask" };
+    searchCatalogMock.mockResolvedValue({ products: [product], total: 1 });
+
+    streamImpl = async function* (tools) {
+      await tools.search_catalog.execute({ query: "face mask" });
+      await tools.search_catalog.execute({ query: "mask" });
+      yield "ok";
+    };
+
+    const output = await runUnifiedAgent({ ...baseOpts, session: makeSession() });
+    expect(output.products).toEqual([product]);
   });
 });
