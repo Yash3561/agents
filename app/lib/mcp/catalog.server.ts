@@ -159,9 +159,13 @@ export async function searchCatalog(
   const raw = result.structuredContent;
   const rawProducts = (raw.products as Array<Record<string, unknown>>) ?? [];
 
+  // Shopify's search returns out-of-stock products too — never recommend something the
+  // customer can't actually buy. Keep a product only if at least one variant is available.
+  const mappedProducts = rawProducts.map(mapProduct).filter((p) => p.variants.some((v) => v.available));
+
   const searchResult: CatalogSearchResult = {
-    products: rawProducts.map(mapProduct),
-    total: rawProducts.length,
+    products: mappedProducts,
+    total: mappedProducts.length,
     pagination: raw.pagination as CatalogSearchResult["pagination"],
   };
 

@@ -53,3 +53,46 @@ describe("search cache key includes intent (Fix B)", () => {
     expect(callMcpToolMock).toHaveBeenCalledTimes(1);
   });
 });
+
+function rawProduct(id: string, title: string, variantAvailable: boolean) {
+  return {
+    id,
+    title,
+    variants: [{ id: `${id}-v1`, title: "Default Title", price: { amount: "10.00", currency: "USD" }, availability: { available: variantAvailable } }],
+  };
+}
+
+describe("out-of-stock products are filtered out of search results", () => {
+  it("drops a product whose only variant is unavailable", async () => {
+    callMcpToolMock.mockResolvedValue({
+      structuredContent: {
+        products: [
+          rawProduct("gid://1", "In Stock Item", true),
+          rawProduct("gid://2", "Out Of Stock Item", false),
+        ],
+      },
+    });
+
+    const result = await searchCatalog(SHOP, "anything");
+    expect(result.products.map((p) => p.title)).toEqual(["In Stock Item"]);
+    expect(result.total).toBe(1);
+  });
+
+  it("keeps a product if at least one variant is available", async () => {
+    callMcpToolMock.mockResolvedValue({
+      structuredContent: {
+        products: [{
+          id: "gid://3",
+          title: "Multi-Variant Item",
+          variants: [
+            { id: "v1", title: "Small", price: { amount: "10.00", currency: "USD" }, availability: { available: false } },
+            { id: "v2", title: "Large", price: { amount: "10.00", currency: "USD" }, availability: { available: true } },
+          ],
+        }],
+      },
+    });
+
+    const result = await searchCatalog(SHOP, "anything");
+    expect(result.products).toHaveLength(1);
+  });
+});
