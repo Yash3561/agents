@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { decryptToken, normalizePhone, sendTextMessage } from "~/lib/whatsapp.server";
+import { decryptToken, normalizePhone, sendTextMessage, workerToken } from "~/lib/whatsapp.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, payload } = await authenticate.webhook(request);
@@ -18,6 +18,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const { redis } = await import("~/redis.server");
     if (await redis.exists(`wa:optout:${phone}`)) return new Response();
+
+    // Free-form messages only deliver inside a 24h customer-service window —
+    // skip customers who have never messaged this store on WhatsApp (Meta
+    // rejects cold free-form sends silently).
+    const hasWaConversation = await prisma.conversation.findUnique({
+      where: { shopDomain_sessionId: { shopDomain: shop, sessionId: `whatsapp_${phone}` } },
+      select: { id: true },
+    });
+    if (!hasWaConversation) return new Response();
 
     const accessToken = decryptToken(merchant.waAccessToken);
     const storeName = shop.replace(".myshopify.com", "");
@@ -54,7 +63,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // ponytail: fire-and-forget to process any due review requests from prior orders
     void fetch(
-      `${process.env.SHOPIFY_APP_URL}/api/whatsapp/review-worker?token=${process.env.REVIEW_WORKER_SECRET ?? ""}`,
+      `${process.env.SHOPIFY_APP_URL}/api/whatsapp/review-worker?token=${encodeURIComponent(workerToken())}`,
     ).catch(() => null);
   } catch (err) {
     console.error(`[orders/fulfilled] Error for ${shop}:`, err);

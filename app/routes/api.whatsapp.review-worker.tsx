@@ -4,14 +4,14 @@
  * Called fire-and-forget from webhooks.orders.fulfilled on each ship event.
  */
 import type { LoaderFunctionArgs } from "react-router";
-import { decryptToken, sendReplyButtons } from "~/lib/whatsapp.server";
+import { decryptToken, sendReplyButtons, workerToken } from "~/lib/whatsapp.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const token = url.searchParams.get("token") ?? "";
-  const secret = process.env.REVIEW_WORKER_SECRET;
-  // ponytail: fail open if secret not configured
-  if (secret && token !== secret) {
+  const secret = workerToken();
+  // Fail closed — workerToken() falls back to SHOPIFY_API_SECRET so this is never open
+  if (!secret || token !== secret) {
     return new Response("Forbidden", { status: 403 });
   }
 

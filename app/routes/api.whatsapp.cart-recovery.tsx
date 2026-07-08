@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { decryptToken, sendTemplate, sendTextMessage } from "~/lib/whatsapp.server";
+import { decryptToken, sendTemplate, sendTextMessage, workerToken } from "~/lib/whatsapp.server";
 import { redis } from "~/redis.server";
 
 /**
@@ -10,6 +10,14 @@ import { redis } from "~/redis.server";
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method !== "POST") return new Response(null, { status: 405 });
+
+  // Fail-closed shared-secret auth — the token is appended to the QStash
+  // callback URL at enqueue time (webhooks.checkouts.create.tsx).
+  const token = new URL(request.url).searchParams.get("token") ?? "";
+  const secret = workerToken();
+  if (!secret || token !== secret) {
+    return new Response("Forbidden", { status: 403 });
+  }
 
   let body: {
     shop: string;
@@ -31,6 +39,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Skip if order was already placed
     if (await redis.exists(`wa:abcart:paid:${body.checkoutId}`)) {
       return new Response("order placed", { status: 200 });
+    }
+
+    // Respect opt-out — the customer may have replied STOP during the 30-min delay
+    if (await redis.exists(`wa:optout:${body.phone}`)) {
+      return new Response("opted out", { status: 200 });
     }
 
     const accessToken = decryptToken(body.waAccessToken);

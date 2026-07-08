@@ -43,6 +43,15 @@ export function verifyWebhookSignature(
   return crypto.timingSafeEqual(expectedBuf, receivedBuf);
 }
 
+/**
+ * Shared secret for internal worker endpoints (cart-recovery, review-worker).
+ * Falls back to SHOPIFY_API_SECRET so the endpoints are always fail-closed
+ * without requiring a new env var on Azure.
+ */
+export function workerToken(): string {
+  return process.env.REVIEW_WORKER_SECRET || process.env.SHOPIFY_API_SECRET || "";
+}
+
 // ---------------------------------------------------------------------------
 // Meta Cloud API helpers
 // ---------------------------------------------------------------------------

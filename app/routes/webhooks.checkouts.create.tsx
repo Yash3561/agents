@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { writeAbandonedCart } from "~/lib/agents/memory.server";
-import { normalizePhone } from "~/lib/whatsapp.server";
+import { normalizePhone, workerToken } from "~/lib/whatsapp.server";
 
 /**
  * POST /webhooks/checkouts/create
@@ -93,7 +93,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const qstashToken = process.env.QSTASH_TOKEN;
         if (!qstashToken) return; // not configured
 
-        const callbackUrl = `${process.env.SHOPIFY_APP_URL}/api/whatsapp/cart-recovery`;
+        const callbackUrl = `${process.env.SHOPIFY_APP_URL}/api/whatsapp/cart-recovery?token=${encodeURIComponent(workerToken())}`;
         const checkoutUrl = (payload as Record<string, unknown>).abandoned_checkout_url as string | undefined
           ?? (payload as Record<string, unknown>).checkout_url as string | undefined;
         const storeName = shop.replace(".myshopify.com", "");

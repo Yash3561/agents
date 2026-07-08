@@ -27,9 +27,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const accessToken = decryptToken(merchant.waAccessToken);
     const storeName = shop.replace(".myshopify.com", "");
     const orderName = payload.name as string | undefined ?? `#${payload.order_number}`;
-    const gateway = (payload.payment_gateway as string | undefined ?? "").toLowerCase();
-    const isCod = COD_GATEWAYS.some((g) => gateway.includes(g));
+    // The order payload has no `payment_gateway` field — gateways arrive as
+    // payment_gateway_names (display names, e.g. "Cash on Delivery (COD)") plus
+    // the deprecated `gateway`. Normalize spaces/hyphens to underscores so
+    // display names match the handle-style COD_GATEWAYS entries.
+    const gatewayNames = [
+      ...((payload.payment_gateway_names as string[] | undefined) ?? []),
+      ...(payload.gateway ? [String(payload.gateway)] : []),
+    ].map((g) => g.toLowerCase().replace(/[\s-]+/g, "_"));
+    const isCod = gatewayNames.some((g) => COD_GATEWAYS.some((c) => g.includes(c)));
     const orderStatusUrl = payload.order_status_url as string | undefined;
+
+    // Free-form (non-template) messages only deliver inside a 24h customer-service
+    // window, i.e. when this phone has actually messaged the store on WhatsApp.
+    // Cold free-form sends are rejected by Meta silently — skip them instead.
+    const hasWaConversation = !!(await prisma.conversation.findUnique({
+      where: { shopDomain_sessionId: { shopDomain: shop, sessionId: `whatsapp_${phone}` } },
+      select: { id: true },
+    }));
 
     // Order confirmation — use template for COD (works outside 24h window), text for prepaid
     if (isCod) {
@@ -44,14 +59,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           [{ type: "body", parameters: [{ type: "text", text: storeName }, { type: "text", text: orderName }, { type: "text", text: totalStr }] }],
         );
       } catch {
-        await sendTextMessage(
-          merchant.waPhoneNumberId,
-          accessToken,
-          phone,
-          `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
-        );
+        if (hasWaConversation) {
+          await sendTextMessage(
+            merchant.waPhoneNumberId,
+            accessToken,
+            phone,
+            `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
+          );
+        }
       }
-    } else {
+    } else if (hasWaConversation) {
       await sendTextMessage(
         merchant.waPhoneNumberId,
         accessToken,
@@ -68,7 +85,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const mainProductId = lineItems[0]?.product_id != null ? String(lineItems[0].product_id) : undefined;
     const orderId = payload.id != null ? String(payload.id) : undefined;
 
-    if (mainProductId && orderId) {
+    if (mainProductId && orderId && hasWaConversation) {
       // ponytail: capture narrowed string before IIFE so tsc is happy inside the closure
       const waPhoneNumberId = merchant.waPhoneNumberId;
       void (async () => {
@@ -100,7 +117,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // COD prepaid nudge — delayed interactive message (fire-and-forget)
-    if (isCod && orderStatusUrl) {
+    if (isCod && orderStatusUrl && hasWaConversation) {
       // ponytail: capture narrowed strings before IIFE so tsc is happy inside the closure
       const waPhoneNumberId = merchant.waPhoneNumberId;
       const capturedUrl = orderStatusUrl;
