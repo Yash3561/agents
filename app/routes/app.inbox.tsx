@@ -7,6 +7,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
 import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
+import { appendMessage } from "../lib/session.server";
 import { runQAJudge } from "../lib/agents/merchant-analyst.server";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { MessageBubble } from "~/components/MessageBubble";
@@ -243,6 +244,16 @@ export async function action({ request }: ActionFunctionArgs) {
         lastMessageAt: new Date(),
       },
     });
+    // Mirror real replies (not notes) into the Redis session so the AI has them
+    // as context after resume, and so web customers receive them on their next
+    // message while paused (api.chat.tsx paused branch).
+    if (!isNote) {
+      await appendMessage(shop, conversation.sessionId, {
+        role: "assistant",
+        content: `[Merchant] ${message}`,
+        timestamp: Date.now(),
+      }).catch(() => null);
+    }
   } else if (intent === "resolve") {
     await prisma.conversation.update({
       where: { id: conversationId },

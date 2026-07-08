@@ -156,11 +156,47 @@ export async function action({ request }: ActionFunctionArgs) {
   // Check if AI is paused for this conversation — merchant has taken over manually
   const convPause = await prisma.conversation.findFirst({
     where: { shopDomain: shop, sessionId: session_id },
-    select: { aiPaused: true },
+    select: { id: true, aiPaused: true, messages: true },
   });
   if (convPause?.aiPaused) {
+    // Deliver merchant replies the customer hasn't seen yet — i.e. "[Merchant] …"
+    // entries newer than the customer's previous message. Without this the widget
+    // customer never sees anything the merchant types while AI is paused.
+    const stored = Array.isArray(convPause.messages)
+      ? (convPause.messages as Array<{ role?: string; content?: string; timestamp?: number }>)
+      : [];
+    const lastUserTs = stored.reduce(
+      (t, m) => (m.role === "user" ? Math.max(t, m.timestamp ?? 0) : t),
+      0,
+    );
+    const unseen = stored.filter(
+      (m) =>
+        m.role === "assistant" &&
+        typeof m.content === "string" &&
+        m.content.startsWith("[Merchant]") &&
+        (m.timestamp ?? 0) > lastUserTs,
+    );
+    const pauseReply = unseen.length
+      ? unseen.map((m) => m.content!.replace(/^\[Merchant\]\s*/, "")).join("\n\n")
+      : "A team member is handling your conversation. We'll be with you shortly.";
+
+    // Persist the customer's message — previously it was silently dropped, so the
+    // merchant handling the conversation never saw what the customer typed.
+    const customerMsg = { role: "user" as const, content: message.trim(), timestamp: Date.now() };
+    await appendMessage(shop, session_id, customerMsg).catch(() => null);
+    await prisma.conversation
+      .update({
+        where: { id: convPause.id },
+        data: {
+          messages: [...stored, customerMsg] as unknown as import("@prisma/client").Prisma.InputJsonValue,
+          messageCount: stored.length + 1,
+          lastMessageAt: new Date(),
+        },
+      })
+      .catch(() => null);
+
     const pauseBody =
-      `event: delta\ndata: ${JSON.stringify({ text: "A team member is handling your conversation. We'll be with you shortly." })}\n\n` +
+      `event: delta\ndata: ${JSON.stringify({ text: pauseReply })}\n\n` +
       `event: meta\ndata: ${JSON.stringify({ agent_trace: [] })}\n\n` +
       `event: done\ndata: {}\n\n`;
     return new Response(pauseBody, {

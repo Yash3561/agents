@@ -70,6 +70,25 @@ export async function persistConversationTurn(opts: {
   const checkoutToken = extractCheckoutToken(checkoutUrl);
   const cartValue = cartValueCents != null ? cartValueCents / 100 : undefined;
 
+  // Internal notes live only in Postgres (never in the Redis session), so a
+  // plain overwrite of `messages` with the session history would delete them.
+  // Merge them back in by timestamp before writing.
+  let history = session.conversation_history as Array<{ role: string; content: string; timestamp?: number }>;
+  const existing = await prisma.conversation
+    .findUnique({
+      where: { shopDomain_sessionId: { shopDomain, sessionId } },
+      select: { messages: true },
+    })
+    .catch(() => null);
+  const notes = Array.isArray(existing?.messages)
+    ? (existing.messages as Array<{ role?: string; timestamp?: number }>).filter((m) => m?.role === "note")
+    : [];
+  if (notes.length) {
+    history = ([...history, ...notes] as typeof history).sort(
+      (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0),
+    );
+  }
+
   await prisma.conversation.upsert({
     where: { shopDomain_sessionId: { shopDomain, sessionId } },
     create: {
@@ -77,8 +96,8 @@ export async function persistConversationTurn(opts: {
       sessionId,
       customerId,
       ...(customerName ? { customerName } : {}),
-      messages: session.conversation_history as unknown as Prisma.InputJsonValue,
-      messageCount: session.conversation_history.length,
+      messages: history as unknown as Prisma.InputJsonValue,
+      messageCount: history.length,
       firstUserMessage: (
         (session.conversation_history as Array<{ role: string; content: string }>)
           .find((m) => m.role === "user")?.content?.slice(0, 200) ?? null
@@ -92,8 +111,8 @@ export async function persistConversationTurn(opts: {
       routeReason: routeReason ?? undefined,
     },
     update: {
-      messages: session.conversation_history as unknown as Prisma.InputJsonValue,
-      messageCount: session.conversation_history.length,
+      messages: history as unknown as Prisma.InputJsonValue,
+      messageCount: history.length,
       cartId: session.cart_id,
       ...(cartValue != null ? { cartValue } : {}),
       ...(checkoutToken ? { checkoutToken } : {}),
