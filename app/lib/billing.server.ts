@@ -1,6 +1,8 @@
+import type { Merchant } from "@prisma/client";
 import prisma from "~/db.server";
 import { redis } from "~/redis.server";
 import { PLAN_LIMITS } from "~/lib/plans";
+import { sendUsageAlertEmail } from "~/lib/conversation.server";
 export { PLAN_CONFIG, PLAN_LIMITS } from "~/lib/plans";
 
 const usageKey = (shopDomain: string) => `usage:${shopDomain}`;
@@ -15,6 +17,25 @@ export interface UsageCheck {
   allowed: boolean;
   used: number;
   limit: number;
+}
+
+/**
+ * Email the merchant once per threshold (80% / 100%) per billing cycle.
+ * Fire-and-forget; Redis NX flag keyed by conversationResetAt dedupes.
+ */
+async function alertUsage(merchant: Merchant, used: number, limit: number): Promise<void> {
+  if (limit <= 0 || !merchant.supportEmail) return;
+  const pct = used / limit;
+  const level = pct >= 1 ? 100 : pct >= 0.8 ? 80 : 0;
+  if (!level) return;
+  try {
+    const flag = `usage_alerted:${merchant.shopDomain}:${level}:${merchant.conversationResetAt.getTime()}`;
+    const first = await redis.set(flag, "1", "EX", 40 * 86400, "NX");
+    if (first === null) return;
+    await sendUsageAlertEmail(merchant.supportEmail, merchant.shopDomain, used, limit, level);
+  } catch {
+    // best-effort — never block or fail the usage check
+  }
 }
 
 /**
@@ -72,10 +93,12 @@ export async function checkAndIncrementUsage(shopDomain: string, sessionId?: str
     const liveCount = parseInt((await redis.get(key)) ?? String(durableCount), 10);
 
     if (liveCount >= limit) {
+      void alertUsage(merchant, liveCount, limit);
       return { allowed: false, used: liveCount, limit };
     }
 
     const newCount = await redis.incr(key);
+    void alertUsage(merchant, newCount, limit);
 
     // Mark this session as billed so subsequent messages don't increment.
     if (sessionId) {

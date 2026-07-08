@@ -38,7 +38,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const excludedPages: string[] = merchant.excludedPages?.length
     ? (merchant.excludedPages as string[])
     : ["checkout"];
-  return { merchant: { ...merchant, excludedPages }, waAppId: process.env.WHATSAPP_APP_ID ?? "", appUrl: process.env.SHOPIFY_APP_URL ?? "" };
+  return {
+    merchant: { ...merchant, excludedPages },
+    waAppId: process.env.WHATSAPP_APP_ID ?? "",
+    appUrl: process.env.SHOPIFY_APP_URL ?? "",
+    emailConfigured: !!process.env.RESEND_API_KEY,
+  };
 };
 
 const VALID_POSITIONS = new Set(["bottom-right", "bottom-left"]);
@@ -99,7 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Settings() {
-  const { merchant, waAppId, appUrl } = useLoaderData<typeof loader>();
+  const { merchant, waAppId, appUrl, emailConfigured } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const formRef = useRef<HTMLFormElement>(null);
@@ -375,7 +380,9 @@ export default function Settings() {
                 checked={escalationEmailEnabled}
                 onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
               ></s-switch>
-              <s-banner tone="warning">Email notifications are coming soon — no emails are currently sent. We&apos;ll notify you when this is live.</s-banner>
+              {!emailConfigured && (
+                <s-banner tone="warning">Email delivery is not configured on the server yet — no emails will be sent until it is. Your preference is saved and will apply automatically.</s-banner>
+              )}
             </div>
             <s-email-field
               label="Support email"

@@ -49,6 +49,37 @@ export async function sendEscalationEmail(
 }
 
 /**
+ * Plan-usage alert (80% warning / 100% limit reached), sent once per threshold
+ * per billing cycle — dedup handled by the caller (billing.server.ts).
+ * Graceful no-op if RESEND_API_KEY is not configured.
+ */
+export async function sendUsageAlertEmail(
+  toEmail: string,
+  shop: string,
+  used: number,
+  limit: number,
+  level: number,
+): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return;
+  const atLimit = level >= 100;
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'NeonPing Alerts <alerts@neonping.com>',
+      to: toEmail,
+      subject: atLimit
+        ? `NeonPing: conversation limit reached — chat is paused (${shop})`
+        : `NeonPing: ${level}% of your monthly conversations used (${shop})`,
+      text: atLimit
+        ? `Your store ${shop} has used all ${limit} conversations in this billing cycle. New customer chats are paused until your plan resets or you upgrade.\n\nUpgrade: open NeonPing → Billing in your Shopify admin.`
+        : `Your store ${shop} has used ${used} of ${limit} conversations (${level}%) this billing cycle. Once the limit is reached, new customer chats will be paused.\n\nUpgrade any time: open NeonPing → Billing in your Shopify admin.`,
+    }),
+  }).catch(e => console.error('[NeonPing] Usage alert email error:', e));
+}
+
+/**
  * Write-through persistence of conversation state to Postgres, called once per
  * turn from the chat route. Fire-and-forget — never blocks or fails the SSE
  * response if Postgres is briefly unavailable.
