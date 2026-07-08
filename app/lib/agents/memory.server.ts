@@ -357,6 +357,13 @@ export async function updateWhatsAppMemory(
   try {
     const existing = await fetchWhatsAppMemory(phone);
     const merged = { ...existing, ...updates };
+    if (updates.recent_products) {
+      // Union with what's already remembered (newest first) — a plain replace
+      // dropped earlier products every time a new search wrote back.
+      merged.recent_products = [
+        ...new Set([...updates.recent_products, ...(existing.recent_products ?? [])]),
+      ];
+    }
     if (merged.recent_products) {
       merged.recent_products = merged.recent_products.slice(0, 5);
     }

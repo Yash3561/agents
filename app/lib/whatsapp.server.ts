@@ -323,9 +323,10 @@ export async function registerDefaultTemplates(wabaId: string, accessToken: stri
       language: "en",
       components: [
         {
+          // Params match what api.whatsapp.cart-recovery.tsx sends: {{1}}=store, {{2}}=items, {{3}}=url
           type: "BODY",
-          text: "Hi {{1}}, you left {{2}} in your cart. Complete your order here: {{3}}",
-          example: { body_text: [["there", "Blue Sneakers", "https://example.com/cart"]] },
+          text: "You left something in your cart at {{1}}: {{2}}. Your cart is saved — complete your order here: {{3}}",
+          example: { body_text: [["Acme Store", "Blue Sneakers", "https://example.com/cart"]] },
         },
         { type: "FOOTER", text: "Reply STOP to unsubscribe" },
       ],
@@ -336,9 +337,11 @@ export async function registerDefaultTemplates(wabaId: string, accessToken: stri
       language: "en",
       components: [
         {
+          // Params match webhooks.orders.create.tsx: {{1}}=store, {{2}}=order name, {{3}}=total
+          // (no hardcoded currency symbol — stores span INR/AED/USD/…)
           type: "BODY",
-          text: "Hi {{1}}, your order {{2}} (COD ₹{{3}}) is confirmed! We'll update you when it ships.",
-          example: { body_text: [["there", "#1001", "999"]] },
+          text: "Your Cash on Delivery order {{2}} at {{1}} (total {{3}}) is confirmed! We'll update you when it ships.",
+          example: { body_text: [["Acme Store", "#1001", "999"]] },
         },
       ],
     },
@@ -360,4 +363,23 @@ export async function registerDefaultTemplates(wabaId: string, accessToken: stri
       console.warn(`[wa-templates] Error registering ${tpl.name}:`, e);
     }
   }
+}
+
+export interface TemplateStatus {
+  name: string;
+  status: string; // APPROVED | PENDING | REJECTED | PAUSED | ...
+}
+
+/** Fetch approval status of our registered templates from the merchant's WABA. */
+export async function fetchTemplateStatuses(
+  wabaId: string,
+  accessToken: string,
+): Promise<TemplateStatus[]> {
+  const res = await fetch(
+    `${META_BASE}/${wabaId}/message_templates?fields=name,status&limit=50`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!res.ok) throw new Error(`Meta template status failed: ${res.status}`);
+  const data = (await res.json()) as { data?: TemplateStatus[] };
+  return (data.data ?? []).filter((t) => t.name.startsWith("neonping_"));
 }

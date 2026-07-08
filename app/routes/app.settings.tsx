@@ -6,6 +6,9 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { redis } from "~/redis.server";
+import { decryptToken, fetchTemplateStatuses } from "~/lib/whatsapp.server";
+import type { TemplateStatus } from "~/lib/whatsapp.server";
 import { WidgetPreview } from "~/components/WidgetPreview";
 
 const VOICE_PRESETS = [
@@ -38,11 +41,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const excludedPages: string[] = merchant.excludedPages?.length
     ? (merchant.excludedPages as string[])
     : ["checkout"];
+  // Template approval status — merchants can't otherwise tell why outbound
+  // flows (cart recovery, COD confirm) are degraded while Meta review is pending.
+  let waTemplates: TemplateStatus[] = [];
+  if (merchant.wabaId && merchant.waAccessToken) {
+    const cacheKey = `wa:tplstatus:${merchant.wabaId}`;
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        waTemplates = JSON.parse(String(cached)) as TemplateStatus[];
+      } else {
+        waTemplates = await fetchTemplateStatuses(merchant.wabaId, decryptToken(merchant.waAccessToken));
+        await redis.set(cacheKey, JSON.stringify(waTemplates), "EX", 600).catch(() => null);
+      }
+    } catch {
+      // best-effort — section simply hides if Meta is unreachable
+    }
+  }
+
   return {
     merchant: { ...merchant, excludedPages },
     waAppId: process.env.WHATSAPP_APP_ID ?? "",
     appUrl: process.env.SHOPIFY_APP_URL ?? "",
     emailConfigured: !!process.env.RESEND_API_KEY,
+    waTemplates,
   };
 };
 
@@ -104,7 +126,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Settings() {
-  const { merchant, waAppId, appUrl, emailConfigured } = useLoaderData<typeof loader>();
+  const { merchant, waAppId, appUrl, emailConfigured, waTemplates } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const formRef = useRef<HTMLFormElement>(null);
@@ -447,6 +469,34 @@ export default function Settings() {
                 >
                   Copy
                 </button>
+              </div>
+            )}
+            {waTemplates.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#6d7175", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                  Message templates (Meta approval)
+                </div>
+                {waTemplates.map((t) => {
+                  const label = t.name === "neonping_cart_recovery" ? "Cart recovery"
+                    : t.name === "neonping_cod_confirm" ? "COD order confirmation"
+                    : t.name;
+                  const tone = t.status === "APPROVED" ? "success" : t.status === "REJECTED" ? "critical" : "warning";
+                  return (
+                    <div key={t.name} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                      <s-badge tone={tone}>{t.status}</s-badge>
+                      <span style={{ fontSize: 13 }}>{label}</span>
+                    </div>
+                  );
+                })}
+                {waTemplates.some((t) => t.status !== "APPROVED") && (
+                  <div style={{ marginTop: 8 }}>
+                    <s-banner tone="warning">
+                      Templates pending Meta approval can&apos;t be sent to customers who haven&apos;t
+                      messaged you in the last 24 hours — cart recovery and order confirmations are
+                      limited until approval (usually 1–2 days).
+                    </s-banner>
+                  </div>
+                )}
               </div>
             )}
             <div style={{ marginTop: 16 }}>

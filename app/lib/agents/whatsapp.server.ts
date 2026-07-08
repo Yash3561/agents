@@ -217,10 +217,23 @@ export async function runWhatsAppAgent(opts: {
       ? await getActiveDiscounts(shopDomain, accessToken)
       : [];
 
-  // Use unified metafield memory when customer is identified, else Redis fallback
-  const memory = customerId
+  // Cross-channel memory merge: the phone-keyed Redis store carries WhatsApp
+  // channel continuity (active cart_id lives ONLY here — metafields never store
+  // it), while customer metafields carry durable cross-channel history from the
+  // web widget (summary, recent_products, last_search). Identified customers
+  // get both, merged.
+  const waMem = await fetchWhatsAppMemory(customerPhone);
+  const metaMem = customerId
     ? await fetchCustomerMemory(shopDomain, accessToken, customerId)
-    : await fetchWhatsAppMemory(customerPhone);
+    : {};
+  const memory = {
+    ...waMem,
+    ...metaMem,
+    cart_id: waMem.cart_id ?? metaMem.cart_id,
+    recent_products: [
+      ...new Set([...(waMem.recent_products ?? []), ...(metaMem.recent_products ?? [])]),
+    ].slice(0, 5),
+  };
 
   const systemPrompt = buildWhatsAppPrompt(
     merchant,
@@ -555,16 +568,19 @@ export async function runWhatsAppAgent(opts: {
     }
   }
 
-  // Fire-and-forget memory update — use unified metafield memory when customer is identified
-  if (lastSearchQuery || searchedProductTitles.length > 0) {
-    if (customerId) {
-      void updateCustomerMemory(shopDomain, accessToken, customerId, session, lastSearchQuery).catch(() => null);
-    } else {
-      void updateWhatsAppMemory(customerPhone, {
-        ...(lastSearchQuery ? { last_search: lastSearchQuery } : {}),
-        ...(searchedProductTitles.length > 0 ? { recent_products: searchedProductTitles } : {}),
-      }).catch(() => null);
-    }
+  // Fire-and-forget memory write-back. Channel continuity (cart_id, searches)
+  // always goes to the phone-keyed Redis store — previously identified customers
+  // skipped it, so agent-created carts were lost on the next turn. Identified
+  // customers additionally enrich the durable cross-channel metafield memory.
+  if (lastCartId || lastSearchQuery || searchedProductTitles.length > 0) {
+    void updateWhatsAppMemory(customerPhone, {
+      ...(lastCartId ? { cart_id: lastCartId } : {}),
+      ...(lastSearchQuery ? { last_search: lastSearchQuery } : {}),
+      ...(searchedProductTitles.length > 0 ? { recent_products: searchedProductTitles } : {}),
+    }).catch(() => null);
+  }
+  if (customerId && (lastSearchQuery || searchedProductTitles.length > 0)) {
+    void updateCustomerMemory(shopDomain, accessToken, customerId, session, lastSearchQuery).catch(() => null);
   }
 
   return {
