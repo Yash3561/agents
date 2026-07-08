@@ -36,7 +36,7 @@ const VALID_PLANS_ONBOARDING = ["spark", "pulse", "surge"] as const;
 type OnboardingPlanKey = (typeof VALID_PLANS_ONBOARDING)[number];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
   const merchant = await prisma.merchant.upsert({
@@ -50,7 +50,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(params ? `/app?${params}` : "/app");
   }
 
-  return { shop, merchant, appUrl: process.env.SHOPIFY_APP_URL ?? "", waAppId: process.env.WHATSAPP_APP_ID ?? "" };
+  // Whether a real Shopify subscription exists (ACTIVE or PENDING). Used to
+  // distinguish "waiting for the billing webhook" from "merchant skipped the
+  // plan step" — both leave onboardingStep at 4, but only the former should
+  // show a 'verifying your subscription' state.
+  let hasShopifySub = false;
+  try {
+    const result = await admin.graphql(
+      `#graphql
+      { currentAppInstallation { activeSubscriptions { status } } }`,
+    );
+    const data = await result.json() as {
+      data?: { currentAppInstallation?: { activeSubscriptions?: Array<{ status: string }> } };
+    };
+    hasShopifySub = (data.data?.currentAppInstallation?.activeSubscriptions ?? [])
+      .some((s) => s.status === "ACTIVE" || s.status === "PENDING");
+  } catch {
+    // fall back to false — merchant sees plan cards, worst case re-subscribing is blocked by Shopify
+  }
+
+  return { shop, merchant, hasShopifySub, appUrl: process.env.SHOPIFY_APP_URL ?? "", waAppId: process.env.WHATSAPP_APP_ID ?? "" };
 };
 
 const VALID_VOICES_ONBOARDING = new Set([
@@ -342,7 +361,7 @@ function OnboardingPlanCard({ plan, onChoose, isLoading, choosingPlan }: Onboard
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function Onboarding() {
-  const { shop, merchant, appUrl, waAppId } = useLoaderData<typeof loader>();
+  const { shop, merchant, hasShopifySub, appUrl, waAppId } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
@@ -536,8 +555,10 @@ export default function Onboarding() {
                 </s-button>
               </s-stack>
             </div>
-          ) : merchant.onboardingStep >= 4 ? (
-            /* ponytail: pending state — step advanced but webhook hasn't fired yet; prevents duplicate subscription */
+          ) : hasShopifySub ? (
+            /* Real Shopify subscription exists but the webhook hasn't written the plan yet.
+               Checked against Shopify directly — a skipped plan step no longer traps the
+               merchant in this state (#199). */
             <div style={{ textAlign: "center", padding: "48px 24px" }}>
               <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
               <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 8 }}>Verifying your subscription…</p>
@@ -598,8 +619,8 @@ export default function Onboarding() {
           {/* Plan status banner at step 4 */}
           {!isActivePlan && (
             <div style={{ marginBottom: "16px" }}>
-              {merchant.onboardingStep >= 4 ? (
-                /* ponytail: merchant returned from billing but webhook hasn't fired yet — show pending state, not "no plan" warning */
+              {hasShopifySub ? (
+                /* Merchant returned from billing but webhook hasn't fired yet — show pending state, not "no plan" warning */
                 <div style={{ textAlign: "center", padding: "24px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
                   <p style={{ fontWeight: 600, fontSize: 14, color: "#1e40af", marginBottom: 4 }}>Your trial is being confirmed…</p>
                   <p style={{ color: "#3b82f6", fontSize: 13, margin: 0 }}>Shopify is activating your subscription. Refresh if this persists.</p>
