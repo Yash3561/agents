@@ -1,3 +1,4 @@
+/* eslint-disable react/no-unescaped-entities -- legal prose, literal quotes intended */
 export default function PrivacyPolicy() {
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 20px", fontFamily: "system-ui, sans-serif", lineHeight: 1.6, color: "#1a1a1a" }}>

@@ -17,6 +17,10 @@ vi.mock("~/redis.server", () => ({ redis: redisMock }));
 vi.mock("~/db.server", () => ({
   default: {
     session: { findFirst: vi.fn() },
+    // orders/create gates free-form sends on an existing WhatsApp conversation
+    conversation: {
+      findUnique: vi.fn().mockResolvedValue({ id: "conv-1" }),
+    },
     merchant: {
       findFirst: vi.fn().mockResolvedValue({
         shopDomain: "test.myshopify.com",
@@ -78,7 +82,7 @@ const basePayload = {
   name: "#1001",
   order_number: 1001,
   total_price: "50.00",
-  payment_gateway: "shopify_payments", // prepaid, not COD
+  payment_gateway_names: ["shopify_payments"], // prepaid, not COD
   customer: { phone: "+15551234567" },
   line_items: [{ product_id: 555 }],
 };

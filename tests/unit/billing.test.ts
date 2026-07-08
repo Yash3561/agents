@@ -20,7 +20,12 @@ vi.mock("~/db.server", () => ({
   },
 }));
 
+vi.mock("~/lib/conversation.server", () => ({
+  sendUsageAlertEmail: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { checkAndIncrementUsage, PLAN_LIMITS } from "~/lib/billing.server";
+import { sendUsageAlertEmail } from "~/lib/conversation.server";
 import { redis } from "~/redis.server";
 import prisma from "~/db.server";
 
@@ -52,7 +57,7 @@ function makeMerchant(plan: string, conversationCount: number) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 describe("checkAndIncrementUsage", () => {
@@ -70,8 +75,6 @@ describe("checkAndIncrementUsage", () => {
     );
     // session not already billed
     mockRedis.exists.mockResolvedValueOnce(0); // sessionBilledKey check
-    // usage key exists
-    mockRedis.exists.mockResolvedValueOnce(1); // usageKey check
     mockRedis.get.mockResolvedValue("500");
 
     const result = await checkAndIncrementUsage(
@@ -127,7 +130,6 @@ describe("checkAndIncrementUsage", () => {
     );
     // First call: session NOT billed yet
     mockRedis.exists.mockResolvedValueOnce(0); // sessionBilledKey
-    mockRedis.exists.mockResolvedValueOnce(1); // usageKey
     mockRedis.get.mockResolvedValue("50");
     mockRedis.incr.mockResolvedValue(51);
     mockRedis.setex.mockResolvedValue("OK");
@@ -135,14 +137,13 @@ describe("checkAndIncrementUsage", () => {
     await checkAndIncrementUsage("test.myshopify.com", "dup-session");
     expect(mockRedis.incr).toHaveBeenCalledTimes(1);
 
-    vi.clearAllMocks();
+    vi.resetAllMocks();
 
     // Second call: same session IS already billed
     mockPrisma.merchant.findUnique.mockResolvedValue(
       makeMerchant("spark", 51),
     );
     mockRedis.exists.mockResolvedValueOnce(1); // sessionBilledKey — already billed
-    mockRedis.exists.mockResolvedValueOnce(1); // usageKey
     mockRedis.get.mockResolvedValue("51");
 
     const result2 = await checkAndIncrementUsage(
@@ -169,6 +170,44 @@ describe("checkAndIncrementUsage", () => {
     );
     expect(result.allowed).toBe(true);
     expect(result.used).toBe(11);
+  });
+
+  it("emails the merchant once when crossing 80% of the plan limit", async () => {
+    mockPrisma.merchant.findUnique.mockResolvedValue({
+      ...makeMerchant("spark", 399),
+      supportEmail: "owner@store.com",
+    });
+    mockPrisma.merchant.update.mockResolvedValue({ conversationCount: 400 });
+    mockRedis.exists.mockResolvedValueOnce(0); // session not billed
+    mockRedis.get.mockResolvedValue("399");
+    mockRedis.incr.mockResolvedValue(400); // 400/500 = exactly 80%
+    mockRedis.set.mockResolvedValue("OK"); // NX dedup flag acquired
+    mockRedis.setex.mockResolvedValue("OK");
+
+    await checkAndIncrementUsage("test.myshopify.com", "session-80pct");
+    await new Promise((r) => setTimeout(r, 0)); // alertUsage is fire-and-forget
+
+    expect(sendUsageAlertEmail).toHaveBeenCalledWith(
+      "owner@store.com", "test.myshopify.com", 400, 500, 80,
+    );
+  });
+
+  it("does not re-email when the cycle dedup flag already exists", async () => {
+    mockPrisma.merchant.findUnique.mockResolvedValue({
+      ...makeMerchant("spark", 400),
+      supportEmail: "owner@store.com",
+    });
+    mockPrisma.merchant.update.mockResolvedValue({ conversationCount: 401 });
+    mockRedis.exists.mockResolvedValueOnce(0);
+    mockRedis.get.mockResolvedValue("400");
+    mockRedis.incr.mockResolvedValue(401);
+    mockRedis.set.mockResolvedValue(null); // NX flag NOT acquired — already alerted
+    mockRedis.setex.mockResolvedValue("OK");
+
+    await checkAndIncrementUsage("test.myshopify.com", "session-81pct");
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(sendUsageAlertEmail).not.toHaveBeenCalled();
   });
 
   it("PLAN_LIMITS constants match expected values", () => {

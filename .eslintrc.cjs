@@ -19,7 +19,9 @@ module.exports = {
     commonjs: true,
     es6: true,
   },
-  ignorePatterns: ["!**/.server", "!**/.client"],
+  // The widget bundle is hand-minified to stay under Shopify's 10KB limit —
+  // it is not lintable source.
+  ignorePatterns: ["!**/.server", "!**/.client", "extensions/chat-widget/assets/neonping-widget.js"],
 
   // Base config
   extends: ["eslint:recommended"],
@@ -74,6 +76,12 @@ module.exports = {
         "plugin:import/recommended",
         "plugin:import/typescript",
       ],
+      rules: {
+        "@typescript-eslint/no-unused-vars": [
+          "error",
+          { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+        ],
+      },
     },
 
     // Node
