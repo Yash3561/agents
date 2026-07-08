@@ -142,9 +142,9 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response(
         JSON.stringify({
           error: noPlan ? "no_active_plan" : "usage_limit_exceeded",
-          message: noPlan
-            ? "A paid plan is required to use NeonPing. Please subscribe at your store admin."
-            : "Monthly conversation limit reached. Upgrade your plan to continue.",
+          // Customer-facing — this text renders in the storefront widget, so it must
+          // never mention plans/billing (that's the merchant's business, not the shopper's)
+          message: "Chat is temporarily unavailable. Please contact the store directly — we're happy to help!",
           used: usage.used,
           limit: usage.limit,
         }),
