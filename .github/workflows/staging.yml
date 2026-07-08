@@ -3,6 +3,13 @@ name: Deploy to Staging → Production
 on:
   push:
     branches: [main]
+  workflow_dispatch: {}
+
+# Serialize deploys — back-to-back merges must not race az containerapp update
+# (ContainerAppOperationInProgress). Queue instead of cancel so every merge ships.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy-staging:
