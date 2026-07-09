@@ -5,7 +5,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { PLAN_CONFIG } from "../lib/plans";
+import { PLAN_CONFIG, PLAN_LIMITS } from "../lib/plans";
 import { sendTestMessage } from "../lib/test-chat";
 import { WidgetPreview } from "~/components/WidgetPreview";
 
@@ -634,9 +634,9 @@ export default function Onboarding() {
                 </div>
               ) : (
                 <s-banner tone="warning">
-                  No active plan — customers won&apos;t be able to chat until you subscribe.{" "}
+                  Free plan active — customers can chat now, up to {PLAN_LIMITS.free} conversations per month.{" "}
                   <button type="button" onClick={() => goToStep(3)} style={{ background: "none", border: "none", color: "inherit", fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: "inherit" }}>
-                    Choose a plan →
+                    View plan options →
                   </button>
                 </s-banner>
               )}
@@ -682,7 +682,10 @@ export default function Onboarding() {
               <button
                 type="button"
                 onClick={() => {
-                  if (!waAppId) return;
+                  if (!waAppId) {
+                    shopify.toast.show("WhatsApp connection is unavailable: WHATSAPP_APP_ID is not configured.", { isError: true });
+                    return;
+                  }
                   const redirectUri = encodeURIComponent(`${appUrl}/api/whatsapp/connect`);
                   const scope = encodeURIComponent("whatsapp_business_management,whatsapp_business_messaging");
                   const extras = encodeURIComponent(JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
@@ -692,11 +695,14 @@ export default function Onboarding() {
                     if (popup?.closed) { clearInterval(timer); window.location.reload(); }
                   }, 500);
                 }}
+                disabled={!waAppId}
                 style={{ background: "#25d366", color: "white", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
               >
                 Connect WhatsApp Business
               </button>
-              <span style={{ fontSize: 12, color: "#6d7175", marginLeft: 10 }}>Takes ~2 minutes · Can skip for now</span>
+              <span style={{ fontSize: 12, color: "#6d7175", marginLeft: 10 }}>
+                {waAppId ? "Takes ~2 minutes · Can skip for now" : "Unavailable: WhatsApp app ID is not configured"}
+              </span>
             </div>
           )}
 

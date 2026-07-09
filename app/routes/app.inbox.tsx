@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Form, useFetcher, useLoaderData, useRouteError, useSearchParams, useNavigation } from "react-router";
+import { Form, useActionData, useFetcher, useLoaderData, useRouteError, useSearchParams, useNavigation } from "react-router";
+import { useAppBridge } from "@shopify/app-bridge-react";
 import type { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -222,13 +223,18 @@ export async function action({ request }: ActionFunctionArgs) {
         where: { shopDomain: shop },
         select: { waPhoneNumberId: true, waAccessToken: true },
       });
-      if (merchant?.waPhoneNumberId && merchant?.waAccessToken) {
+      if (!merchant?.waPhoneNumberId || !merchant?.waAccessToken) {
+        return { error: "WhatsApp is not connected. Message was not sent." };
+      }
+      try {
         await sendTextMessage(
           merchant.waPhoneNumberId,
           decryptToken(merchant.waAccessToken),
           phone,
           message,
-        ).catch(() => null);
+        );
+      } catch {
+        return { error: "WhatsApp send failed. Message was not sent." };
       }
     }
 
@@ -325,6 +331,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function Inbox() {
   const loaderData = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const shopify = useAppBridge();
   const {
     conversations,
     totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount,
@@ -372,6 +380,13 @@ export default function Inbox() {
       { method: "POST" },
     );
   }
+
+  useEffect(() => {
+    const error = (rateFetcher.data as { error?: string } | undefined)?.error;
+    if (rateFetcher.state === "idle" && error) {
+      shopify.toast.show(error, { isError: true });
+    }
+  }, [rateFetcher.state, rateFetcher.data, shopify]);
 
   // SSE real-time: track last update time and hold merged updates
   type ConvItem = typeof conversations[number];
@@ -518,12 +533,23 @@ export default function Inbox() {
   // Clear textarea and reset mode after submission
   useEffect(() => {
     if (prevNavState.current === "submitting" && navigation.state === "idle") {
+      if ((actionData as { error?: string } | undefined)?.error) {
+        prevNavState.current = navigation.state;
+        return;
+      }
       if (replyRef.current) replyRef.current.value = "";
       setReplyText("");
       setReplyMode("reply");
     }
     prevNavState.current = navigation.state;
-  }, [navigation.state]);
+  }, [navigation.state, actionData]);
+
+  useEffect(() => {
+    const error = (actionData as { error?: string } | undefined)?.error;
+    if (error) {
+      shopify.toast.show(error, { isError: true });
+    }
+  }, [actionData, shopify]);
 
   // Sync search input when URL param changes (e.g. after filter reset)
   useEffect(() => {

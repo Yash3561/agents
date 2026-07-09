@@ -10,8 +10,6 @@ import { getUsage } from "../lib/billing.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
 import { runInsightsAnalysis, runRevenueNarrator } from "../lib/agents/merchant-analyst.server";
 
-const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
@@ -26,8 +24,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const url = new URL(request.url);
     throw redirect(`/app/onboarding?${url.searchParams.toString()}`);
   }
-
-  const hasPlan = PAID_PLANS.has(merchant.plan);
 
   const url = new URL(request.url);
   const rawDays = parseInt(url.searchParams.get("days") ?? "30", 10);
@@ -200,7 +196,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   return {
-    hasPlan,
     days,
     channel,
     shopDomain: shop,
@@ -581,7 +576,6 @@ export default function Index() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const {
-    hasPlan,
     stats,
     days,
     channel,
@@ -645,22 +639,14 @@ export default function Index() {
   return (
     <s-page heading="Dashboard">
       {/* ── Banners ── */}
-      {!hasPlan && (
-        <s-banner tone="info">
-          {"Your chat widget is inactive. "}
-          <a href="/app/billing" style={{ fontWeight: 600 }}>
-            Choose a plan
-          </a>
-          {" to activate NeonPing — all plans include a 7-day free trial."}
-        </s-banner>
-      )}
       {isAtCapacity && (
         <s-banner tone="critical">
           {"You've reached your "}
           {usage.limit}
           {" conversation limit for this billing cycle. "}
-          <a href="/app/billing">Upgrade your plan</a>
-          {" to continue."}
+          New chats are paused until your usage resets.{" "}
+          <a href="/app/billing">View plan options</a>
+          {" for paid-plan availability."}
         </s-banner>
       )}
       {isNearCapacity && (
@@ -670,7 +656,7 @@ export default function Index() {
           {"% of your "}
           {usage.limit}
           {" conversation limit this billing cycle. "}
-          <a href="/app/billing">Upgrade soon</a>
+          <a href="/app/billing">View plan options</a>
           {"."}
         </s-banner>
       )}
@@ -1175,7 +1161,15 @@ export default function Index() {
                     <span style={{ fontWeight: 600 }}>Suggestion:</span>
                     <span>{topic.suggestion}</span>
                     {topic.suggestion?.toLowerCase().includes("faq") && (
-                      <a href="/app/ai-config" style={{ marginLeft: "8px", fontSize: "11px", color: "var(--color-primary)", fontWeight: 600 }}>Add to FAQ →</a>
+                      <a
+                        href={`/app/ai-config?${new URLSearchParams({
+                          faqQuestion: topic.label,
+                          faqAnswer: topic.suggestion,
+                        }).toString()}`}
+                        style={{ marginLeft: "8px", fontSize: "11px", color: "var(--color-primary)", fontWeight: 600 }}
+                      >
+                        Add to FAQ →
+                      </a>
                     )}
                   </div>
                 </div>

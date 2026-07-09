@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData, useRouteError } from "react-router";
+import { useFetcher, useLoaderData, useRouteError, useSearchParams } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -124,21 +124,64 @@ export default function AiConfig() {
   const quickFetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const playgroundRef = useRef<HTMLDivElement>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // --- FAQ state ---
   const [faqs, setFaqs] = useState<Faq[]>(merchant.customFaqs);
 
   useEffect(() => {
-    if (faqFetcher.state === "idle" && (faqFetcher.data as { saved?: string } | undefined)?.saved === "faqs") {
+    const data = faqFetcher.data as { saved?: string; error?: string } | undefined;
+    if (faqFetcher.state !== "idle" || !data) return;
+    if (data.saved === "faqs") {
       shopify.toast.show("FAQ knowledge base saved");
+    } else if (data.error) {
+      shopify.toast.show(data.error, { isError: true });
     }
   }, [faqFetcher.state, faqFetcher.data, shopify]);
 
   useEffect(() => {
-    if (quickFetcher.state === "idle" && (quickFetcher.data as { saved?: string } | undefined)?.saved === "quick_replies") {
+    const data = quickFetcher.data as { saved?: string; error?: string } | undefined;
+    if (quickFetcher.state !== "idle" || !data) return;
+    if (data.saved === "quick_replies") {
       shopify.toast.show("Conversation starters saved");
+    } else if (data.error) {
+      shopify.toast.show(data.error, { isError: true });
     }
   }, [quickFetcher.state, quickFetcher.data, shopify]);
+
+  useEffect(() => {
+    const data = testFetcher.data as { error?: string } | undefined;
+    if (testFetcher.state === "idle" && data?.error) {
+      shopify.toast.show(data.error, { isError: true });
+    }
+  }, [testFetcher.state, testFetcher.data, shopify]);
+
+  useEffect(() => {
+    const question = searchParams.get("faqQuestion")?.trim();
+    const answer = searchParams.get("faqAnswer")?.trim();
+    if (!question && !answer) return;
+
+    setFaqs((prev) => {
+      if (prev.length >= MAX_FAQS) {
+        shopify.toast.show("FAQ limit reached. Remove an FAQ before adding this suggestion.", { isError: true });
+        return prev;
+      }
+      const next = [
+        ...prev,
+        {
+          question: (question || "New FAQ").slice(0, MAX_FAQ_QUESTION_LENGTH),
+          answer: (answer || "").slice(0, MAX_FAQ_ANSWER_LENGTH),
+        },
+      ];
+      shopify.toast.show("FAQ suggestion added. Review and save it to publish.");
+      return next;
+    });
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("faqQuestion");
+    nextParams.delete("faqAnswer");
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams, shopify]);
 
   const addFaq = () => {
     if (faqs.length >= 20) return;

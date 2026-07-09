@@ -147,14 +147,28 @@ export default function Settings() {
   const [codEnabled, setCodEnabled] = useState(merchant.codEnabled);
   const [excludedPages, setExcludedPages] = useState(merchant.excludedPages);
   const [customPathInput, setCustomPathInput] = useState("");
+  const [customPathError, setCustomPathError] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const customPathFieldRef = useRef<any>(null);
 
   const addCustomPath = () => {
     const path = customPathInput.trim();
-    if (path && CUSTOM_PATH_RE.test(path) && !excludedPages.includes(path)) {
+    if (!path) {
+      setCustomPathError("Enter a URL path to exclude.");
+      return;
+    }
+    if (!CUSTOM_PATH_RE.test(path) || path.length > 200) {
+      setCustomPathError("Use a path that starts with / and contains only letters, numbers, dashes, underscores, slashes, dots, or *.");
+      return;
+    }
+    if (excludedPages.includes(path)) {
+      setCustomPathError("That path is already excluded.");
+      return;
+    }
+    if (path) {
       setExcludedPages((prev) => [...prev, path]);
     }
+    setCustomPathError(null);
     setCustomPathInput("");
   };
 
@@ -302,8 +316,16 @@ export default function Settings() {
                   value={customPathInput}
                   placeholder="/pages/wholesale"
                   help-text='Must start with /. Use * for wildcards (e.g. /collections/*).'
-                  onInput={(e: Event) => setCustomPathInput((e.target as HTMLInputElement).value)}
+                  onInput={(e: Event) => {
+                    setCustomPathInput((e.target as HTMLInputElement).value);
+                    if (customPathError) setCustomPathError(null);
+                  }}
                 ></s-text-field>
+                {customPathError && (
+                  <p style={{ margin: "6px 0 0", fontSize: "12px", color: "#b42318" }}>
+                    {customPathError}
+                  </p>
+                )}
               </div>
               <div style={{ paddingBottom: "22px" }}>
                 <s-button
@@ -527,7 +549,10 @@ export default function Settings() {
               type="button"
               variant="primary"
               onClick={() => {
-                if (!waAppId) return;
+                if (!waAppId) {
+                  shopify.toast.show("WhatsApp connection is unavailable: WHATSAPP_APP_ID is not configured.", { isError: true });
+                  return;
+                }
                 const redirectUri = encodeURIComponent(`${appUrl}/api/whatsapp/connect`);
                 const scope = encodeURIComponent("whatsapp_business_management,whatsapp_business_messaging");
                 const extras = encodeURIComponent(JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
@@ -539,9 +564,15 @@ export default function Settings() {
                   if (popup?.closed) { clearInterval(timer); window.location.reload(); }
                 }, 500);
               }}
+              disabled={!waAppId}
             >
               Connect WhatsApp Business
             </s-button>
+            {!waAppId && (
+              <p style={{ fontSize: 12, color: "#b42318", margin: "8px 0 0" }}>
+                WhatsApp connection is unavailable because WHATSAPP_APP_ID is not configured.
+              </p>
+            )}
           </div>
         )}
       </s-section>
