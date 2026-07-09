@@ -59,8 +59,10 @@ model Conversation {
   orderRevenueCents Int?              // written by orders/paid webhook
   agentTrace        Json?
   routeReason       String?
-  qualityScore      Float?
+  qualityScore      Float?            // AI-judged, written by runQAJudge
   qaMeta            Json?
+  merchantThumbsUp   Int      @default(0) // merchant-rated, per-message ratings live in messages[].merchantRating
+  merchantThumbsDown Int      @default(0)
   customerEmail     String?
   customerName      String?
   resolvedAt        DateTime?

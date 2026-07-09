@@ -2,9 +2,13 @@ interface Props {
   role: string;
   content: string;
   timestamp?: number;
+  /** Only offered on genuine AI replies — undefined hides the buttons entirely (user/note/merchant messages). */
+  merchantRating?: "up" | "down";
+  /** undefined = clicking the already-active button, i.e. toggle the rating off */
+  onRate?: (rating: "up" | "down" | undefined) => void;
 }
 
-export function MessageBubble({ role, content, timestamp }: Props) {
+export function MessageBubble({ role, content, timestamp, merchantRating, onRate }: Props) {
   const isUser = role === "user";
   const isMerchant = content?.startsWith("[Merchant]");
   const isSystem = role === "tool" || role === "system";
@@ -13,6 +17,7 @@ export function MessageBubble({ role, content, timestamp }: Props) {
 
   const displayContent = isMerchant ? content.replace("[Merchant] ", "") : content;
   const label = isMerchant ? "You (Merchant)" : "NeonPing AI";
+  const showRating = !isUser && !isMerchant && !!onRate;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start", marginBottom: 2 }}>
@@ -39,11 +44,43 @@ export function MessageBubble({ role, content, timestamp }: Props) {
       }}>
         {displayContent}
       </div>
-      {timestamp && (
-        <span style={{ fontSize: 10, color: "#9ca3af", marginTop: 2, paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0 }}>
-          {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </span>
-      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0 }}>
+        {timestamp && (
+          <span style={{ fontSize: 10, color: "#9ca3af" }}>
+            {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        )}
+        {showRating && (
+          <span style={{ display: "flex", gap: 2 }}>
+            <button
+              type="button"
+              aria-label="Mark this AI reply as helpful"
+              aria-pressed={merchantRating === "up"}
+              onClick={() => onRate!(merchantRating === "up" ? undefined : "up")}
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: "1px 3px",
+                fontSize: 11, opacity: merchantRating === "up" ? 1 : 0.35,
+                filter: merchantRating === "up" ? "none" : "grayscale(1)",
+              }}
+            >
+              👍
+            </button>
+            <button
+              type="button"
+              aria-label="Mark this AI reply as not helpful"
+              aria-pressed={merchantRating === "down"}
+              onClick={() => onRate!(merchantRating === "down" ? undefined : "down")}
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: "1px 3px",
+                fontSize: 11, opacity: merchantRating === "down" ? 1 : 0.35,
+                filter: merchantRating === "down" ? "none" : "grayscale(1)",
+              }}
+            >
+              👎
+            </button>
+          </span>
+        )}
+      </div>
     </div>
   );
 }

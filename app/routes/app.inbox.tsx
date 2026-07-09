@@ -20,6 +20,7 @@ interface ChatMessage {
   role: string;
   content: string;
   timestamp?: number;
+  merchantRating?: "up" | "down";
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -122,7 +123,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Summary counts use global shop scope (not filtered by date/outcome/channel)
   const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
 
-  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant] =
+  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg] =
     await Promise.all([
       prisma.conversation.findMany({
         where,
@@ -162,6 +163,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       prisma.conversation.count({ where: { ...countBase, escalated: false, resolved: false } }),
       prisma.conversation.count({ where: { ...countBase, resolved: true } }),
       prisma.merchant.findUnique({ where: { shopDomain: shop }, select: { quickReplies: true } }),
+      prisma.conversation.aggregate({
+        where: countBase,
+        _sum: { merchantThumbsUp: true, merchantThumbsDown: true },
+      }),
     ]);
 
   let selected = null;
@@ -191,6 +196,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     currencyCode,
     storeHandle,
     quickReplies: merchant?.quickReplies ?? [],
+    thumbsUp: ratingAgg._sum.merchantThumbsUp ?? 0,
+    thumbsDown: ratingAgg._sum.merchantThumbsDown ?? 0,
   };
 }
 
@@ -284,6 +291,35 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: conversationId },
       data: { aiPaused: pause },
     });
+  } else if (intent === "rate-message") {
+    const messageTimestamp = Number(formData.get("messageTimestamp"));
+    const rawRating = formData.get("rating");
+    const rating = rawRating === "up" || rawRating === "down" ? rawRating : null; // null = un-rate
+    if (!Number.isFinite(messageTimestamp)) return { error: "Invalid message" };
+
+    const existing = Array.isArray(conversation.messages)
+      ? (conversation.messages as Array<{ role?: string; content?: string; timestamp?: number; merchantRating?: "up" | "down" }>)
+      : [];
+    const target = existing.find(
+      (m) => m.timestamp === messageTimestamp && m.role === "assistant" && !m.content?.startsWith("[Merchant]"),
+    );
+    if (!target) return { error: "Message not ratable" };
+
+    const prevRating = target.merchantRating;
+    if (rating) target.merchantRating = rating;
+    else delete target.merchantRating;
+
+    const upDelta = (rating === "up" ? 1 : 0) - (prevRating === "up" ? 1 : 0);
+    const downDelta = (rating === "down" ? 1 : 0) - (prevRating === "down" ? 1 : 0);
+
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        messages: existing as unknown as import("@prisma/client").Prisma.InputJsonValue,
+        ...(upDelta ? { merchantThumbsUp: { increment: upDelta } } : {}),
+        ...(downDelta ? { merchantThumbsDown: { increment: downDelta } } : {}),
+      },
+    });
   }
 
   return null;
@@ -302,6 +338,7 @@ export default function Inbox() {
     search, dateRange, statusTab, channel,
     currencyCode, storeHandle,
     quickReplies,
+    thumbsUp, thumbsDown,
   } = loaderData;
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -329,6 +366,18 @@ export default function Inbox() {
 
   // Pause/resume AI fetcher
   const pauseFetcher = useFetcher<typeof action>();
+
+  // Message rating fetcher — optimistic local overrides keyed by message timestamp,
+  // since the loader only refreshes on navigation/SSE and a rating click shouldn't wait for that
+  const rateFetcher = useFetcher<typeof action>();
+  const [ratingOverrides, setRatingOverrides] = useState<Record<number, "up" | "down" | undefined>>({});
+  function rateMessage(conversationId: string, messageTimestamp: number, rating: "up" | "down" | undefined) {
+    setRatingOverrides((prev) => ({ ...prev, [messageTimestamp]: rating }));
+    rateFetcher.submit(
+      { intent: "rate-message", conversationId, messageTimestamp: String(messageTimestamp), rating: rating ?? "" },
+      { method: "POST" },
+    );
+  }
 
   // SSE real-time: track last update time and hold merged updates
   type ConvItem = typeof conversations[number];
@@ -574,6 +623,11 @@ export default function Inbox() {
             {inCartCount > 0 && <span style={{ color: "var(--color-primary)" }}>● {inCartCount} in cart</span>}
             {escalatedCount > 0 && <span style={{ color: "var(--color-critical)" }}>● {escalatedCount} escalated</span>}
             {liveCount > 0 && <span style={{ color: "#22c55e", fontWeight: 600 }}>⬤ {liveCount} live</span>}
+            {thumbsUp + thumbsDown > 0 && (
+              <span title={`${thumbsUp} rated helpful, ${thumbsDown} rated not helpful`}>
+                {Math.round((thumbsUp / (thumbsUp + thumbsDown)) * 100)}% rated helpful ({thumbsUp}👍 {thumbsDown}👎)
+              </span>
+            )}
             <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
               <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                 <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
@@ -858,8 +912,21 @@ export default function Inbox() {
                       </div>
                     );
                   }
+                  const hasOverride = msg.timestamp != null && msg.timestamp in ratingOverrides;
+                  const currentRating = hasOverride ? ratingOverrides[msg.timestamp!] : msg.merchantRating;
                   return (
-                    <MessageBubble key={i} role={msg.role} content={msg.content} timestamp={msg.timestamp} />
+                    <MessageBubble
+                      key={i}
+                      role={msg.role}
+                      content={msg.content}
+                      timestamp={msg.timestamp}
+                      merchantRating={currentRating}
+                      onRate={
+                        selected && msg.timestamp != null
+                          ? (rating) => rateMessage(selected.id, msg.timestamp!, rating)
+                          : undefined
+                      }
+                    />
                   );
                 })}
               </div>
