@@ -625,7 +625,7 @@ export default function Inbox() {
             {liveCount > 0 && <span style={{ color: "#22c55e", fontWeight: 600 }}>⬤ {liveCount} live</span>}
             {thumbsUp + thumbsDown > 0 && (
               <span title={`${thumbsUp} rated helpful, ${thumbsDown} rated not helpful`}>
-                {Math.round((thumbsUp / (thumbsUp + thumbsDown)) * 100)}% rated helpful ({thumbsUp}👍 {thumbsDown}👎)
+                {Math.round((thumbsUp / (thumbsUp + thumbsDown)) * 100)}% rated helpful ({thumbsUp} helpful, {thumbsDown} not helpful)
               </span>
             )}
             <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -635,9 +635,12 @@ export default function Inbox() {
               </span>
               <button
                 onClick={() => (document.getElementById("inbox-win") as unknown as { show(): void })?.show()}
-                style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer" }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer" }}
               >
-                ⛶ Full screen
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Full screen
               </button>
             </span>
           </div>

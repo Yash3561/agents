@@ -46,6 +46,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const baseWhere = { shopDomain: shop, startedAt: { gte: since }, ...channelFilter };
 
+  // All of these are independent — none depend on another's result, only on shop/since/
+  // channelSql/session, all already known. Previously the 4 raw SQL queries, the Admin
+  // GraphQL currency call, and the insights/narrative fetch ran as separate sequential
+  // `await`s AFTER this Promise.all — 6 extra full network round-trips on every single
+  // dashboard load. Merged into one parallel batch: a production load of this route was
+  // observed taking 8.8s end-to-end before this fix.
   const [
     totalConversations,
     conversionsCount,
@@ -56,6 +62,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     openNow,
     recentForResponseTime,
     llmUsageAgg,
+    rawRouting,
+    rawConversionByRoute,
+    rawIntents,
+    dailyCounts,
+    currencyResult,
+    merchantData,
   ] = await Promise.all([
     prisma.conversation.count({ where: baseWhere }),
     prisma.conversation.count({ where: { ...baseWhere, orderId: { not: null } } }),
@@ -88,6 +100,60 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { shopDomain: shop, date: { gte: since } },
       _sum: { inputTokens: true, outputTokens: true, cachedInputTokens: true, callCount: true },
     }),
+    prisma.$queryRaw<Array<{ route: string; count: bigint }>>`
+      SELECT
+        "agentTrace"::json->>0 as route,
+        COUNT(*) as count
+      FROM "Conversation"
+      WHERE "shopDomain" = ${shop}
+        AND "startedAt" >= ${since}
+        AND "agentTrace" IS NOT NULL
+        ${channelSql}
+      GROUP BY 1
+      ORDER BY count DESC
+    `,
+    prisma.$queryRaw<Array<{ route: string; converted: bigint; total: bigint }>>`
+      SELECT
+        "agentTrace"::json->>0 as route,
+        COUNT(CASE WHEN "orderId" IS NOT NULL THEN 1 END) as converted,
+        COUNT(*) as total
+      FROM "Conversation"
+      WHERE "shopDomain" = ${shop}
+        AND "startedAt" >= ${since}
+        AND "agentTrace" IS NOT NULL
+        ${channelSql}
+      GROUP BY 1
+    `,
+    prisma.$queryRaw<Array<{ reason: string; count: bigint }>>`
+      SELECT "routeReason" as reason, COUNT(*) as count
+      FROM "Conversation"
+      WHERE "shopDomain" = ${shop}
+        AND "startedAt" >= ${since}
+        AND "routeReason" IS NOT NULL
+        AND "routeReason" != ''
+        ${channelSql}
+      GROUP BY "routeReason"
+      ORDER BY count DESC
+      LIMIT 10
+    `,
+    prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
+      SELECT DATE("startedAt")::text as date, COUNT(*) as count
+      FROM "Conversation"
+      WHERE "shopDomain" = ${shop}
+      AND "startedAt" >= ${since}
+      ${channelSql}
+      GROUP BY DATE("startedAt")
+      ORDER BY date ASC
+    `,
+    adminGraphql<{ shop: { currencyCode: string } }>(
+      session.shop,
+      session.accessToken ?? "",
+      `{ shop { currencyCode } }`,
+    ).catch(() => null),
+    prisma.merchant.findUnique({
+      where: { shopDomain: shop },
+      select: { insightsJson: true, revenueNarrative: true },
+    }),
   ]);
 
   // Compute avg first-response time from messages JSON
@@ -103,35 +169,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
     : null;
 
-  const rawRouting = await prisma.$queryRaw<Array<{ route: string; count: bigint }>>`
-    SELECT
-      "agentTrace"::json->>0 as route,
-      COUNT(*) as count
-    FROM "Conversation"
-    WHERE "shopDomain" = ${shop}
-      AND "startedAt" >= ${since}
-      AND "agentTrace" IS NOT NULL
-      ${channelSql}
-    GROUP BY 1
-    ORDER BY count DESC
-  `;
   const routingData = rawRouting.map((r) => ({
     route: String(r.route || "unknown"),
     count: Number(r.count),
   }));
 
-  const rawConversionByRoute = await prisma.$queryRaw<Array<{ route: string; converted: bigint; total: bigint }>>`
-    SELECT
-      "agentTrace"::json->>0 as route,
-      COUNT(CASE WHEN "orderId" IS NOT NULL THEN 1 END) as converted,
-      COUNT(*) as total
-    FROM "Conversation"
-    WHERE "shopDomain" = ${shop}
-      AND "startedAt" >= ${since}
-      AND "agentTrace" IS NOT NULL
-      ${channelSql}
-    GROUP BY 1
-  `;
   const conversionByRoute = new Map(
     rawConversionByRoute.map((r) => [
       String(r.route),
@@ -139,52 +181,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ])
   );
 
-  const rawIntents = await prisma.$queryRaw<Array<{ reason: string; count: bigint }>>`
-    SELECT "routeReason" as reason, COUNT(*) as count
-    FROM "Conversation"
-    WHERE "shopDomain" = ${shop}
-      AND "startedAt" >= ${since}
-      AND "routeReason" IS NOT NULL
-      AND "routeReason" != ''
-      ${channelSql}
-    GROUP BY "routeReason"
-    ORDER BY count DESC
-    LIMIT 10
-  `;
   const topIntents = rawIntents.map((r) => ({ reason: String(r.reason), count: Number(r.count) }));
 
-  const dailyCounts = await prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
-    SELECT DATE("startedAt")::text as date, COUNT(*) as count
-    FROM "Conversation"
-    WHERE "shopDomain" = ${shop}
-    AND "startedAt" >= ${since}
-    ${channelSql}
-    GROUP BY DATE("startedAt")
-    ORDER BY date ASC
-  `;
   const dailyData = dailyCounts.map((r) => ({
     date: String(r.date).slice(0, 10),
     count: Number(r.count),
   }));
 
-  let currencyCode = "USD";
-  try {
-    const shopData = await adminGraphql<{ shop: { currencyCode: string } }>(
-      session.shop,
-      session.accessToken ?? "",
-      `{ shop { currencyCode } }`,
-    );
-    currencyCode = shopData.shop?.currencyCode ?? "USD";
-  } catch {
-    // fall back to USD silently
-  }
+  // currencyResult is null if the GraphQL call threw (caught inline above so it can
+  // run inside the same Promise.all as everything else, rather than needing its own
+  // try/catch after an awaited batch)
+  const currencyCode = currencyResult?.shop?.currencyCode ?? "USD";
 
   // Fetch cached AI insights + revenue narrative; auto-refresh if stale (non-blocking)
-  const merchantData = await prisma.merchant.findUnique({
-    where: { shopDomain: shop },
-    select: { insightsJson: true, revenueNarrative: true },
-  });
-
   const insightsRaw = merchantData?.insightsJson as { generatedAt?: string; topics?: unknown[] } | null;
   const insightsAge = insightsRaw?.generatedAt ? Date.now() - new Date(insightsRaw.generatedAt).getTime() : Infinity;
   if (insightsAge > 24 * 3600 * 1000) {
@@ -646,8 +655,8 @@ export default function Index() {
 
   const CHANNEL_TOGGLE = [
     { value: "all", label: "All channels" },
-    { value: "web", label: "🌐 Web Widget" },
-    { value: "whatsapp", label: "💚 WhatsApp" },
+    { value: "web", label: "Web Widget" },
+    { value: "whatsapp", label: "WhatsApp" },
   ] as const;
 
   return (
@@ -1204,7 +1213,7 @@ export default function Index() {
                   </div>
                   <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontStyle: "italic", marginBottom: "8px" }}>&ldquo;{topic.sample}&rdquo;</div>
                   <div style={{ fontSize: "12px", color: "var(--color-primary)", display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span>💡</span>
+                    <span style={{ fontWeight: 600 }}>Suggestion:</span>
                     <span>{topic.suggestion}</span>
                     {topic.suggestion?.toLowerCase().includes("faq") && (
                       <a href="/app/ai-config" style={{ marginLeft: "8px", fontSize: "11px", color: "var(--color-primary)", fontWeight: 600 }}>Add to FAQ →</a>

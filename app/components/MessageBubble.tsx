@@ -1,3 +1,21 @@
+function ThumbIcon({ direction, filled }: { direction: "up" | "down"; filled: boolean }) {
+  return (
+    <svg
+      width="12" height="12" viewBox="0 0 20 20"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.5"
+      style={direction === "down" ? { transform: "rotate(180deg)" } : undefined}
+    >
+      <path
+        d="M7 9v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3zm0 0 4.5-7a1.5 1.5 0 0 1 2.7.9L13.5 8H16a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 14.8 18H7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 interface Props {
   role: string;
   content: string;
@@ -58,12 +76,11 @@ export function MessageBubble({ role, content, timestamp, merchantRating, onRate
               aria-pressed={merchantRating === "up"}
               onClick={() => onRate!(merchantRating === "up" ? undefined : "up")}
               style={{
-                background: "none", border: "none", cursor: "pointer", padding: "1px 3px",
-                fontSize: 11, opacity: merchantRating === "up" ? 1 : 0.35,
-                filter: merchantRating === "up" ? "none" : "grayscale(1)",
+                display: "flex", background: "none", border: "none", cursor: "pointer", padding: "2px",
+                color: merchantRating === "up" ? "#008060" : "#c9cccf",
               }}
             >
-              👍
+              <ThumbIcon direction="up" filled={merchantRating === "up"} />
             </button>
             <button
               type="button"
@@ -71,12 +88,11 @@ export function MessageBubble({ role, content, timestamp, merchantRating, onRate
               aria-pressed={merchantRating === "down"}
               onClick={() => onRate!(merchantRating === "down" ? undefined : "down")}
               style={{
-                background: "none", border: "none", cursor: "pointer", padding: "1px 3px",
-                fontSize: 11, opacity: merchantRating === "down" ? 1 : 0.35,
-                filter: merchantRating === "down" ? "none" : "grayscale(1)",
+                display: "flex", background: "none", border: "none", cursor: "pointer", padding: "2px",
+                color: merchantRating === "down" ? "#d82c0d" : "#c9cccf",
               }}
             >
-              👎
+              <ThumbIcon direction="down" filled={merchantRating === "down"} />
             </button>
           </span>
         )}
