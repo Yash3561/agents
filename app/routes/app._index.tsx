@@ -32,7 +32,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const channel = url.searchParams.get("channel") || "all";
   const daysNum = parseInt(days, 10) || 30;
   const since = new Date(Date.now() - daysNum * 86400000);
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
   const channelFilter =
     channel === "whatsapp" ? { channel: "whatsapp" }
@@ -59,9 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     revenueAgg,
     recentEscalations,
     usage,
-    openNow,
     recentForResponseTime,
-    llmUsageAgg,
     rawRouting,
     rawConversionByRoute,
     rawIntents,
@@ -87,18 +84,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       select: { id: true, sessionId: true, lastMessageAt: true, messageCount: true },
     }),
     getUsage(shop),
-    prisma.conversation.count({
-      where: { shopDomain: shop, resolved: false, lastMessageAt: { gte: tenMinutesAgo }, ...channelFilter },
-    }),
     prisma.conversation.findMany({
       where: baseWhere,
       orderBy: { startedAt: "desc" },
       take: 200,
       select: { messages: true },
-    }),
-    prisma.llmUsage.aggregate({
-      where: { shopDomain: shop, date: { gte: since } },
-      _sum: { inputTokens: true, outputTokens: true, cachedInputTokens: true, callCount: true },
     }),
     prisma.$queryRaw<Array<{ route: string; count: bigint }>>`
       SELECT
@@ -220,7 +210,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       discountsUsedCount,
       revenueCents: revenueAgg._sum.orderRevenueCents ?? 0,
     },
-    openNow,
     avgResponseMs,
     recentEscalations,
     usage,
@@ -228,12 +217,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     dailyData,
     conversionByRoute: Object.fromEntries(conversionByRoute),
     topIntents,
-    llmUsage: {
-      inputTokens: llmUsageAgg._sum.inputTokens ?? 0,
-      outputTokens: llmUsageAgg._sum.outputTokens ?? 0,
-      cachedInputTokens: llmUsageAgg._sum.cachedInputTokens ?? 0,
-      callCount: llmUsageAgg._sum.callCount ?? 0,
-    },
   };
 };
 
@@ -599,7 +582,6 @@ export default function Index() {
     stats,
     days,
     channel,
-    openNow,
     avgResponseMs,
     recentEscalations,
     usage,
@@ -611,7 +593,6 @@ export default function Index() {
     currencyCode,
     insightsJson,
     revenueNarrative,
-    llmUsage,
   } = loaderData;
 
   type InsightsTopic = { label: string; count: number; sample: string; suggestion: string };
@@ -632,11 +613,6 @@ export default function Index() {
     ? fmtCurrency(stats.revenueCents / stats.conversionsCount)
     : fmtCurrency(0);
 
-  const revenuePerChat =
-    stats.totalConversations > 0 && stats.revenueCents > 0
-      ? fmtCurrency(stats.revenueCents / stats.totalConversations)
-      : "—";
-
   const usagePercent =
     usage.limit > 0 ? Math.round((usage.used / usage.limit) * 100) : 0;
   const isAtCapacity = usage.limit > 0 && usage.used >= usage.limit;
@@ -656,12 +632,6 @@ export default function Index() {
     : avgResponseMs < 180000 ? "#008060"
     : avgResponseMs < 600000 ? "#b98900"
     : "#d82c0d";
-
-  const totalLlmTokens = llmUsage.inputTokens + llmUsage.outputTokens;
-  const cacheHitRatePct = llmUsage.inputTokens > 0
-    ? Math.round((llmUsage.cachedInputTokens / llmUsage.inputTokens) * 100)
-    : null;
-  const fmtTokens = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 
   const CHANNEL_TOGGLE = [
     { value: "all", label: "All channels" },
@@ -825,12 +795,6 @@ export default function Index() {
             borderColor="#2c6ecb"
           />
           <Metric
-            label="Revenue per chat"
-            value={revenuePerChat}
-            sub="avg per conversation"
-            borderColor="#2c6ecb"
-          />
-          <Metric
             label="Plan usage"
             value={`${usage.used} / ${usage.limit > 0 ? usage.limit.toLocaleString() : "∞"}`}
             sub={
@@ -843,24 +807,6 @@ export default function Index() {
             value={fmtResponseTime(avgResponseMs)}
             sub={avgResponseMs !== null ? (avgResponseMs < 180000 ? "Excellent (< 3 min)" : avgResponseMs < 600000 ? "Good (< 10 min)" : "Slow (> 10 min)") : "No data yet"}
             borderColor={responseColor}
-          />
-          <Metric
-            label="Active now"
-            value={String(openNow)}
-            sub={openNow === 1 ? "open conversation" : "open conversations"}
-            borderColor={openNow > 0 ? "#d97706" : "#e1e3e5"}
-          />
-          <Metric
-            label="LLM tokens"
-            value={llmUsage.callCount > 0 ? fmtTokens(totalLlmTokens) : "—"}
-            sub={
-              llmUsage.callCount === 0
-                ? "No data yet"
-                : cacheHitRatePct !== null
-                  ? `${llmUsage.callCount.toLocaleString()} calls · ${cacheHitRatePct}% cache hit`
-                  : `${llmUsage.callCount.toLocaleString()} calls`
-            }
-            borderColor="#2c6ecb"
           />
         </div>
       </s-section>
