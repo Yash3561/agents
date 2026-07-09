@@ -86,15 +86,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (formData.get("intent") === "save-step") {
     try {
-      const updateData: Record<string, unknown> = { onboardingStep: Number(formData.get("step")) || 1 };
+      const rawStep = Number(formData.get("step")) || 1;
+      const updateData: Record<string, unknown> = { onboardingStep: Math.min(4, Math.max(1, rawStep)) };
       const botName = formData.get("botName");
       const widgetGreeting = formData.get("widgetGreeting");
       const widgetColor = formData.get("widgetColor");
       const brandVoice = formData.get("brandVoice");
-      if (botName) updateData.botName = String(botName);
-      if (widgetGreeting) updateData.widgetGreeting = String(widgetGreeting);
-      if (widgetColor) updateData.widgetColor = String(widgetColor);
-      if (brandVoice) updateData.brandVoice = String(brandVoice);
+      if (botName) updateData.botName = String(botName).trim().slice(0, 30) || "NeonPing";
+      if (widgetGreeting) updateData.widgetGreeting = String(widgetGreeting).slice(0, 500);
+      if (widgetColor) {
+        const rawColor = String(widgetColor).trim();
+        updateData.widgetColor = HEX_RE_ONBOARDING.test(rawColor) ? rawColor : "#1a1a1a";
+      }
+      if (brandVoice) {
+        const rawVoice = String(brandVoice);
+        updateData.brandVoice = VALID_VOICES_ONBOARDING.has(rawVoice) ? rawVoice : "friendly and helpful";
+      }
       await prisma.merchant.update({
         where: { shopDomain: session.shop },
         data: updateData,

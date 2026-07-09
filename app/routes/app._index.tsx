@@ -6,9 +6,11 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { getUsage, PLAN_LIMITS } from "../lib/billing.server";
+import { getUsage } from "../lib/billing.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
 import { runInsightsAnalysis, runRevenueNarrator } from "../lib/agents/merchant-analyst.server";
+
+const PAID_PLANS = new Set(["spark", "pulse", "surge"]);
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -25,12 +27,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(`/app/onboarding?${url.searchParams.toString()}`);
   }
 
-  const hasPlan = merchant.plan in PLAN_LIMITS;
+  const hasPlan = PAID_PLANS.has(merchant.plan);
 
   const url = new URL(request.url);
-  const days = url.searchParams.get("days") || "30";
+  const rawDays = parseInt(url.searchParams.get("days") ?? "30", 10);
+  const daysNum = Number.isFinite(rawDays) ? Math.min(365, Math.max(1, rawDays)) : 30;
+  const days = String(daysNum);
   const channel = url.searchParams.get("channel") || "all";
-  const daysNum = parseInt(days, 10) || 30;
   const since = new Date(Date.now() - daysNum * 86400000);
 
   const channelFilter =

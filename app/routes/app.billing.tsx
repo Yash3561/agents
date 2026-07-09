@@ -150,7 +150,6 @@ export async function action({ request }: ActionFunctionArgs) {
       return { error: "billing_error", detail: "No confirmation URL returned" };
     }
 
-    console.log("[billing] subscription created, redirecting to payment page");
     return { redirectUrl: result.confirmationUrl };
   } catch (e) {
     console.error("[billing] unexpected error:", e);
@@ -311,7 +310,7 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
 export default function BillingPage() {
   const { usage, activeSubscription, resetAtStr, daysUntilReset } = useLoaderData<typeof loader>();
 
-  const hasActivePlan = usage.plan in PLAN_LIMITS;
+  const hasActivePlan = VALID_PLANS.includes(usage.plan as PlanKey);
   const usagePct =
     usage.limit > 0
       ? Math.min(100, Math.round((usage.used / usage.limit) * 100))

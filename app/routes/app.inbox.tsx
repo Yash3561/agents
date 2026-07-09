@@ -123,7 +123,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Summary counts use global shop scope (not filtered by date/outcome/channel)
   const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
 
-  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg] =
+  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg, selected, currencyResult] =
     await Promise.all([
       prisma.conversation.findMany({
         where,
@@ -167,23 +167,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: countBase,
         _sum: { merchantThumbsUp: true, merchantThumbsDown: true },
       }),
+      selectedId
+        ? prisma.conversation.findFirst({ where: { id: selectedId, shopDomain: shop } })
+        : Promise.resolve(null),
+      adminGraphql<{ shop: { currencyCode: string } }>(
+        session.shop,
+        session.accessToken ?? "",
+        `{ shop { currencyCode } }`,
+      ).catch(() => null),
     ]);
 
-  let selected = null;
-  if (selectedId) {
-    const raw = await prisma.conversation.findUnique({ where: { id: selectedId } });
-    if (raw && raw.shopDomain === shop) selected = raw;
-  }
-
-  let currencyCode = "USD";
-  try {
-    const shopData = await adminGraphql<{ shop: { currencyCode: string } }>(
-      session.shop,
-      session.accessToken ?? "",
-      `{ shop { currencyCode } }`,
-    );
-    currencyCode = shopData.shop?.currencyCode ?? "USD";
-  } catch { /* fall back to USD */ }
+  const currencyCode = currencyResult?.shop?.currencyCode ?? "USD";
 
   const storeHandle = shop.replace(".myshopify.com", "");
 
@@ -272,11 +266,11 @@ export async function action({ request }: ActionFunctionArgs) {
     const answer = (formData.get("answer") as string)?.trim();
     if (question && answer) {
       const merchant = await prisma.merchant.findUnique({ where: { shopDomain: shop } });
-      const faqs = Array.isArray(merchant?.customFaqs) ? (merchant!.customFaqs as { q: string; a: string }[]) : [];
+      const faqs = Array.isArray(merchant?.customFaqs) ? (merchant!.customFaqs as { question: string; answer: string }[]) : [];
       if (faqs.length < 20) {
         await prisma.merchant.update({
           where: { shopDomain: shop },
-          data: { customFaqs: [...faqs, { q: question, a: answer }] },
+          data: { customFaqs: [...faqs, { question, answer }] },
         });
       }
     }

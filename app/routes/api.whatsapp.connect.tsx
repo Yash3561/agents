@@ -4,13 +4,14 @@
  * OAuth callback from Meta. Called inside a popup opened by the settings page.
  * Returns a self-closing HTML page so the popup closes and the parent reloads.
  *
- * Shop is passed via the `state` param (set in app.settings.tsx at popup open time).
- * No Shopify session needed — this is a plain OAuth callback, not an embedded route.
+ * The `state` param is signed and nonce-backed so the callback can safely bind
+ * the Meta account to the shop that initiated the flow.
  */
 
 import type { LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
 import { encryptToken, sendTextMessage, registerDefaultTemplates } from "~/lib/whatsapp.server";
+import { verifyWhatsAppOAuthState } from "~/lib/whatsapp-oauth-state.server";
 
 const close = (msg: string) =>
   new Response(
@@ -21,7 +22,7 @@ const close = (msg: string) =>
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const shop = url.searchParams.get("state"); // shopDomain passed as state at popup open
+  const shop = await verifyWhatsAppOAuthState(url.searchParams.get("state"));
 
   if (!code || !shop) return close("Missing params. You can close this window.");
 
@@ -97,8 +98,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const phone = displayPhone ?? "";
+  const phoneLiteral = JSON.stringify(phone);
   return new Response(
-    `<!DOCTYPE html><html><body><script>if(window.opener){window.opener.postMessage({type:'WA_CONNECTED',phone:'${phone}'},'*');}window.close();</script><p>Connected! Closing...</p></body></html>`,
+    `<!DOCTYPE html><html><body><script>if(window.opener){window.opener.postMessage({type:'WA_CONNECTED',phone:${phoneLiteral}},'*');}window.close();</script><p>Connected! Closing...</p></body></html>`,
     { headers: { "Content-Type": "text/html" } },
   );
 }

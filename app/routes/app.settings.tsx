@@ -10,6 +10,7 @@ import { redis } from "~/redis.server";
 import { decryptToken, fetchTemplateStatuses } from "~/lib/whatsapp.server";
 import type { TemplateStatus } from "~/lib/whatsapp.server";
 import { WidgetPreview } from "~/components/WidgetPreview";
+import { createWhatsAppOAuthState } from "~/lib/whatsapp-oauth-state.server";
 
 const VOICE_PRESETS = [
   {
@@ -65,6 +66,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     appUrl: process.env.SHOPIFY_APP_URL ?? "",
     emailConfigured: !!process.env.RESEND_API_KEY,
     waTemplates,
+    waOAuthState: await createWhatsAppOAuthState(session.shop),
   };
 };
 
@@ -126,7 +128,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Settings() {
-  const { merchant, waAppId, appUrl, emailConfigured, waTemplates } = useLoaderData<typeof loader>();
+  const { merchant, waAppId, appUrl, emailConfigured, waTemplates, waOAuthState } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const formRef = useRef<HTMLFormElement>(null);
@@ -529,10 +531,10 @@ export default function Settings() {
                 const redirectUri = encodeURIComponent(`${appUrl}/api/whatsapp/connect`);
                 const scope = encodeURIComponent("whatsapp_business_management,whatsapp_business_messaging");
                 const extras = encodeURIComponent(JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
-                const state = encodeURIComponent(merchant.shopDomain);
+                const state = encodeURIComponent(waOAuthState);
                 const url = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${waAppId}&display=popup&extras=${extras}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${state}`;
                 const popup = window.open(url, "waConnect", "width=660,height=750,scrollbars=yes");
-                // ponytail: poll until popup closes, then reload to pick up waConnectedAt from DB
+                // Poll until the popup closes, then reload to pick up waConnectedAt from DB.
                 const timer = setInterval(() => {
                   if (popup?.closed) { clearInterval(timer); window.location.reload(); }
                 }, 500);

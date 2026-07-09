@@ -22,6 +22,10 @@ interface ChatMessage {
   text: string;
 }
 
+const MAX_FAQS = 20;
+const MAX_FAQ_QUESTION_LENGTH = 300;
+const MAX_FAQ_ANSWER_LENGTH = 2000;
+
 // ---------------------------------------------------------------------------
 // Loader
 // ---------------------------------------------------------------------------
@@ -53,9 +57,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const raw = String(formData.get("customFaqs") || "[]");
     let faqs: Faq[] = [];
     try {
-      faqs = (JSON.parse(raw) as Faq[]).slice(0, 20);
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) {
+        return { error: "Invalid FAQ data" };
+      }
+      faqs = parsed
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return null;
+          const record = entry as Record<string, unknown>;
+          const question = String(record.question ?? "").trim().slice(0, MAX_FAQ_QUESTION_LENGTH);
+          const answer = String(record.answer ?? "").trim().slice(0, MAX_FAQ_ANSWER_LENGTH);
+          return question && answer ? { question, answer } : null;
+        })
+        .filter((entry): entry is Faq => entry !== null)
+        .slice(0, MAX_FAQS);
     } catch {
-      // keep empty
+      return { error: "Invalid FAQ data" };
     }
     await prisma.merchant.update({
       where: { shopDomain: session.shop },
@@ -137,7 +154,6 @@ export default function AiConfig() {
   };
 
   const submitFaqs = () => {
-    // Fix C — validate before saving
     const hasEmpty = faqs.some((f) => !f.question.trim() || !f.answer.trim());
     if (hasEmpty) {
       shopify.toast.show("Please fill in all FAQ questions and answers", { isError: true });
@@ -235,7 +251,6 @@ export default function AiConfig() {
       <s-section heading="Custom knowledge base">
         <s-banner tone="info">Add up to 20 Q&amp;A pairs. The support agent will answer these questions exactly as written.</s-banner>
 
-        {/* Fix D — empty state */}
         {faqs.length === 0 ? (
           <div style={{ padding: "24px 0", textAlign: "center" }}>
             <s-text tone="neutral">
@@ -247,7 +262,6 @@ export default function AiConfig() {
           </div>
         ) : (
           <>
-            {/* Fix B — stable key using question text */}
             {faqs.map((faq, idx) => (
               <s-box key={faq.question || `faq-${idx}`} padding="base" background="subdued" borderRadius="base">
                 <s-stack direction="block" gap="base">

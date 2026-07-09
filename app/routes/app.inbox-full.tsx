@@ -1,7 +1,5 @@
 // Full-screen inbox overlay — rendered inside <s-app-window> via /app/inbox-full.
 // No <s-page> wrapper; <ui-title-bar> registers the admin chrome heading.
-// ponytail: loader/action are direct copies of app.inbox.tsx; no shared abstraction
-// needed until a third consumer appears.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
@@ -12,6 +10,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { adminGraphql } from "../lib/mcp/admin.server";
 import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
+import { appendMessage } from "../lib/session.server";
 import { runQAJudge } from "../lib/agents/merchant-analyst.server";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { MessageBubble } from "~/components/MessageBubble";
@@ -24,6 +23,7 @@ interface ChatMessage {
   role: string;
   content: string;
   timestamp?: number;
+  merchantRating?: "up" | "down";
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
 
-  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant] =
+  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg] =
     await Promise.all([
       prisma.conversation.findMany({
         where,
@@ -161,6 +161,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       prisma.conversation.count({ where: { ...countBase, escalated: false, resolved: false } }),
       prisma.conversation.count({ where: { ...countBase, resolved: true } }),
       prisma.merchant.findUnique({ where: { shopDomain: shop }, select: { quickReplies: true } }),
+      prisma.conversation.aggregate({
+        where: countBase,
+        _sum: { merchantThumbsUp: true, merchantThumbsDown: true },
+      }),
     ]);
 
   let selected = null;
@@ -190,6 +194,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     currencyCode,
     storeHandle,
     quickReplies: merchant?.quickReplies ?? [],
+    thumbsUp: ratingAgg._sum.merchantThumbsUp ?? 0,
+    thumbsDown: ratingAgg._sum.merchantThumbsDown ?? 0,
   };
 }
 
@@ -240,6 +246,13 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: conversationId },
       data: { messages: [...existing, newMsg], lastMessageAt: new Date() },
     });
+    if (!isNote) {
+      await appendMessage(shop, conversation.sessionId, {
+        role: "assistant",
+        content: `[Merchant] ${message}`,
+        timestamp: Date.now(),
+      }).catch(() => null);
+    }
   } else if (intent === "resolve") {
     await prisma.conversation.update({
       where: { id: conversationId },
@@ -251,11 +264,11 @@ export async function action({ request }: ActionFunctionArgs) {
     const answer = (formData.get("answer") as string)?.trim();
     if (question && answer) {
       const merchant = await prisma.merchant.findUnique({ where: { shopDomain: shop } });
-      const faqs = Array.isArray(merchant?.customFaqs) ? (merchant!.customFaqs as { q: string; a: string }[]) : [];
+      const faqs = Array.isArray(merchant?.customFaqs) ? (merchant!.customFaqs as { question: string; answer: string }[]) : [];
       if (faqs.length < 20) {
         await prisma.merchant.update({
           where: { shopDomain: shop },
-          data: { customFaqs: [...faqs, { q: question, a: answer }] },
+          data: { customFaqs: [...faqs, { question, answer }] },
         });
       }
     }
@@ -269,6 +282,35 @@ export async function action({ request }: ActionFunctionArgs) {
     await prisma.conversation.update({
       where: { id: conversationId },
       data: { aiPaused: pause },
+    });
+  } else if (intent === "rate-message") {
+    const messageTimestamp = Number(formData.get("messageTimestamp"));
+    const rawRating = formData.get("rating");
+    const rating = rawRating === "up" || rawRating === "down" ? rawRating : null;
+    if (!Number.isFinite(messageTimestamp)) return { error: "Invalid message" };
+
+    const existing = Array.isArray(conversation.messages)
+      ? (conversation.messages as Array<{ role?: string; content?: string; timestamp?: number; merchantRating?: "up" | "down" }>)
+      : [];
+    const target = existing.find(
+      (m) => m.timestamp === messageTimestamp && m.role === "assistant" && !m.content?.startsWith("[Merchant]"),
+    );
+    if (!target) return { error: "Message not ratable" };
+
+    const prevRating = target.merchantRating;
+    if (rating) target.merchantRating = rating;
+    else delete target.merchantRating;
+
+    const upDelta = (rating === "up" ? 1 : 0) - (prevRating === "up" ? 1 : 0);
+    const downDelta = (rating === "down" ? 1 : 0) - (prevRating === "down" ? 1 : 0);
+
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        messages: existing as unknown as import("@prisma/client").Prisma.InputJsonValue,
+        ...(upDelta ? { merchantThumbsUp: { increment: upDelta } } : {}),
+        ...(downDelta ? { merchantThumbsDown: { increment: downDelta } } : {}),
+      },
     });
   }
 
@@ -286,6 +328,7 @@ export default function InboxFull() {
     search, dateRange, statusTab, channel,
     currencyCode, storeHandle,
     quickReplies,
+    thumbsUp, thumbsDown,
   } = loaderData;
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -302,6 +345,15 @@ export default function InboxFull() {
   const [macroQuery, setMacroQuery] = useState("");
 
   const pauseFetcher = useFetcher<typeof action>();
+  const rateFetcher = useFetcher<typeof action>();
+  const [ratingOverrides, setRatingOverrides] = useState<Record<number, "up" | "down" | undefined>>({});
+  function rateMessage(conversationId: string, messageTimestamp: number, rating: "up" | "down" | undefined) {
+    setRatingOverrides((prev) => ({ ...prev, [messageTimestamp]: rating }));
+    rateFetcher.submit(
+      { intent: "rate-message", conversationId, messageTimestamp: String(messageTimestamp), rating: rating ?? "" },
+      { method: "POST" },
+    );
+  }
 
   type ConvItem = typeof conversations[number];
   const [lastSeen, setLastSeen] = useState(() => new Date().toISOString());
@@ -479,6 +531,11 @@ export default function InboxFull() {
             {inCartCount > 0 && <span style={{ color: "var(--color-primary)" }}>● {inCartCount} in cart</span>}
             {escalatedCount > 0 && <span style={{ color: "var(--color-critical)" }}>● {escalatedCount} escalated</span>}
             {liveCount > 0 && <span style={{ color: "#22c55e", fontWeight: 600 }}>⬤ {liveCount} live</span>}
+            {thumbsUp + thumbsDown > 0 && (
+              <span title={`${thumbsUp} rated helpful, ${thumbsDown} rated not helpful`}>
+                {Math.round((thumbsUp / (thumbsUp + thumbsDown)) * 100)}% rated helpful ({thumbsUp} helpful, {thumbsDown} not helpful)
+              </span>
+            )}
             <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "4px" }}>
               <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
               <span style={{ fontSize: "11px", color: "var(--color-neutral)" }}>Live</span>
@@ -735,8 +792,21 @@ export default function InboxFull() {
                       </div>
                     );
                   }
+                  const hasOverride = msg.timestamp != null && msg.timestamp in ratingOverrides;
+                  const currentRating = hasOverride ? ratingOverrides[msg.timestamp!] : msg.merchantRating;
                   return (
-                    <MessageBubble key={i} role={msg.role} content={msg.content} timestamp={msg.timestamp} />
+                    <MessageBubble
+                      key={i}
+                      role={msg.role}
+                      content={msg.content}
+                      timestamp={msg.timestamp}
+                      merchantRating={currentRating}
+                      onRate={
+                        selected && msg.timestamp != null
+                          ? (rating) => rateMessage(selected.id, msg.timestamp!, rating)
+                          : undefined
+                      }
+                    />
                   );
                 })}
               </div>
