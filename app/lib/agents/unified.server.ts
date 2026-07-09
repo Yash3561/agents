@@ -13,14 +13,15 @@ import {
   buildSupportPrompt,
   type CustomerMemory,
 } from "~/lib/prompt.server";
-import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.server";
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
-import { searchPoliciesAndFaqs } from "~/lib/mcp/policy.server";
-import { getOrder } from "~/lib/mcp/order.server";
 import { getCustomerOrders } from "~/lib/mcp/customer-accounts.server";
 import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
+import { createSharedTools } from "~/lib/agents/shared-tools.server";
 import type { ConversationSession } from "~/lib/session.server";
 import type { Merchant } from "@prisma/client";
+
+const SEARCH_CATALOG_DESCRIPTION =
+  "Search the merchant catalog. Always pass intent (the customer's real underlying need) alongside query, and maxPriceCents whenever a budget was mentioned. For gift queries (customer says 'gift', 'present', 'for my [person]', 'for him/her/them/someone'), the intent field MUST capture: (1) that it is a gift, (2) who it is for (e.g. 'gift for mom', 'gift for dad who runs', 'gift for boyfriend'), (3) any occasion if mentioned (birthday, anniversary, Mother's Day), and (4) relevant use-case or interest tags (e.g. 'spa', 'fitness', 'outdoors', 'beginner'). The query should use the recipient's interest/use-case as keywords, not the word 'gift' itself (e.g. query='face mask skincare' intent='gift for mom self-care spa' — Shopify search matches product tags, not intent strings). Example: customer says 'something for my dad who loves running under $50' → query='running', intent='gift for dad fitness active', maxPriceCents=5000.";
 
 // ---------------------------------------------------------------------------
 // Output type (same shape as the prior OutboundMessage type (orchestrator removed))
@@ -154,14 +155,7 @@ export async function runUnifiedAgent(opts: {
   } = opts;
 
   const agentTrace: string[] = ["unified"];
-  const toolsCalled: string[] = [];
-  let products: unknown[] | undefined;
-  let cart: unknown | undefined;
-  let checkoutUrl: string | undefined;
-  let lastSearchQuery: string | undefined;
   let discountCode: string | undefined;
-  let escalateToHuman = false;
-  let routeReason: string | undefined;
 
   // Discount state from session
   const { offered_codes, level: discountLevel } = session.discount_negotiation;
@@ -198,65 +192,23 @@ export async function runUnifiedAgent(opts: {
   ];
 
   // ---------------------------------------------------------------------------
-  // Tool definitions
+  // Tool definitions — search_catalog/lookup_catalog/get_product/get_checkout_url/
+  // search_policies_and_faqs/get_order/set_intent/escalate_human are shared with
+  // the WhatsApp agent (shared-tools.server.ts); `shared.state` is the single
+  // mutable object both the shared tools AND the local tools below write into,
+  // so last-write-wins ordering (e.g. create_cart then get_checkout_url) stays
+  // correct regardless of which file defines the tool that ran last.
   // ---------------------------------------------------------------------------
 
+  const { tools: shared, state } = createSharedTools({
+    shopDomain,
+    onToolStart,
+    searchCatalogDescription: SEARCH_CATALOG_DESCRIPTION,
+    orderNotFoundMessage: "I couldn't find that order — could you double-check the order number?",
+  });
+
   const baseTools = {
-    // -- Shopping tools --
-    search_catalog: tool({
-      description:
-        "Search the merchant catalog. Always pass intent (the customer's real underlying need) alongside query, and maxPriceCents whenever a budget was mentioned. For gift queries (customer says 'gift', 'present', 'for my [person]', 'for him/her/them/someone'), the intent field MUST capture: (1) that it is a gift, (2) who it is for (e.g. 'gift for mom', 'gift for dad who runs', 'gift for boyfriend'), (3) any occasion if mentioned (birthday, anniversary, Mother's Day), and (4) relevant use-case or interest tags (e.g. 'spa', 'fitness', 'outdoors', 'beginner'). The query should use the recipient's interest/use-case as keywords, not the word 'gift' itself (e.g. query='face mask skincare' intent='gift for mom self-care spa' — Shopify search matches product tags, not intent strings). Example: customer says 'something for my dad who loves running under $50' → query='running', intent='gift for dad fitness active', maxPriceCents=5000.",
-      inputSchema: z.object({
-        query: z.string(),
-        maxPriceCents: z.number().optional(),
-        currency: z.string().optional(),
-        intent: z.string().optional().describe("The customer's real underlying need. For gift queries include: 'gift for [recipient]', occasion if known, and use-case/interest tags. For non-gift queries include budget signals, skill level, use case, or other context that changes which products rank best."),
-        maxResults: z.number().min(1).max(3).optional(),
-      }),
-      execute: async (input) => {
-        onToolStart?.("search_catalog");
-        toolsCalled.push("search_catalog");
-        if (input.query) lastSearchQuery = input.query;
-        const result = await searchCatalog(shopDomain, input.query, {
-          maxPriceCents: input.maxPriceCents,
-          currency: input.currency,
-          intent: input.intent,
-        });
-        const sliced = input.maxResults ? result.products.slice(0, input.maxResults) : result.products;
-        // Accumulate across multiple search_catalog calls in the same turn (e.g. "show me
-        // featured and popular products" triggers two searches) — a later, narrower search
-        // that finds nothing must not wipe out real results an earlier search already found.
-        const priorProducts = (products ?? []) as Array<{ id: string }>;
-        const seen = new Set(priorProducts.map((p) => p.id));
-        products = [...priorProducts, ...sliced.filter((p) => !seen.has(p.id))];
-        return { ...result, products: sliced, total: sliced.length };
-      },
-    }),
-
-    lookup_catalog: tool({
-      description: "Look up specific product variants by GID",
-      inputSchema: z.object({ ids: z.array(z.string()) }),
-      execute: async (input) => {
-        onToolStart?.("lookup_catalog");
-        toolsCalled.push("lookup_catalog");
-        return lookupCatalog(shopDomain, input.ids);
-      },
-    }),
-
-    get_product: tool({
-      description: "Get full product details including all variants",
-      inputSchema: z.object({
-        productId: z.string(),
-        selectedOptions: z
-          .array(z.object({ name: z.string(), label: z.string() }))
-          .optional(),
-      }),
-      execute: async (input) => {
-        onToolStart?.("get_product");
-        toolsCalled.push("get_product");
-        return getProduct(shopDomain, input.productId, input.selectedOptions);
-      },
-    }),
+    ...shared,
 
     create_cart: tool({
       description: "Create a new cart with the given line items",
@@ -271,15 +223,15 @@ export async function runUnifiedAgent(opts: {
       }),
       execute: async (input) => {
         onToolStart?.("create_cart");
-        toolsCalled.push("create_cart");
+        state.toolsCalled.push("create_cart");
         if (!input.lineItems?.length) {
           return { error: "empty_cart", message: "No items were provided — ask the customer which product they'd like to add." };
         }
         const result = await createCart(shopDomain, input.lineItems, {
           currency: input.currency,
         });
-        cart = result;
-        checkoutUrl = result.checkoutUrl;
+        state.cart = result;
+        state.checkoutUrl = result.checkoutUrl;
         return result;
       },
     }),
@@ -289,10 +241,10 @@ export async function runUnifiedAgent(opts: {
       inputSchema: z.object({ cartId: z.string() }),
       execute: async (input) => {
         onToolStart?.("get_cart");
-        toolsCalled.push("get_cart");
+        state.toolsCalled.push("get_cart");
         const result = await getCart(shopDomain, input.cartId);
-        cart = result;
-        checkoutUrl = result.checkoutUrl;
+        state.cart = result;
+        state.checkoutUrl = result.checkoutUrl;
         return result;
       },
     }),
@@ -313,108 +265,32 @@ export async function runUnifiedAgent(opts: {
       }),
       execute: async (input) => {
         onToolStart?.("update_cart");
-        toolsCalled.push("update_cart");
+        state.toolsCalled.push("update_cart");
         const result = await updateCart(shopDomain, input.cartId, {
           add: input.add,
           update: input.update,
           discountCodes: input.discountCodes,
           giftCardCodes: input.giftCardCodes,
         });
-        cart = result;
-        checkoutUrl = result.checkoutUrl;
+        state.cart = result;
+        state.checkoutUrl = result.checkoutUrl;
         return result;
-      },
-    }),
-
-    get_checkout_url: tool({
-      description: "Get the checkout URL for a cart so the buyer can complete their purchase.",
-      inputSchema: z.object({ cartId: z.string() }),
-      execute: async (input) => {
-        onToolStart?.("get_checkout_url");
-        toolsCalled.push("get_checkout_url");
-        const cartData = await getCart(shopDomain, input.cartId);
-        const url = cartData.checkoutUrl ?? cartData.continue_url ?? "";
-        checkoutUrl = url;
-        cart = cartData;
-        return { continue_url: url, requires_escalation: !url };
       },
     }),
 
     // -- Support tools --
-    search_policies_and_faqs: tool({
-      description: "Search the merchant's shop policies and FAQs",
-      inputSchema: z.object({
-        query: z.string(),
-        context: z.string().optional(),
-      }),
-      execute: async (input) => {
-        onToolStart?.("search_policies_and_faqs");
-        toolsCalled.push("search_policies_and_faqs");
-        const result = await searchPoliciesAndFaqs(shopDomain, input.query, input.context);
-        if (!result) return { text: null, message: "No policy found for that query." };
-        return result;
-      },
-    }),
-
-    get_order: tool({
-      description: "Look up an order by ID for status and tracking",
-      inputSchema: z.object({ orderId: z.string() }),
-      execute: async (input) => {
-        onToolStart?.("get_order");
-        toolsCalled.push("get_order");
-        try {
-          return await getOrder(shopDomain, input.orderId);
-        } catch {
-          // Not found is often just a typo — let the model ask the customer to double-check
-          // rather than forcing escalation. Real "I want a human" requests go through
-          // the dedicated escalate_human tool instead.
-          return {
-            error: "Order not found",
-            message: "I couldn't find that order — could you double-check the order number?",
-          };
-        }
-      },
-    }),
-
     get_customer_orders: tool({
       description: "Get order history for the logged-in customer",
       inputSchema: z.object({}),
       execute: async () => {
         onToolStart?.("get_customer_orders");
-        toolsCalled.push("get_customer_orders");
+        state.toolsCalled.push("get_customer_orders");
         if (!customerAccessToken) return { error: "Customer not logged in", orders: [] };
         try {
           return { orders: await getCustomerOrders(shopDomain, customerAccessToken) };
         } catch {
           return { error: "Could not load orders", orders: [] };
         }
-      },
-    }),
-
-    // Lightweight intent classifier — side-effect only, no extra token cost beyond the tool call.
-    // Feeds route_reason, which the merchant dashboard groups conversations by (app._index.tsx) —
-    // keep the enum in sync with whatsapp.server.ts's identical tool.
-    set_intent: tool({
-      description: "Call once after understanding what the customer needs to classify their intent.",
-      inputSchema: z.object({
-        intent: z.enum(["product_question", "order_tracking", "discount_request", "cart_help", "general"]),
-      }),
-      execute: async (input) => {
-        onToolStart?.("set_intent");
-        toolsCalled.push("set_intent");
-        routeReason = input.intent;
-        return { ok: true };
-      },
-    }),
-
-    escalate_human: tool({
-      description: "Call when the customer explicitly asks to speak with a human, live agent, real person, or support staff. Never call for any other reason.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        onToolStart?.("escalate_human");
-        toolsCalled.push("escalate_human");
-        escalateToHuman = true;
-        return { ok: true };
       },
     }),
   };
@@ -435,7 +311,7 @@ export async function runUnifiedAgent(opts: {
       }),
       execute: async (input) => {
         onToolStart?.("offer_discount");
-        toolsCalled.push("offer_discount");
+        state.toolsCalled.push("offer_discount");
         if (discountLevel_local >= 3) {
           return { error: "discount_cap_reached", message: "No more discount offers available for this conversation." };
         }
@@ -469,7 +345,7 @@ export async function runUnifiedAgent(opts: {
               };
             }
             // Code applied successfully — update cart state so caller gets the discount
-            cart = testCart;
+            state.cart = testCart;
           } catch {
             // Network/MCP failure — still surface the code; customer can apply manually
           }
@@ -500,14 +376,14 @@ export async function runUnifiedAgent(opts: {
       // A previous attempt may have partially executed tool calls before hitting the
       // 429 (e.g. create_cart succeeded, then a later step got rate-limited) — reset
       // so the retry can't return a merged mix of two attempts (duplicate cart/discount).
-      toolsCalled.length = 0;
-      products = undefined;
-      cart = undefined;
-      checkoutUrl = undefined;
-      lastSearchQuery = undefined;
+      state.toolsCalled.length = 0;
+      state.products = undefined;
+      state.cart = undefined;
+      state.checkoutUrl = undefined;
+      state.lastSearchQuery = undefined;
       discountCode = undefined;
-      escalateToHuman = false;
-      routeReason = undefined;
+      state.escalateToHuman = false;
+      state.routeReason = undefined;
       offered_codes_local.length = 0;
       offered_codes_local.push(...offered_codes);
       discountLevel_local = discountLevel;
@@ -547,7 +423,7 @@ export async function runUnifiedAgent(opts: {
     // A tool call earlier in this same turn (cart created, discount applied) can succeed
     // before a later step fails — don't show a blind "sorry" when there's real state to see;
     // the customer should notice the checkout link/discount chip the UI still renders below.
-    const hasCartOrDiscount = !!(checkoutUrl || discountCode);
+    const hasCartOrDiscount = !!(state.checkoutUrl || discountCode);
     text = is429
       ? "Our assistant is briefly busy — please send your message again in a moment."
       : hasCartOrDiscount
@@ -564,19 +440,19 @@ export async function runUnifiedAgent(opts: {
       : DEFAULT_QUICK_REPLIES;
 
   // Only emit quick_replies when no tool was called (direct/greeting responses)
-  const quickReplies = toolsCalled.length === 0 ? merchantQuickReplies : undefined;
+  const quickReplies = state.toolsCalled.length === 0 ? merchantQuickReplies : undefined;
 
   return {
     text,
-    products,
-    cart,
-    checkout_url: checkoutUrl,
+    products: state.products,
+    cart: state.cart,
+    checkout_url: state.checkoutUrl,
     discount_code: discountCode,
     quick_replies: quickReplies,
-    escalate_to_human: escalateToHuman || undefined,
-    agent_trace: [...agentTrace, ...toolsCalled],
-    last_search_query: lastSearchQuery,
-    route_reason: routeReason ?? "unified",
+    escalate_to_human: state.escalateToHuman || undefined,
+    agent_trace: [...agentTrace, ...state.toolsCalled],
+    last_search_query: state.lastSearchQuery,
+    route_reason: state.routeReason ?? "unified",
     discount_negotiation: { offered_codes: offered_codes_local, level: discountLevel_local },
   };
 }

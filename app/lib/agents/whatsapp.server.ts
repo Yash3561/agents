@@ -9,14 +9,12 @@
 import { tool, generateText, stepCountIs } from "ai";
 import { z } from "zod";
 import { deployments } from "~/lib/llm.server";
-import { searchCatalog, getProduct, lookupCatalog } from "~/lib/mcp/catalog.server";
 import type { CatalogProduct } from "~/lib/mcp/catalog.server";
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
-import { searchPoliciesAndFaqs } from "~/lib/mcp/policy.server";
-import { getOrder } from "~/lib/mcp/order.server";
 import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
 import type { ActiveDiscount } from "~/lib/mcp/discounts.server";
 import { getCustomerOrdersAdmin, adminGraphql, getProductRecommendation } from "~/lib/mcp/admin.server";
+import { createSharedTools } from "~/lib/agents/shared-tools.server";
 import {
   fetchCustomerMemory,
   updateCustomerMemory,
@@ -26,6 +24,9 @@ import {
 import type { ConversationSession } from "~/lib/session.server";
 import { setSession } from "~/lib/session.server";
 import type { Merchant } from "@prisma/client";
+
+const SEARCH_CATALOG_DESCRIPTION =
+  "Search the merchant catalog. Pass intent alongside query, and maxPriceCents when a budget was mentioned.";
 
 // ---------------------------------------------------------------------------
 // In-session cart assist — one suggestion per session, never blocks checkout
@@ -178,16 +179,10 @@ export async function runWhatsAppAgent(opts: {
 }): Promise<WhatsAppAgentOutput> {
   const { shopDomain, sessionId, customerPhone, customerId, agentMessage, session, merchant, accessToken } = opts;
 
-  const toolsCalled: string[] = [];
-  let products: CatalogProduct[] | undefined;
-  let checkoutUrl: string | undefined;
   let cartLines: Array<{ title: string; quantity: number; price: string }> | undefined;
   let discountCode: string | undefined;
-  let lastSearchQuery: string | undefined;
-  let routeReason: string | undefined;
   let lastCartId: string | undefined;
   let lastCartValueCents: number | undefined;
-  let escalateToHuman = false;
 
   function extractCartLines(result: unknown): Array<{ title: string; quantity: number; price: string }> | undefined {
     const r = result as { lines?: unknown[] } | undefined;
@@ -249,57 +244,18 @@ export async function runWhatsAppAgent(opts: {
     { role: "user", content: agentMessage },
   ];
 
+  // search_catalog/lookup_catalog/get_product/get_checkout_url/search_policies_and_faqs/
+  // get_order/set_intent/escalate_human are shared with the web widget agent
+  // (shared-tools.server.ts). Local tools below write into the same `state` object
+  // so ordering (e.g. create_cart then get_checkout_url) stays correct.
+  const { tools: shared, state } = createSharedTools({
+    shopDomain,
+    searchCatalogDescription: SEARCH_CATALOG_DESCRIPTION,
+    orderNotFoundMessage: "Please contact support for assistance with this order.",
+  });
+
   const baseTools = {
-    search_catalog: tool({
-      description:
-        "Search the merchant catalog. Pass intent alongside query, and maxPriceCents when a budget was mentioned.",
-      inputSchema: z.object({
-        query: z.string(),
-        maxPriceCents: z.number().optional(),
-        currency: z.string().optional(),
-        intent: z.string().optional(),
-        maxResults: z.number().min(1).max(3).optional(),
-      }),
-      execute: async (input) => {
-        toolsCalled.push("search_catalog");
-        if (input.query) lastSearchQuery = input.query;
-        const result = await searchCatalog(shopDomain, input.query, {
-          maxPriceCents: input.maxPriceCents,
-          currency: input.currency,
-          intent: input.intent,
-        });
-        const sliced = input.maxResults ? result.products.slice(0, input.maxResults) : result.products;
-        // Accumulate across multiple search_catalog calls in the same turn (e.g. "show me
-        // featured and popular products" triggers two searches) — a later, narrower search
-        // that finds nothing must not wipe out real results an earlier search already found.
-        const seen = new Set((products ?? []).map((p) => p.id));
-        products = [...(products ?? []), ...sliced.filter((p) => !seen.has(p.id))];
-        return { ...result, products: sliced, total: sliced.length };
-      },
-    }),
-
-    lookup_catalog: tool({
-      description: "Look up specific product variants by GID",
-      inputSchema: z.object({ ids: z.array(z.string()) }),
-      execute: async (input) => {
-        toolsCalled.push("lookup_catalog");
-        return lookupCatalog(shopDomain, input.ids);
-      },
-    }),
-
-    get_product: tool({
-      description: "Get full product details including all variants",
-      inputSchema: z.object({
-        productId: z.string(),
-        selectedOptions: z
-          .array(z.object({ name: z.string(), label: z.string() }))
-          .optional(),
-      }),
-      execute: async (input) => {
-        toolsCalled.push("get_product");
-        return getProduct(shopDomain, input.productId, input.selectedOptions);
-      },
-    }),
+    ...shared,
 
     create_cart: tool({
       description: "Create a new cart with the given line items",
@@ -313,12 +269,12 @@ export async function runWhatsAppAgent(opts: {
         currency: z.string().optional(),
       }),
       execute: async (input) => {
-        toolsCalled.push("create_cart");
+        state.toolsCalled.push("create_cart");
         if (!input.lineItems?.length) {
           return { error: "empty_cart", message: "No items were provided — ask the customer which product they'd like to add." };
         }
         const result = await createCart(shopDomain, input.lineItems, { currency: input.currency });
-        checkoutUrl = result.checkoutUrl;
+        state.checkoutUrl = result.checkoutUrl;
         lastCartId = result.id;
         lastCartValueCents = result.cost?.total_amount?.amount ? Math.round(parseFloat(result.cost.total_amount.amount) * 100) : undefined;
 
@@ -338,9 +294,9 @@ export async function runWhatsAppAgent(opts: {
       description: "Fetch current cart state",
       inputSchema: z.object({ cartId: z.string() }),
       execute: async (input) => {
-        toolsCalled.push("get_cart");
+        state.toolsCalled.push("get_cart");
         const result = await getCart(shopDomain, input.cartId);
-        checkoutUrl = result.checkoutUrl;
+        state.checkoutUrl = result.checkoutUrl;
         cartLines = extractCartLines(result) ?? cartLines;
         return result;
       },
@@ -361,14 +317,14 @@ export async function runWhatsAppAgent(opts: {
         giftCardCodes: z.array(z.string()).optional(),
       }),
       execute: async (input) => {
-        toolsCalled.push("update_cart");
+        state.toolsCalled.push("update_cart");
         const result = await updateCart(shopDomain, input.cartId, {
           add: input.add,
           update: input.update,
           discountCodes: input.discountCodes,
           giftCardCodes: input.giftCardCodes,
         });
-        checkoutUrl = result.checkoutUrl;
+        state.checkoutUrl = result.checkoutUrl;
         cartLines = extractCartLines(result) ?? cartLines;
         lastCartId = input.cartId;
         lastCartValueCents = result.cost?.total_amount?.amount ? Math.round(parseFloat(result.cost.total_amount.amount) * 100) : undefined;
@@ -386,53 +342,11 @@ export async function runWhatsAppAgent(opts: {
       },
     }),
 
-    get_checkout_url: tool({
-      description: "Get the checkout URL for a cart so the buyer can complete their purchase.",
-      inputSchema: z.object({ cartId: z.string() }),
-      execute: async (input) => {
-        toolsCalled.push("get_checkout_url");
-        const cartData = await getCart(shopDomain, input.cartId);
-        const url = cartData.checkoutUrl ?? cartData.continue_url ?? "";
-        checkoutUrl = url;
-        return { continue_url: url, requires_escalation: !url };
-      },
-    }),
-
-    search_policies_and_faqs: tool({
-      description: "Search the merchant's shop policies and FAQs",
-      inputSchema: z.object({
-        query: z.string(),
-        context: z.string().optional(),
-      }),
-      execute: async (input) => {
-        toolsCalled.push("search_policies_and_faqs");
-        const result = await searchPoliciesAndFaqs(shopDomain, input.query, input.context);
-        if (!result) return { text: null, message: "No policy found for that query." };
-        return result;
-      },
-    }),
-
-    get_order: tool({
-      description: "Look up an order by ID for status and tracking",
-      inputSchema: z.object({ orderId: z.string() }),
-      execute: async (input) => {
-        toolsCalled.push("get_order");
-        try {
-          return await getOrder(shopDomain, input.orderId);
-        } catch {
-          return {
-            error: "Order not found",
-            message: "Please contact support for assistance with this order.",
-          };
-        }
-      },
-    }),
-
     get_customer_orders: tool({
       description: "Get recent order history for this customer",
       inputSchema: z.object({}),
       execute: async () => {
-        toolsCalled.push("get_customer_orders");
+        state.toolsCalled.push("get_customer_orders");
         if (!customerId) {
           return { orders: [], message: "I need to verify your identity first." };
         }
@@ -454,7 +368,7 @@ export async function runWhatsAppAgent(opts: {
         message: z.string().describe("Natural language message to show when offering the code"),
       }),
       execute: async (input) => {
-        toolsCalled.push("offer_discount");
+        state.toolsCalled.push("offer_discount");
         if (discountLevel_local >= 3) {
           return { error: "discount_cap_reached", message: "No more discount offers available." };
         }
@@ -487,7 +401,7 @@ export async function runWhatsAppAgent(opts: {
             }
             // Code applied successfully — keep cart state fresh so the checkout link/cart
             // summary the customer sees next reflects the just-applied discount.
-            checkoutUrl = testCart.checkoutUrl;
+            state.checkoutUrl = testCart.checkoutUrl;
             cartLines = extractCartLines(testCart) ?? cartLines;
           } catch {
             // Network failure — surface the code anyway; customer can apply manually
@@ -501,29 +415,6 @@ export async function runWhatsAppAgent(opts: {
       },
     });
   }
-
-  // Lightweight intent classifier — side-effect only, no token cost beyond tool call
-  (baseTools as Record<string, unknown>)["set_intent"] = tool({
-    description: "Call once after understanding what the customer needs to classify their intent.",
-    inputSchema: z.object({
-      intent: z.enum(["product_question", "order_tracking", "discount_request", "cart_help", "general"]),
-    }),
-    execute: async (input) => {
-      toolsCalled.push("set_intent");
-      routeReason = input.intent;
-      return { ok: true };
-    },
-  });
-
-  (baseTools as Record<string, unknown>)["escalate_human"] = tool({
-    description: "Call when the customer explicitly asks to speak with a human, live agent, real person, or support staff. Never call for any other reason.",
-    inputSchema: z.object({}),
-    execute: async () => {
-      toolsCalled.push("escalate_human");
-      escalateToHuman = true;
-      return { ok: true };
-    },
-  });
 
   // ponytail: no retry loop — WhatsApp has its own Meta retry on 5xx; let it bubble
   const result = await generateText({
@@ -541,7 +432,7 @@ export async function runWhatsAppAgent(opts: {
       (err as { statusCode?: number })?.statusCode === 429;
     // A tool call earlier in this same turn (cart created, discount applied) can succeed
     // before a later step fails — don't show a blind "sorry" when there's real state to see.
-    const hasCartOrDiscount = !!(checkoutUrl || discountCode);
+    const hasCartOrDiscount = !!(state.checkoutUrl || discountCode);
     return {
       text: is429
         ? "I'm briefly busy — please try again in a moment."
@@ -572,29 +463,29 @@ export async function runWhatsAppAgent(opts: {
   // always goes to the phone-keyed Redis store — previously identified customers
   // skipped it, so agent-created carts were lost on the next turn. Identified
   // customers additionally enrich the durable cross-channel metafield memory.
-  if (lastCartId || lastSearchQuery || searchedProductTitles.length > 0) {
+  if (lastCartId || state.lastSearchQuery || searchedProductTitles.length > 0) {
     void updateWhatsAppMemory(customerPhone, {
       ...(lastCartId ? { cart_id: lastCartId } : {}),
-      ...(lastSearchQuery ? { last_search: lastSearchQuery } : {}),
+      ...(state.lastSearchQuery ? { last_search: state.lastSearchQuery } : {}),
       ...(searchedProductTitles.length > 0 ? { recent_products: searchedProductTitles } : {}),
     }).catch(() => null);
   }
-  if (customerId && (lastSearchQuery || searchedProductTitles.length > 0)) {
-    void updateCustomerMemory(shopDomain, accessToken, customerId, session, lastSearchQuery).catch(() => null);
+  if (customerId && (state.lastSearchQuery || searchedProductTitles.length > 0)) {
+    void updateCustomerMemory(shopDomain, accessToken, customerId, session, state.lastSearchQuery).catch(() => null);
   }
 
   return {
     text: result.text,
-    products,
-    checkout_url: checkoutUrl,
+    products: state.products,
+    checkout_url: state.checkoutUrl,
     cart_lines: cartLines,
     discount_code: discountCode,
-    last_search_query: lastSearchQuery,
-    agent_trace: ["whatsapp", ...toolsCalled],
-    route_reason: routeReason,
+    last_search_query: state.lastSearchQuery,
+    agent_trace: ["whatsapp", ...state.toolsCalled],
+    route_reason: state.routeReason,
     cart_id: lastCartId,
     cart_value_cents: lastCartValueCents,
     discount_negotiation: { offered_codes: offered_codes_local, level: discountLevel_local },
-    escalate_to_human: escalateToHuman || undefined,
+    escalate_to_human: state.escalateToHuman || undefined,
   };
 }
