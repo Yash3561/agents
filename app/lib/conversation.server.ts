@@ -79,6 +79,34 @@ export async function sendUsageAlertEmail(
   }).catch(e => console.error('[NeonPing] Usage alert email error:', e));
 }
 
+export interface StoredMessage {
+  role: string;
+  content: string;
+  timestamp?: number;
+}
+
+const MAX_STORED_MESSAGES = 200;
+
+/**
+ * Append-only merge of the Redis session history (capped at the last 20
+ * messages) into the durable Postgres thread. A plain overwrite silently
+ * truncated long conversations in the inbox and deleted Postgres-only entries
+ * (internal notes, merchant replies). Capped at MAX_STORED_MESSAGES so the
+ * JSON blob can't grow unbounded (#187).
+ */
+export function mergeMessages(
+  existingRaw: unknown,
+  incoming: StoredMessage[],
+): StoredMessage[] {
+  const existing = Array.isArray(existingRaw) ? (existingRaw as StoredMessage[]) : [];
+  const key = (m: StoredMessage) =>
+    `${m.timestamp ?? 0}|${m.role}|${(m.content ?? "").slice(0, 40)}`;
+  const seen = new Set(existing.map(key));
+  return [...existing, ...incoming.filter((m) => !seen.has(key(m)))]
+    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
+    .slice(-MAX_STORED_MESSAGES);
+}
+
 /**
  * Write-through persistence of conversation state to Postgres, called once per
  * turn from the chat route. Fire-and-forget — never blocks or fails the SSE
@@ -101,24 +129,16 @@ export async function persistConversationTurn(opts: {
   const checkoutToken = extractCheckoutToken(checkoutUrl);
   const cartValue = cartValueCents != null ? cartValueCents / 100 : undefined;
 
-  // Internal notes live only in Postgres (never in the Redis session), so a
-  // plain overwrite of `messages` with the session history would delete them.
-  // Merge them back in by timestamp before writing.
-  let history = session.conversation_history as Array<{ role: string; content: string; timestamp?: number }>;
   const existing = await prisma.conversation
     .findUnique({
       where: { shopDomain_sessionId: { shopDomain, sessionId } },
       select: { messages: true },
     })
     .catch(() => null);
-  const notes = Array.isArray(existing?.messages)
-    ? (existing.messages as Array<{ role?: string; timestamp?: number }>).filter((m) => m?.role === "note")
-    : [];
-  if (notes.length) {
-    history = ([...history, ...notes] as typeof history).sort(
-      (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0),
-    );
-  }
+  const history = mergeMessages(
+    existing?.messages,
+    session.conversation_history as Array<{ role: string; content: string; timestamp?: number }>,
+  );
 
   await prisma.conversation.upsert({
     where: { shopDomain_sessionId: { shopDomain, sessionId } },
