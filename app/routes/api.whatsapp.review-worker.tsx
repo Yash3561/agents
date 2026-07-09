@@ -1,10 +1,54 @@
 /**
- * GET /api/whatsapp/review-worker?token=REVIEW_WORKER_SECRET
- * Processes due review-request entries from the Redis sorted set.
- * Called fire-and-forget from webhooks.orders.fulfilled on each ship event.
+ * POST /api/whatsapp/review-worker?token=…  — QStash callback, fires 3 days
+ *   after fulfillment with a self-contained review-request payload.
+ * GET  /api/whatsapp/review-worker?token=…  — legacy drain of the old Redis
+ *   sorted-set queue (in-flight entries scheduled before the QStash migration).
  */
-import type { LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { decryptToken, sendReplyButtons, workerToken } from "~/lib/whatsapp.server";
+
+export async function action({ request }: ActionFunctionArgs) {
+  if (request.method !== "POST") return new Response(null, { status: 405 });
+  const token = new URL(request.url).searchParams.get("token") ?? "";
+  const secret = workerToken();
+  if (!secret || token !== secret) return new Response("Forbidden", { status: 403 });
+
+  let body: {
+    phone: string;
+    orderName: string;
+    shopDomain: string;
+    waPhoneNumberId: string;
+    waAccessToken: string;
+    storeName: string;
+  };
+  try {
+    body = await request.json();
+  } catch {
+    return new Response("bad body", { status: 400 });
+  }
+
+  try {
+    const { redis } = await import("~/redis.server");
+    if (await redis.exists(`wa:optout:${body.phone}`)) {
+      return new Response("opted out", { status: 200 });
+    }
+    await sendReplyButtons(
+      body.waPhoneNumberId,
+      decryptToken(body.waAccessToken),
+      body.phone,
+      `Hi! How was your order ${body.orderName} from ${body.storeName}? We'd love your feedback 🌟`,
+      [
+        { id: `review_good|${body.orderName}`, title: "⭐ Leave a Review" },
+        { id: `review_issue|${body.orderName}`, title: "😕 Had an Issue" },
+      ],
+    );
+  } catch (err) {
+    console.error(`[review-worker] QStash job failed for ${body.orderName}:`, err);
+    // Return 200 anyway — a hard-failed send (expired token, opted-out device)
+    // won't succeed on QStash retries either.
+  }
+  return new Response(null, { status: 200 });
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);

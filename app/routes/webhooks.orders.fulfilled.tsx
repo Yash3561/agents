@@ -41,30 +41,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     await sendTextMessage(merchant.waPhoneNumberId, accessToken, phone, message);
 
-    // Schedule a review request 3 days from now
-    const orderStatusUrl = payload.order_status_url as string | undefined ?? "";
-    const pendingKey = `wa:review:pending:${phone}:${orderName}`;
-    const member = `${phone}:${orderName}:${shop}`;
-    await redis.set(
-      pendingKey,
-      JSON.stringify({
-        phone,
-        orderName,
-        shopDomain: shop,
-        waPhoneNumberId: merchant.waPhoneNumberId,
-        waAccessToken: merchant.waAccessToken, // encrypted; decrypted in worker
-        storeName,
-        orderStatusUrl,
-      }),
-      "EX",
-      345600, // 4 days
-    );
-    await redis.zadd("wa:review:queue", Date.now() + 3 * 24 * 60 * 60 * 1000, member);
-
-    // ponytail: fire-and-forget to process any due review requests from prior orders
-    void fetch(
-      `${process.env.SHOPIFY_APP_URL}/api/whatsapp/review-worker?token=${encodeURIComponent(workerToken())}`,
-    ).catch(() => null);
+    // Schedule a review request 3 days out via QStash — replaces the old Redis
+    // sorted set + self-ping, which stalled for low-volume merchants (the queue
+    // was only drained when ANOTHER order shipped).
+    const qstashToken = process.env.QSTASH_TOKEN;
+    if (qstashToken) {
+      const callbackUrl = `${process.env.SHOPIFY_APP_URL}/api/whatsapp/review-worker?token=${encodeURIComponent(workerToken())}`;
+      await fetch(`https://qstash.upstash.io/v2/publish/${encodeURIComponent(callbackUrl)}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${qstashToken}`,
+          "Content-Type": "application/json",
+          "Upstash-Delay": "259200s", // 3 days
+        },
+        body: JSON.stringify({
+          phone,
+          orderName,
+          shopDomain: shop,
+          waPhoneNumberId: merchant.waPhoneNumberId,
+          waAccessToken: merchant.waAccessToken, // encrypted; decrypted in worker
+          storeName,
+        }),
+      }).catch(() => null);
+    }
   } catch (err) {
     console.error(`[orders/fulfilled] Error for ${shop}:`, err);
   }
