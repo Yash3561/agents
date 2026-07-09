@@ -8,7 +8,7 @@
 
 import { tool, generateText, stepCountIs } from "ai";
 import { z } from "zod";
-import { deployments } from "~/lib/llm.server";
+import { deployments, recordLlmUsage } from "~/lib/llm.server";
 import type { CatalogProduct } from "~/lib/mcp/catalog.server";
 import { createCart, getCart, updateCart } from "~/lib/mcp/cart.server";
 import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
@@ -450,6 +450,9 @@ export async function runWhatsAppAgent(opts: {
       steps: [] as unknown[],
     };
   });
+  // Fallback branch above returns a synthetic object with no `usage` — only the real
+  // generateText result has one.
+  if ("usage" in result) void recordLlmUsage(shopDomain, "whatsapp", result.usage).catch(() => {});
 
   // Extract product titles from search_catalog tool results for memory update
   const searchedProductTitles: string[] = [];

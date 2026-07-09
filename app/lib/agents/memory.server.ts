@@ -120,7 +120,7 @@ export async function updateCustomerMemory(
       session.conversation_history.length >= SUMMARIZE_AFTER_TURNS &&
       !isSummaryFresh(updated.summary, session.conversation_history)
     ) {
-      updated.summary = await summarize(session.conversation_history).catch(
+      updated.summary = await summarize(shopDomain, session.conversation_history).catch(
         () => current.summary,
       );
     }
@@ -323,7 +323,7 @@ function isSummaryFresh(summary: string | undefined, history: Message[]): boolea
   return !!summary && history.length < SUMMARIZE_AFTER_TURNS + 3;
 }
 
-async function summarize(history: Message[]): Promise<string> {
+async function summarize(shopDomain: string, history: Message[]): Promise<string> {
   const transcript = history
     .slice(-20)
     .map((m) => `${m.role}: ${m.content}`)
@@ -332,6 +332,7 @@ async function summarize(history: Message[]): Promise<string> {
   return generateSummary(
     "Summarize this shopping conversation in 1-2 sentences. Focus on what the customer bought or was interested in, their preferences, and any patterns. No PII.",
     transcript,
+    shopDomain,
   );
 }
 

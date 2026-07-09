@@ -11,7 +11,8 @@
  * swap createOpenAICompatible for createAzure — zero changes in agents/routes.
  */
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { generateText, streamText, stepCountIs } from "ai";
+import { generateText, streamText, stepCountIs, type LanguageModelUsage } from "ai";
+import prisma from "~/db.server";
 
 // ---------------------------------------------------------------------------
 // Provider — Azure AI Foundry /openai/v1 endpoint
@@ -34,6 +35,44 @@ export const deployments = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Token usage tracking — groundwork for a cost/usage dashboard. Fire-and-forget,
+// day-granularity upsert-increment; never blocks or fails the calling agent.
+// cachedInputTokens lets the dashboard verify the prompt-cache-alignment work
+// (see prompt.server.ts) is actually landing provider-side cache hits.
+// ---------------------------------------------------------------------------
+
+export async function recordLlmUsage(
+  shopDomain: string,
+  agent: "unified" | "whatsapp" | "summary",
+  usage: LanguageModelUsage,
+): Promise<void> {
+  try {
+    const date = new Date();
+    date.setUTCHours(0, 0, 0, 0);
+    await prisma.llmUsage.upsert({
+      where: { shopDomain_date_agent: { shopDomain, date, agent } },
+      create: {
+        shopDomain,
+        date,
+        agent,
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
+        callCount: 1,
+      },
+      update: {
+        inputTokens: { increment: usage.inputTokens ?? 0 },
+        outputTokens: { increment: usage.outputTokens ?? 0 },
+        cachedInputTokens: { increment: usage.inputTokenDetails?.cacheReadTokens ?? 0 },
+        callCount: { increment: 1 },
+      },
+    });
+  } catch {
+    // Telemetry is best-effort — never let a usage-tracking failure affect the agent.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Tool-calling stream — Shopping / Support agents
 // ---------------------------------------------------------------------------
 
@@ -44,8 +83,11 @@ export function runAgentStream(opts: {
   tools?: Parameters<typeof streamText>[0]["tools"];
   maxOutputTokens?: number;
   maxSteps?: number;
+  /** When provided, usage is recorded fire-and-forget once the stream completes. */
+  shopDomain?: string;
+  agentLabel?: "unified" | "whatsapp";
 }) {
-  return streamText({
+  const result = streamText({
     model: opts.deployment,
     system: opts.system,
     messages: opts.messages,
@@ -54,13 +96,22 @@ export function runAgentStream(opts: {
     stopWhen: stepCountIs(opts.maxSteps ?? 5),
     abortSignal: AbortSignal.timeout(25_000),
   });
+  if (opts.shopDomain) {
+    // result.usage is a PromiseLike (streamText's usage resolves once the stream ends),
+    // not a full Promise — use the two-arg .then() form since .catch() isn't available.
+    void result.usage.then(
+      (usage) => recordLlmUsage(opts.shopDomain!, opts.agentLabel ?? "unified", usage),
+      () => {},
+    );
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
 // One-shot text — Memory Agent summarization
 // ---------------------------------------------------------------------------
 
-export async function generateSummary(system: string, prompt: string): Promise<string> {
+export async function generateSummary(system: string, prompt: string, shopDomain?: string): Promise<string> {
   const result = await generateText({
     model: deployments.shopping(),
     system,
@@ -68,5 +119,6 @@ export async function generateSummary(system: string, prompt: string): Promise<s
     maxOutputTokens: 200,
     abortSignal: AbortSignal.timeout(25_000),
   });
+  if (shopDomain) void recordLlmUsage(shopDomain, "summary", result.usage).catch(() => {});
   return result.text.trim();
 }

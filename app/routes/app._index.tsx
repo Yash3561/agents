@@ -55,6 +55,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     usage,
     openNow,
     recentForResponseTime,
+    llmUsageAgg,
   ] = await Promise.all([
     prisma.conversation.count({ where: baseWhere }),
     prisma.conversation.count({ where: { ...baseWhere, orderId: { not: null } } }),
@@ -82,6 +83,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderBy: { startedAt: "desc" },
       take: 200,
       select: { messages: true },
+    }),
+    prisma.llmUsage.aggregate({
+      where: { shopDomain: shop, date: { gte: since } },
+      _sum: { inputTokens: true, outputTokens: true, cachedInputTokens: true, callCount: true },
     }),
   ]);
 
@@ -214,6 +219,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     dailyData,
     conversionByRoute: Object.fromEntries(conversionByRoute),
     topIntents,
+    llmUsage: {
+      inputTokens: llmUsageAgg._sum.inputTokens ?? 0,
+      outputTokens: llmUsageAgg._sum.outputTokens ?? 0,
+      cachedInputTokens: llmUsageAgg._sum.cachedInputTokens ?? 0,
+      callCount: llmUsageAgg._sum.callCount ?? 0,
+    },
   };
 };
 
@@ -581,6 +592,7 @@ export default function Index() {
     currencyCode,
     insightsJson,
     revenueNarrative,
+    llmUsage,
   } = loaderData;
 
   type InsightsTopic = { label: string; count: number; sample: string; suggestion: string };
@@ -625,6 +637,12 @@ export default function Index() {
     : avgResponseMs < 180000 ? "#008060"
     : avgResponseMs < 600000 ? "#b98900"
     : "#d82c0d";
+
+  const totalLlmTokens = llmUsage.inputTokens + llmUsage.outputTokens;
+  const cacheHitRatePct = llmUsage.inputTokens > 0
+    ? Math.round((llmUsage.cachedInputTokens / llmUsage.inputTokens) * 100)
+    : null;
+  const fmtTokens = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n);
 
   const CHANNEL_TOGGLE = [
     { value: "all", label: "All channels" },
@@ -812,6 +830,18 @@ export default function Index() {
             value={String(openNow)}
             sub={openNow === 1 ? "open conversation" : "open conversations"}
             borderColor={openNow > 0 ? "#d97706" : "#e1e3e5"}
+          />
+          <Metric
+            label="LLM tokens"
+            value={llmUsage.callCount > 0 ? fmtTokens(totalLlmTokens) : "—"}
+            sub={
+              llmUsage.callCount === 0
+                ? "No data yet"
+                : cacheHitRatePct !== null
+                  ? `${llmUsage.callCount.toLocaleString()} calls · ${cacheHitRatePct}% cache hit`
+                  : `${llmUsage.callCount.toLocaleString()} calls`
+            }
+            borderColor="#2c6ecb"
           />
         </div>
       </s-section>

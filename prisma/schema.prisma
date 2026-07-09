@@ -79,6 +79,25 @@ model Conversation {
   @@index([checkoutToken])
 }
 
+/**
+ * Daily, per-agent LLM token usage rollup — groundwork for a cost/usage dashboard
+ * and for verifying the prompt-cache-alignment work (cachedInputTokens) actually
+ * lands provider-side cache hits, not just estimated token counts.
+ */
+model LlmUsage {
+  id                String   @id @default(cuid())
+  shopDomain        String
+  date              DateTime // truncated to day (UTC midnight)
+  agent             String   // "unified" | "whatsapp" | "summary"
+  inputTokens       Int      @default(0)
+  outputTokens      Int      @default(0)
+  cachedInputTokens Int      @default(0) // subset of inputTokens served from the provider's prompt cache
+  callCount         Int      @default(0)
+
+  @@unique([shopDomain, date, agent])
+  @@index([shopDomain])
+}
+
 model Session {
   id                  String    @id
   shop                String
