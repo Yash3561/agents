@@ -642,7 +642,7 @@ export default function Inbox() {
             {purchasedCount > 0 && <span style={{ color: "var(--color-success)" }}>● {purchasedCount} purchased</span>}
             {inCartCount > 0 && <span style={{ color: "var(--color-primary)" }}>● {inCartCount} in cart</span>}
             {escalatedCount > 0 && <span style={{ color: "var(--color-critical)" }}>● {escalatedCount} escalated</span>}
-            {liveCount > 0 && <span style={{ color: "#22c55e", fontWeight: 600 }}>⬤ {liveCount} live</span>}
+            {liveCount > 0 && <span style={{ color: "var(--color-live)", fontWeight: 600 }}>⬤ {liveCount} live</span>}
             {thumbsUp + thumbsDown > 0 && (
               <span title={`${thumbsUp} rated helpful, ${thumbsDown} rated not helpful`}>
                 {Math.round((thumbsUp / (thumbsUp + thumbsDown)) * 100)}% rated helpful ({thumbsUp} helpful, {thumbsDown} not helpful)
@@ -650,12 +650,12 @@ export default function Inbox() {
             )}
             <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
               <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
-                <span style={{ fontSize: "11px", color: "var(--color-neutral)" }}>Live</span>
+                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--color-live)", display: "inline-block" }} />
+                <span style={{ fontSize: "12px", color: "var(--color-neutral)" }}>Live</span>
               </span>
               <button
                 onClick={() => (document.getElementById("inbox-win") as unknown as { show(): void })?.show()}
-                style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer" }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, padding: "4px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer" }}
               >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4" strokeLinecap="round" strokeLinejoin="round" />
@@ -673,16 +673,16 @@ export default function Inbox() {
               placeholder="Search conversations..."
               defaultValue={search}
               onChange={(e) => handleSearch(e.target.value)}
-              style={{ width: "100%", padding: "6px 10px", border: "1px solid var(--color-border)", borderRadius: "6px", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
+              style={{ width: "100%", padding: "8px 12px", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", fontSize: "13px", boxSizing: "border-box", outline: "none" }}
             />
           </div>
 
           {/* Status tabs */}
           <div style={{ display: "flex", borderBottom: "2px solid var(--color-border)" }}>
             {([
-              { key: "open", label: "Open", count: escalatedCount, activeColor: "#c2410c", activeBg: "#fff7ed" },
-              { key: "pending", label: "Pending", count: pendingCount, activeColor: "var(--color-primary)", activeBg: "#eff6ff" },
-              { key: "resolved", label: "Resolved", count: resolvedCount, activeColor: "var(--color-neutral)", activeBg: "#f3f4f6" },
+              { key: "open", label: "Open", count: escalatedCount, activeColor: "var(--color-warning)", activeBg: "var(--color-warning-subdued)" },
+              { key: "pending", label: "Pending", count: pendingCount, activeColor: "var(--color-primary)", activeBg: "var(--color-primary-subdued)" },
+              { key: "resolved", label: "Resolved", count: resolvedCount, activeColor: "var(--color-neutral)", activeBg: "var(--color-neutral-subdued)" },
             ] as const).map((tab) => (
               <button
                 key={tab.key}
@@ -697,7 +697,7 @@ export default function Inbox() {
               >
                 {tab.label}
                 {tab.count > 0 && (
-                  <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 10, background: activeTab === tab.key ? tab.activeBg : "#f3f4f6", color: activeTab === tab.key ? tab.activeColor : "var(--color-neutral)" }}>
+                  <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: "var(--radius-pill)", background: activeTab === tab.key ? tab.activeBg : "var(--color-neutral-subdued)", color: activeTab === tab.key ? tab.activeColor : "var(--color-neutral)" }}>
                     {tab.count}
                   </span>
                 )}
@@ -706,7 +706,7 @@ export default function Inbox() {
           </div>
 
           {/* Filters */}
-          <div style={{ padding: "6px 12px", borderBottom: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: "4px" }}>
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: "4px" }}>
             <FilterButtonGroup options={DATE_OPTIONS} value={dateRange} onChange={(v) => setFilter("dateRange", v)} />
             <FilterButtonGroup options={CHANNEL_OPTS} value={channel} onChange={(v) => setFilter("channel", v)} />
           </div>
@@ -748,25 +748,25 @@ export default function Inbox() {
                         onClick={() => selectConversation(conv.id)}
                         onKeyDown={(e) => e.key === "Enter" && selectConversation(conv.id)}
                         style={{
-                          padding: "10px 14px",
+                          padding: "12px 16px",
                           cursor: "pointer",
-                          background: isSelected ? "#f0f4ff" : "white",
+                          background: isSelected ? "var(--color-primary-selected)" : "var(--color-surface-default)",
                           borderBottom: "1px solid var(--color-border)",
                           display: "flex",
                           alignItems: "flex-start",
-                          gap: 10,
+                          gap: 12,
                           minHeight: 72,
                         }}
                       >
                         {/* Unread dot */}
-                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: isUnread ? "#2c6ecb" : "transparent", marginTop: 6, flexShrink: 0 }} />
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: isUnread ? "var(--color-primary)" : "transparent", marginTop: 8, flexShrink: 0 }} />
 
                         {/* Channel icon */}
                         <div style={{
-                          width: 28, height: 28, borderRadius: "50%", flexShrink: 0, marginTop: 2,
-                          background: isWA ? "#25d366" : "#2c6ecb",
+                          width: 32, height: 32, borderRadius: "50%", flexShrink: 0, marginTop: 4,
+                          background: isWA ? "var(--color-channel-whatsapp)" : "var(--color-primary)",
                           display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 13, color: "white", fontWeight: 700,
+                          fontSize: 13, color: "var(--color-text-inverse)", fontWeight: 700,
                         }}>
                           {isWA ? "W" : "C"}
                         </div>
@@ -774,32 +774,32 @@ export default function Inbox() {
                         {/* Content */}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           {/* Row 1: name + time */}
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                            <span style={{ fontWeight: 600, fontSize: 13, color: "#1a1a1a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <span style={{ fontWeight: 600, fontSize: 13, color: "var(--color-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {displayName}
                             </span>
-                            <span style={{ fontSize: 11, color: "#6d7175", flexShrink: 0, opacity: 0.8 }}>
+                            <span style={{ fontSize: 12, color: "var(--color-neutral)", flexShrink: 0, opacity: 0.8 }}>
                               {relTime(conv.lastMessageAt)}
                             </span>
                           </div>
 
                           {/* Row 2: preview + badges */}
                           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <span style={{ fontSize: 12, color: "#6d7175", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.85 }}>
+                            <span style={{ fontSize: 12, color: "var(--color-neutral)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.85 }}>
                               {(conv.firstUserMessage ?? "").slice(0, 60) || "No messages yet"}
                             </span>
                             {needsReply && (
-                              <span style={{ fontSize: 10, fontWeight: 600, color: "#b54708", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-warning-text)", background: "var(--color-warning-subdued)", border: "1px solid var(--color-warning-border)", borderRadius: 4, padding: "2px 8px", flexShrink: 0 }}>
                                 Needs reply
                               </span>
                             )}
                             {aiResolved && (
-                              <span style={{ fontSize: 10, fontWeight: 600, color: "#027a48", background: "#d1fae5", border: "1px solid #6ee7b7", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-success-text)", background: "var(--color-success-subdued)", border: "1px solid var(--color-success-border)", borderRadius: 4, padding: "2px 8px", flexShrink: 0 }}>
                                 AI ✓
                               </span>
                             )}
                             {hasRevenue && (
-                              <span style={{ fontSize: 10, fontWeight: 600, color: "#92400e", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-warning)", background: "var(--color-warning-subdued)", border: "1px solid var(--color-warning-border)", borderRadius: 4, padding: "2px 8px", flexShrink: 0 }}>
                                 ${((conv.orderRevenueCents ?? 0) / 100).toFixed(0)}
                               </span>
                             )}
@@ -825,15 +825,15 @@ export default function Inbox() {
         {/* ── Center Panel: Transcript ──────────────────────────────────────── */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
           {!selected ? (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#8c9196", fontSize: "14px" }}>
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-neutral-light)", fontSize: "14px" }}>
               Select a conversation to view the transcript
             </div>
           ) : (
             <>
               {/* Conversation header — Phase 6: circle channel icon, 3-state badge, resolve + pause in header */}
-              <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", gap: 10, background: "#fff", flexShrink: 0 }}>
+              <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", gap: 12, background: "var(--color-surface-default)", flexShrink: 0 }}>
                 {/* Circle channel icon */}
-                <div style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, background: selected.channel === "whatsapp" ? "#25d366" : "#2c6ecb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "white", fontWeight: 700 }}>
+                <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0, background: selected.channel === "whatsapp" ? "var(--color-channel-whatsapp)" : "var(--color-primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--color-text-inverse)", fontWeight: 700 }}>
                   {selected.channel === "whatsapp" ? "W" : "C"}
                 </div>
                 {/* Customer name */}
@@ -842,18 +842,18 @@ export default function Inbox() {
                 </span>
                 {/* Status badge — 3 states; isAiPaused conveyed by Resume button label */}
                 {selected.resolved ? (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: "#027a48", background: "#d1fae5", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px" }}>Resolved</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-success-text)", background: "var(--color-success-subdued)", border: "1px solid var(--color-success-border)", borderRadius: 4, padding: "2px 8px" }}>Resolved</span>
                 ) : selected.escalated ? (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: "#b54708", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 4, padding: "2px 8px" }}>Needs Reply</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-warning-text)", background: "var(--color-warning-subdued)", border: "1px solid var(--color-warning-border)", borderRadius: 4, padding: "2px 8px" }}>Needs Reply</span>
                 ) : (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: "#2c6ecb", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 4, padding: "2px 8px" }}>AI Handling</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-primary)", background: "var(--color-primary-subdued)", border: "1px solid var(--color-primary-border)", borderRadius: 4, padding: "2px 8px" }}>AI Handling</span>
                 )}
                 {/* Resolve — moved from sidebar */}
                 {!selected.resolved && (
                   <Form method="post" style={{ display: "inline" }}>
                     <input type="hidden" name="intent" value="resolve" />
                     <input type="hidden" name="conversationId" value={selected.id} />
-                    <button type="submit" style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer" }}>✓ Resolve</button>
+                    <button type="submit" style={{ fontSize: 12, padding: "4px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer" }}>✓ Resolve</button>
                   </Form>
                 )}
                 {/* Pause AI */}
@@ -862,7 +862,7 @@ export default function Inbox() {
                     <input type="hidden" name="intent" value="pause-ai" />
                     <input type="hidden" name="conversationId" value={selected.id} />
                     <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
-                    <button type="submit" style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer", color: isAiPaused ? "var(--color-warning)" : "var(--color-neutral)" }}>
+                    <button type="submit" style={{ fontSize: 12, padding: "4px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer", color: isAiPaused ? "var(--color-warning)" : "var(--color-neutral)" }}>
                       {isAiPaused ? "▶ Resume" : "⏸ Pause AI"}
                     </button>
                   </pauseFetcher.Form>
@@ -891,7 +891,7 @@ export default function Inbox() {
               )}
 
               {/* Journey funnel */}
-              <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
+              <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
                 <JourneyFunnel
                   browsed={agentTraceArr.includes("search_catalog")}
                   inCart={!!selected.cartId}
@@ -912,7 +912,7 @@ export default function Inbox() {
 
               {/* AI paused banner */}
               {isAiPaused && (
-                <div style={{ padding: "6px 16px", background: "#fff7ed", borderBottom: "1px solid #fed7aa", fontSize: "12px", color: "#c2410c" }}>
+                <div style={{ padding: "8px 16px", background: "var(--color-warning-subdued)", borderBottom: "1px solid var(--color-warning-border)", fontSize: "12px", color: "var(--color-warning)" }}>
                   AI is paused — you&apos;re handling this conversation. Replies you send are from you, not the AI.
                 </div>
               )}
@@ -920,15 +920,15 @@ export default function Inbox() {
               {/* Messages */}
               <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: "4px" }}>
                 {msgs.length === 0 ? (
-                  <span style={{ color: "#8c9196", fontSize: "13px" }}>No messages recorded.</span>
+                  <span style={{ color: "var(--color-neutral-light)", fontSize: "13px" }}>No messages recorded.</span>
                 ) : msgs.map((msg, i) => {
                   if (msg.role === "note") {
                     return (
-                      <div key={i} style={{ margin: "8px 0", padding: "8px 12px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "8px", borderLeft: "3px solid var(--color-warning)" }}>
-                        <div style={{ fontSize: "11px", color: "var(--color-warning)", fontWeight: 600, marginBottom: "4px" }}>Internal note</div>
+                      <div key={i} style={{ margin: "8px 0", padding: "8px 12px", background: "var(--color-warning-surface)", border: "1px solid var(--color-warning-border)", borderRadius: "var(--radius-base)", borderLeft: "3px solid var(--color-warning)" }}>
+                        <div style={{ fontSize: "12px", color: "var(--color-warning)", fontWeight: 600, marginBottom: "4px" }}>Internal note</div>
                         <div style={{ fontSize: "13px", color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{msg.content}</div>
                         {msg.timestamp && (
-                          <div style={{ fontSize: "10px", color: "#aaa", marginTop: "4px" }}>
+                          <div style={{ fontSize: "12px", color: "var(--color-neutral-light)", marginTop: "4px" }}>
                             {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </div>
                         )}
@@ -956,20 +956,20 @@ export default function Inbox() {
 
               {/* Reply box (escalated only) or status hint */}
               {selected.escalated && !selected.resolved ? (
-                <div style={{ borderTop: "1px solid var(--color-border)", background: "#fff" }}>
+                <div style={{ borderTop: "1px solid var(--color-border)", background: "var(--color-surface-default)" }}>
                   {/* Mode tabs */}
                   <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)" }}>
                     <button
                       type="button"
                       onClick={() => setReplyMode("reply")}
-                      style={{ padding: "6px 16px", border: "none", background: "none", cursor: "pointer", fontSize: "13px", fontWeight: replyMode === "reply" ? 600 : 400, color: replyMode === "reply" ? "var(--color-primary)" : "var(--color-neutral)", borderBottom: replyMode === "reply" ? "2px solid var(--color-primary)" : "2px solid transparent" }}
+                      style={{ padding: "8px 16px", border: "none", background: "none", cursor: "pointer", fontSize: "13px", fontWeight: replyMode === "reply" ? 600 : 400, color: replyMode === "reply" ? "var(--color-primary)" : "var(--color-neutral)", borderBottom: replyMode === "reply" ? "2px solid var(--color-primary)" : "2px solid transparent" }}
                     >
                       Reply
                     </button>
                     <button
                       type="button"
                       onClick={() => setReplyMode("note")}
-                      style={{ padding: "6px 16px", border: "none", background: "none", cursor: "pointer", fontSize: "13px", fontWeight: replyMode === "note" ? 600 : 400, color: replyMode === "note" ? "var(--color-warning)" : "var(--color-neutral)", borderBottom: replyMode === "note" ? "2px solid var(--color-warning)" : "2px solid transparent" }}
+                      style={{ padding: "8px 16px", border: "none", background: "none", cursor: "pointer", fontSize: "13px", fontWeight: replyMode === "note" ? 600 : 400, color: replyMode === "note" ? "var(--color-warning)" : "var(--color-neutral)", borderBottom: replyMode === "note" ? "2px solid var(--color-warning)" : "2px solid transparent" }}
                     >
                       Note
                     </button>
@@ -982,7 +982,7 @@ export default function Inbox() {
                     <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
                       <div style={{ flex: 1, position: "relative" }}>
                         {showMacros && filteredMacros.length > 0 && (
-                          <div style={{ position: "absolute", bottom: "100%", left: 0, right: 0, zIndex: 20, background: "#fff", border: "1px solid var(--color-border)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 180, overflowY: "auto", marginBottom: 4 }}>
+                          <div style={{ position: "absolute", bottom: "100%", left: 0, right: 0, zIndex: 20, background: "var(--color-surface-default)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", boxShadow: "0 4px 12px var(--color-shadow-popover)", maxHeight: 192, overflowY: "auto", marginBottom: 4 }}>
                             {filteredMacros.slice(0, 6).map((r, i) => (
                               <div
                                 key={i}
@@ -1007,10 +1007,10 @@ export default function Inbox() {
                           placeholder={replyMode === "note" ? "Leave an internal note (customer won't see this)…" : "Reply as store… (type / for quick replies, ⌘↵ to send)"}
                           rows={2}
                           style={{
-                            width: "100%", padding: "8px 10px", borderRadius: "6px",
-                            border: `1px solid ${replyMode === "note" ? "#fde68a" : "var(--color-border)"}`,
+                            width: "100%", padding: "8px 12px", borderRadius: "var(--radius-sm)",
+                            border: `1px solid ${replyMode === "note" ? "var(--color-warning-border)" : "var(--color-border)"}`,
                             fontSize: "13px", resize: "none", fontFamily: "inherit",
-                            background: replyMode === "note" ? "#fffbeb" : "#fff",
+                            background: replyMode === "note" ? "var(--color-warning-surface)" : "var(--color-surface-default)",
                             boxSizing: "border-box",
                           }}
                           onChange={(e) => {
@@ -1041,8 +1041,8 @@ export default function Inbox() {
                         disabled={isSubmitting}
                         style={{
                           padding: "8px 16px",
-                          background: isSubmitting ? "var(--color-neutral)" : replyMode === "note" ? "#d97706" : "var(--color-primary)",
-                          color: "#fff", border: "none",
+                          background: isSubmitting ? "var(--color-neutral)" : replyMode === "note" ? "var(--color-warning)" : "var(--color-primary)",
+                          color: "var(--color-text-inverse)", border: "none",
                           borderRadius: "var(--radius-sm)",
                           cursor: isSubmitting ? "wait" : "pointer",
                           fontSize: "13px", fontWeight: 600, flexShrink: 0,
@@ -1052,14 +1052,14 @@ export default function Inbox() {
                         {isSubmitting ? "Saving…" : replyMode === "note" ? "Save Note" : "Send"}
                       </button>
                     </div>{/* end flex row */}
-                    <div style={{ fontSize: "11px", color: "#8c9196", marginTop: "4px" }}>
+                    <div style={{ fontSize: "12px", color: "var(--color-neutral-light)", marginTop: "4px" }}>
                       {replyMode === "note" ? "Internal only — not sent to customer or AI" : selected.channel === "whatsapp" ? "Sends via WhatsApp to customer" : "Stored in conversation — AI picks up on next reply"}
                     </div>
                   </Form>
                   </div>
                 </div>
               ) : selected && !selected.resolved ? (
-                <div style={{ padding: "10px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-surface)", fontSize: "12px", color: "#8c9196" }}>
+                <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-surface)", fontSize: "12px", color: "var(--color-neutral-light)" }}>
                   AI is handling this conversation · Escalate from sidebar to reply manually
                 </div>
               ) : null}
@@ -1070,13 +1070,13 @@ export default function Inbox() {
         {/* ── Right Panel: Customer Sidebar ─────────────────────────────────── */}
         <div style={{ width: 280, flexShrink: 0, overflowY: "auto", padding: "16px", borderLeft: "1px solid var(--color-border)" }}>
           {!selected ? (
-            <div style={{ fontSize: "13px", color: "#8c9196" }}>No conversation selected</div>
+            <div style={{ fontSize: "13px", color: "var(--color-neutral-light)" }}>No conversation selected</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>{/* Phase 5: Customer → Phone → Cart → Order → Discount → Escalate → AI trace → Details → Train → Channel */}
               {/* Customer — name at top, Shopify link below */}
               <div>
-                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Customer</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a" }}>
+                <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Customer</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
                   {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
                 </div>
                 {selected.customerId && (
@@ -1094,8 +1094,8 @@ export default function Inbox() {
               {/* Phone (WhatsApp only) */}
               {selected.channel === "whatsapp" && (
                 <div>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Phone</div>
-                  <span style={{ fontSize: "13px", color: "#202223" }}>
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Phone</div>
+                  <span style={{ fontSize: "13px", color: "var(--color-text)" }}>
                     {"****" + selected.sessionId.replace("whatsapp_", "").slice(-4)}
                   </span>
                 </div>
@@ -1104,7 +1104,7 @@ export default function Inbox() {
               {/* Cart value */}
               {selected.cartValue != null && (
                 <div>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Cart Value</div>
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Cart Value</div>
                   <span style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-primary)" }}>
                     {fmtMoney(selected.cartValue)}
                   </span>
@@ -1113,14 +1113,14 @@ export default function Inbox() {
 
               {/* Order card */}
               {selected.orderId && (
-                <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", padding: "10px 12px" }}>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Order</div>
+                <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", padding: "12px 12px" }}>
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Order</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)" }}>
                         {selected.orderRevenueCents != null ? fmtMoney(selected.orderRevenueCents / 100) : "Order placed"}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--color-success)", marginTop: 2 }}>Revenue attributed ✓</div>
+                      <div style={{ fontSize: 12, color: "var(--color-success)", marginTop: 4 }}>Revenue attributed ✓</div>
                     </div>
                     <a
                       href={`https://${storeHandle}.myshopify.com/admin/orders/${selected.orderId.replace("gid://shopify/Order/", "")}`}
@@ -1136,7 +1136,7 @@ export default function Inbox() {
               {/* Discount code */}
               {selected.discountCode && (
                 <div>
-                  <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Discount Used</div>
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Discount Used</div>
                   <s-badge>{selected.discountCode}</s-badge>
                 </div>
               )}
@@ -1155,10 +1155,10 @@ export default function Inbox() {
               {/* AI tool trace — collapsed by default */}
               {aiActions.length > 0 && (
                 <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
-                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em", listStyle: "none", display: "flex", alignItems: "center", gap: 4 }}>
+                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--color-neutral-border)", textTransform: "uppercase", letterSpacing: "0.06em", listStyle: "none", display: "flex", alignItems: "center", gap: 4 }}>
                     Tool calls · {aiActions.length}
                   </summary>
-                  <div style={{ padding: "4px 12px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
+                  <div style={{ padding: "4px 12px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
                     {aiActions.map((a, i) => (
                       <div key={i} style={{ fontSize: 12, color: "var(--color-neutral)" }}>{a}</div>
                     ))}
@@ -1168,13 +1168,13 @@ export default function Inbox() {
 
               {/* Details */}
               <div>
-                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Details</div>
-                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", fontSize: "12px" }}>
-                  <span style={{ color: "#6d7175" }}>Started</span>
+                <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Details</div>
+                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", fontSize: "12px" }}>
+                  <span style={{ color: "var(--color-neutral)" }}>Started</span>
                   <span>{new Date(selected.startedAt as unknown as string).toLocaleDateString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-                  <span style={{ color: "#6d7175" }}>Messages</span>
+                  <span style={{ color: "var(--color-neutral)" }}>Messages</span>
                   <span>{selected.messageCount}</span>
-                  <span style={{ color: "#6d7175" }}>Status</span>
+                  <span style={{ color: "var(--color-neutral)" }}>Status</span>
                   <span>
                     {selected.escalated && !selected.resolved
                       ? <s-badge tone="critical">Escalated</s-badge>
@@ -1185,16 +1185,16 @@ export default function Inbox() {
                   </span>
                   {selected.qualityScore != null && (
                     <>
-                      <span style={{ color: "#6d7175" }}>AI Quality</span>
+                      <span style={{ color: "var(--color-neutral)" }}>AI Quality</span>
                       <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                         <span style={{
                           fontWeight: 600, fontSize: "13px",
-                          color: selected.qualityScore >= 4 ? "#15803d" : selected.qualityScore >= 3 ? "#d97706" : "#dc2626",
+                          color: selected.qualityScore >= 4 ? "var(--color-channel-whatsapp)" : selected.qualityScore >= 3 ? "var(--color-warning)" : "var(--color-critical)",
                         }}>
                           {selected.qualityScore.toFixed(1)}/5
                         </span>
                         {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
-                          <span style={{ fontSize: "11px", color: "#dc2626" }}>● Needs review</span>
+                          <span style={{ fontSize: "12px", color: "var(--color-critical)" }}>● Needs review</span>
                         )}
                       </span>
                     </>
@@ -1235,7 +1235,7 @@ export default function Inbox() {
 
               {/* Channel */}
               <div>
-                <div style={{ fontSize: "11px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Channel</div>
+                <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Channel</div>
                 <s-badge tone={selected.channel === "whatsapp" ? "success" : "info"}>
                   {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
                 </s-badge>
