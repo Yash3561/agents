@@ -58,7 +58,7 @@ function buildUnifiedPrompt(
   offeredCodes: string[],
   cartTotalCents: number,
 ): string {
-  const shoppingPart = buildShoppingPrompt(merchant, session, memory);
+  const { rules: shoppingRules, context: shoppingContext } = buildShoppingPrompt(merchant, session, memory);
   const supportPart = buildSupportPrompt(merchant);
 
   const cartDollars = (cartTotalCents / 100).toFixed(2);
@@ -96,12 +96,11 @@ DISCOUNT RULES:
         ? `\n## DISCOUNTS\nNo promotional codes are active right now. If the customer asks about discounts, deals, or promo codes, say: "We don't have any promotional codes running at the moment — but I can help you find the perfect product!"`
         : "";
 
-  const discountGuidanceLine =
-    merchant.personalizationEnabled && freshCodes.length > 0
-      ? `\n- Discount/personalization: offer_discount (call this tool — do NOT mention codes in free text)`
-      : "";
-
-  return `${shoppingPart}
+  // Static content (identical for every conversation this merchant has) comes first,
+  // so a provider's prompt caching can hit on the shared leading prefix; volatile
+  // per-turn content (customer context, live discount state) is appended last. See
+  // buildShoppingPrompt's comment for why this ordering matters.
+  return `${shoppingRules}
 
 ---
 
@@ -121,7 +120,11 @@ You handle shopping, support, AND personalization yourself — pick the right to
 - Support: search_policies_and_faqs, get_order, get_customer_orders (READ-ONLY — never modify orders)
 - Intent: set_intent — call once after understanding what the customer needs
 - Greetings/small talk/off-topic: respond directly without calling any tool
-- If intent is unclear (confidence < 0.6): ask the customer to rephrase; offer quick options${discountGuidanceLine}
+- If intent is unclear (confidence < 0.6): ask the customer to rephrase; offer quick options
+
+---
+
+${shoppingContext}
 ${discountSection}`;
 }
 

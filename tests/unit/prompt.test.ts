@@ -39,9 +39,18 @@ function makeSession(overrides: Partial<ConversationSession> = {}): Conversation
 
 const emptyMemory: CustomerMemory = {};
 
+// buildShoppingPrompt returns { rules, context } — rules is the static, merchant-scoped
+// block (shop domain, RULES 1-11); context is the volatile per-customer/per-turn block
+// (cart state, customer name, memory JSON). Real callers always concatenate both, so
+// tests do too, except where a case specifically cares which half something landed in.
+function fullPrompt(merchant: Merchant, session: ConversationSession, memory: CustomerMemory): string {
+  const { rules, context } = buildShoppingPrompt(merchant, session, memory);
+  return `${rules}\n${context}`;
+}
+
 describe("buildShoppingPrompt", () => {
   it("includes cart ID in cartState when session has cart_id", () => {
-    const prompt = buildShoppingPrompt(
+    const prompt = fullPrompt(
       makeMerchant(),
       makeSession({ cart_id: "gid://shopify/Cart/abc123" }),
       emptyMemory,
@@ -50,7 +59,7 @@ describe("buildShoppingPrompt", () => {
   });
 
   it("says 'No cart yet.' when session has no cart_id", () => {
-    const prompt = buildShoppingPrompt(
+    const prompt = fullPrompt(
       makeMerchant(),
       makeSession(),
       emptyMemory,
@@ -59,7 +68,7 @@ describe("buildShoppingPrompt", () => {
   });
 
   it("includes customer name when memory has firstName", () => {
-    const prompt = buildShoppingPrompt(
+    const prompt = fullPrompt(
       makeMerchant(),
       makeSession(),
       { firstName: "Alice" },
@@ -69,7 +78,7 @@ describe("buildShoppingPrompt", () => {
   });
 
   it("does not include customer name section when memory has no firstName", () => {
-    const prompt = buildShoppingPrompt(
+    const prompt = fullPrompt(
       makeMerchant(),
       makeSession(),
       emptyMemory,
@@ -77,8 +86,20 @@ describe("buildShoppingPrompt", () => {
     expect(prompt).not.toContain("Customer name:");
   });
 
+  it("places customer name, cart state, and memory in `context`, not `rules` (cache-prefix stability)", () => {
+    const { rules, context } = buildShoppingPrompt(
+      makeMerchant(),
+      makeSession({ cart_id: "gid://shopify/Cart/abc123" }),
+      { firstName: "Alice" },
+    );
+    expect(rules).not.toContain("Alice");
+    expect(rules).not.toContain("gid://shopify/Cart/abc123");
+    expect(context).toContain("Alice");
+    expect(context).toContain("gid://shopify/Cart/abc123");
+  });
+
   it("includes abandoned_cart recovery rule (rule 11) when memory.abandoned_cart is set", () => {
-    const prompt = buildShoppingPrompt(
+    const prompt = fullPrompt(
       makeMerchant(),
       makeSession(),
       {
@@ -97,7 +118,7 @@ describe("buildShoppingPrompt", () => {
     const memory: CustomerMemory = {
       recent_products: ["Fabric Resistance Bands (Pink)", "Silk Sleep Mask"],
     };
-    const prompt = buildShoppingPrompt(makeMerchant(), makeSession(), memory);
+    const prompt = fullPrompt(makeMerchant(), makeSession(), memory);
     expect(prompt).toContain("Fabric Resistance Bands (Pink)");
     expect(prompt).toContain("Silk Sleep Mask");
   });
@@ -109,7 +130,7 @@ describe("buildShoppingPrompt", () => {
   });
 
   it("includes shop domain in the prompt", () => {
-    const prompt = buildShoppingPrompt(
+    const prompt = fullPrompt(
       makeMerchant({ shopDomain: "myawesomestore.myshopify.com" }),
       makeSession(),
       emptyMemory,

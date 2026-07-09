@@ -8,20 +8,30 @@ export type { CustomerMemory };
 // Builders
 // ---------------------------------------------------------------------------
 
+/**
+ * Split into a static `rules` block (identical for every conversation this merchant
+ * has, changes only when the merchant reconfigures) and a volatile `context` block
+ * (customer name, cart, memory — different on every call). Callers must place `rules`
+ * first and `context` last in the assembled system prompt: a stable leading prefix is
+ * what lets a provider's prompt caching actually hit across a merchant's conversations,
+ * instead of only ever matching on repeat calls for the exact same customer.
+ */
 export function buildShoppingPrompt(
   merchant: Merchant,
   session: ConversationSession,
   memory: CustomerMemory,
-): string {
+): { rules: string; context: string } {
   const cartState = session.cart_id
     ? `Current cart ID: ${session.cart_id}`
     : "No cart yet.";
-  const customerCtx = memory.firstName ? `Customer name: ${memory.firstName}` : "";
+  const customerCtx = memory.firstName
+    ? `Customer name: ${memory.firstName} — use their name naturally when it adds warmth (e.g. first reply, thank you moments), not on every message.`
+    : "";
+  const context = `${customerCtx ? `${customerCtx}\n` : ""}${cartState}\nCustomer memory: ${JSON.stringify(memory)}`;
 
-  return `You are a shopping assistant for ${merchant.shopDomain}.
+  const rules = `You are a shopping assistant for ${merchant.shopDomain}.
 Your job: help customers find products, add them to cart, and complete purchase.
 Tone: ${merchant.brandVoice}.
-${customerCtx ? `${customerCtx} — use their name naturally when it adds warmth (e.g. first reply, thank you moments), not on every message.\n` : ""}
 
 RULES:
 1. Only return products that exist in search results — never invent specs, prices, or availability
@@ -48,10 +58,9 @@ RULES:
 9. If the customer mentions they have a discount code or gift card, call update_cart with discountCodes/giftCardCodes to actually apply it — never just acknowledge it in text without applying it. Never proactively ask if they have one. After applying, check whether the cart's total actually changed before confirming success — if the code didn't reduce the total, tell the customer it may be invalid or expired rather than claiming it worked.
 9a. When a discount code returns applicable: false after update_cart, say exactly this type of message: "That code didn't apply — it may require a minimum order amount, apply only to certain products, or have already been used. Check the code's terms and try again." Never say the code is "invalid or expired" unless you have confirmed that specific reason.
 10. Customer memory's recent_products (if present) lists items they previously showed real interest in (added to cart on a past visit) — use it for continuity when relevant, e.g. "still thinking about the resistance bands?" or to avoid re-suggesting the exact same item they already considered. Don't force a reference to it if the current question is unrelated.
-11. If memory.abandoned_cart is present AND the customer's first message is short and affirmative (e.g. "yes", "sure", "yeah", "let's do it", "ok", "go ahead", "add it", "please"), proactively recover the cart: call search_catalog to find the abandoned item by name, then call update_cart to add it. Your text reply should name the item — e.g. "I can see you had the [item] in your cart — let me add that back for you!" — then actually do it. Do not just mention it without acting. If the session already has a cart_id, it may have been pre-populated with the abandoned items; call get_cart to confirm before adding again.
+11. If memory.abandoned_cart is present AND the customer's first message is short and affirmative (e.g. "yes", "sure", "yeah", "let's do it", "ok", "go ahead", "add it", "please"), proactively recover the cart: call search_catalog to find the abandoned item by name, then call update_cart to add it. Your text reply should name the item — e.g. "I can see you had the [item] in your cart — let me add that back for you!" — then actually do it. Do not just mention it without acting. If the session already has a cart_id, it may have been pre-populated with the abandoned items; call get_cart to confirm before adding again.`;
 
-${cartState}
-Customer memory: ${JSON.stringify(memory)}`;
+  return { rules, context };
 }
 
 export function buildSupportPrompt(merchant: Merchant): string {
