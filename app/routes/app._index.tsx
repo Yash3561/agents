@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useLoaderData, useSearchParams } from "react-router";
 import { FilterButtonGroup } from "~/components/FilterButtonGroup";
@@ -324,6 +324,16 @@ function LineChart({
 }) {
   const [tooltip, setTooltip] = useState<{ idx: number } | null>(null);
 
+  // tooltip.idx is only ever set from a live mouse move over the CURRENT points array,
+  // so it can't go stale during a hover — but it's local state, so it survives a
+  // days/channel filter change that shrinks `data` (e.g. 90 days -> 7 days). Without
+  // this reset, a hover index left over from the larger dataset points past the end
+  // of the new, shorter `pts` array on the next render, crashing render (was hit in
+  // production: "Cannot read properties of undefined (reading '0')").
+  useEffect(() => {
+    setTooltip(null);
+  }, [data, daysNum]);
+
   const filled = fillDates(data, daysNum);
   const maxCount = Math.max(...filled.map((d) => d.count), 1);
 
@@ -468,7 +478,7 @@ function LineChart({
         )}
 
         {/* Hover vertical line */}
-        {hoverIdx >= 0 && (
+        {hoverIdx >= 0 && pts[hoverIdx] && (
           <line
             x1={pts[hoverIdx][0]}
             y1={PT}
