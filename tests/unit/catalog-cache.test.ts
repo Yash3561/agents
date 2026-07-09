@@ -62,6 +62,40 @@ function rawProduct(id: string, title: string, variantAvailable: boolean) {
   };
 }
 
+describe("product descriptions are stripped of HTML before reaching the agent", () => {
+  it("removes tags and decodes entities from a rich-text description", async () => {
+    callMcpToolMock.mockResolvedValue({
+      structuredContent: {
+        products: [{
+          id: "gid://1",
+          title: "Item",
+          description: { html: "<p>Made from <strong>100% cotton</strong> &amp; recycled fibers.</p><ul><li>Machine washable</li></ul>" },
+          variants: [{ id: "v1", title: "Default", price: { amount: "10.00", currency: "USD" }, availability: { available: true } }],
+        }],
+      },
+    });
+
+    const result = await searchCatalog(SHOP, "item");
+    expect(result.products[0].description).toBe("Made from 100% cotton & recycled fibers. Machine washable");
+  });
+
+  it("leaves a plain-string description untouched aside from whitespace", async () => {
+    callMcpToolMock.mockResolvedValue({
+      structuredContent: {
+        products: [{
+          id: "gid://2",
+          title: "Item",
+          description: "Already plain text",
+          variants: [{ id: "v1", title: "Default", price: { amount: "10.00", currency: "USD" }, availability: { available: true } }],
+        }],
+      },
+    });
+
+    const result = await searchCatalog(SHOP, "item");
+    expect(result.products[0].description).toBe("Already plain text");
+  });
+});
+
 describe("out-of-stock products are filtered out of search results", () => {
   it("drops a product whose only variant is unavailable", async () => {
     callMcpToolMock.mockResolvedValue({

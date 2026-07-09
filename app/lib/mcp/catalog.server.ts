@@ -66,18 +66,37 @@ function moneyToString(money: Record<string, unknown> | undefined): string | und
   return typeof amount === "number" ? (amount / 100).toFixed(2) : (amount as string | undefined);
 }
 
+/**
+ * Strips HTML tags/entities from a Shopify rich-text product description so the
+ * LLM (and, if ever surfaced directly, the customer) sees clean prose instead of
+ * raw markup — the field is a full HTML blob from Shopify's UCP, not plain text.
+ */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function mapProduct(p: Record<string, unknown>): CatalogProduct {
   const variants = (p.variants as Array<Record<string, unknown>> | undefined) ?? [];
   const media = (p.media as Array<Record<string, unknown>> | undefined) ?? [];
   const priceRange = p.price_range as Record<string, unknown> | undefined;
   const minPrice = priceRange?.min as Record<string, unknown> | undefined;
   const description = p.description as Record<string, unknown> | string | undefined;
+  const rawDescription =
+    typeof description === "string" ? description : (description?.html as string | undefined);
 
   return {
     id: p.id as string,
     title: p.title as string,
-    description:
-      typeof description === "string" ? description : (description?.html as string | undefined),
+    description: rawDescription ? stripHtml(rawDescription) : undefined,
     image_url: media[0]?.url as string | undefined,
     vendor: p.vendor as string | undefined,
     price_min: moneyToString(minPrice),
