@@ -115,9 +115,12 @@ Production URL: `https://neonping.politeocean-a6f0ef16.southcentralus.azureconta
 | `ENCRYPTION_KEY` | 32-byte hex key for encrypting stored tokens |
 | `WHATSAPP_VERIFY_TOKEN` | Meta webhook verify token |
 | `WHATSAPP_APP_SECRET` | Meta app secret for HMAC signature verification |
-| `AZURE_OPENAI_ENDPOINT` | Azure AI Foundry endpoint |
+| `AZURE_FOUNDRY_BASE_URL` | Azure AI Foundry `/openai/v1` base URL |
 | `AZURE_OPENAI_API_KEY` | Azure AI Foundry API key |
-| `AZURE_OPENAI_DEPLOYMENT` | Model deployment name (e.g. `gpt-4o-mini`) |
+| `AZURE_OPENAI_RESOURCE_NAME` | Azure AI Foundry resource name |
+| `AZURE_ORCHESTRATOR_MODEL` | Model deployment name used for routing |
+| `AZURE_SPECIALIST_MODEL` | Model deployment name used for shopping/support/etc. (e.g. `gpt-4o-mini`) |
+| `RESEND_API_KEY` | Resend API key — escalation and usage-alert emails no-op without it |
 
 ---
 
@@ -141,6 +144,16 @@ Production URL: `https://neonping.politeocean-a6f0ef16.southcentralus.azureconta
 
 ## Notes
 
-- `.env` is currently copied into the Docker image via `COPY . .`. Add `.env` to `.dockerignore` before any public image push; secrets should come from Azure environment variables only.
 - Storefront MCP tier does not support Order MCP — order lookup requires Customer Account API credentials (not yet wired).
 - WhatsApp carousel templates are blocked for US +1 numbers during Meta's marketing template pause; tracked in issue [#152](https://github.com/NeonPing/agentic-commerce/issues/152).
+
+---
+
+## Documentation map
+
+- **This file** — public-facing overview: features, stack, deploy steps, key files.
+- **[CLAUDE.md](./CLAUDE.md)** — the maintained source of truth for session continuity, current build state, and operational runbooks. Read this first in any new working session.
+- **[SECURITY.md](./SECURITY.md)** — vulnerability disclosure policy.
+- **GitHub Project board** — https://github.com/orgs/NeonPing/projects/1 — source of truth for what's open/closed/blocked.
+
+There is intentionally no separate architecture/implementation-plan document: the codebase (`app/lib/prompt.server.ts` for agent prompts, `app/lib/agents/` for agent logic, `prisma/schema.prisma` for data model) is the source of truth for how the system actually works, and CLAUDE.md is the single maintained doc for everything else. A prior set of architecture docs (`AGENT_ARCHITECTURE.md`, `ARCHITECTURE.md`, `IMPLEMENTATION_PLAN.md`, `SESSION_STARTER.md`) described an early design (a 5-agent orchestrator pipeline, since replaced by the single unified agent in `unified.server.ts`) and had drifted into contradicting the real code — including wrong Shopify OAuth scopes and a nonexistent file path. They were removed rather than fixed in place to avoid re-accumulating the same drift.
