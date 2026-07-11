@@ -27,7 +27,7 @@ interface Props {
 }
 
 export function MessageBubble({ role, content, timestamp, merchantRating, onRate }: Props) {
-  const isUser = role === "user";
+  const isUser = role === "user" || role === "customer";
   const isMerchant = content?.startsWith("[Merchant]");
   const isSystem = role === "tool" || role === "system";
 
@@ -36,21 +36,27 @@ export function MessageBubble({ role, content, timestamp, merchantRating, onRate
   const displayContent = isMerchant ? content.replace("[Merchant] ", "") : content;
   const label = isMerchant ? "You (Merchant)" : "NeonPing AI";
   const showRating = !isUser && !isMerchant && !!onRate;
+  const bubbleBackground = isUser
+    ? "var(--color-primary-subdued)"
+    : isMerchant
+    ? "var(--color-success-subdued)"
+    : "var(--color-surface-default)";
+  const bubbleBorder = isUser
+    ? "var(--color-primary-border)"
+    : isMerchant
+    ? "var(--color-success-border)"
+    : "var(--color-border)";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start", marginBottom: 2 }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start", marginBottom: 4 }}>
       {!isUser && (
-        <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.04em", color: "#9ca3af", marginBottom: 3, marginLeft: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 500, letterSpacing: "0.04em", color: "var(--color-neutral-border)", marginBottom: 4, marginLeft: 4 }}>
           {label}
         </span>
       )}
       <div style={{
-        background: isUser
-          ? "#f3f4f6"
-          : isMerchant
-          ? "#f0fdf4"
-          : "#eff6ff",
-        border: `1px solid ${isUser ? "#e5e7eb" : isMerchant ? "#bbf7d0" : "#bfdbfe"}`,
+        background: bubbleBackground,
+        border: `1px solid ${bubbleBorder}`,
         padding: "8px 12px",
         borderRadius: isUser ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
         maxWidth: "75%",
@@ -58,18 +64,18 @@ export function MessageBubble({ role, content, timestamp, merchantRating, onRate
         wordBreak: "break-word",
         fontSize: 13,
         lineHeight: 1.5,
-        color: "#1f2937",
+        color: "var(--color-text)",
       }}>
         {displayContent}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4, paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0 }}>
         {timestamp && (
-          <span style={{ fontSize: 10, color: "#9ca3af" }}>
+          <span style={{ fontSize: 12, color: "var(--color-neutral-border)" }}>
             {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}
         {showRating && (
-          <span style={{ display: "flex", gap: 2 }}>
+          <span style={{ display: "flex", gap: 4 }}>
             <button
               type="button"
               aria-label="Mark this AI reply as helpful"
@@ -77,7 +83,7 @@ export function MessageBubble({ role, content, timestamp, merchantRating, onRate
               onClick={() => onRate!(merchantRating === "up" ? undefined : "up")}
               style={{
                 display: "flex", background: "none", border: "none", cursor: "pointer", padding: "2px",
-                color: merchantRating === "up" ? "#008060" : "#c9cccf",
+                color: merchantRating === "up" ? "var(--color-success)" : "var(--color-border)",
               }}
             >
               <ThumbIcon direction="up" filled={merchantRating === "up"} />
@@ -89,7 +95,7 @@ export function MessageBubble({ role, content, timestamp, merchantRating, onRate
               onClick={() => onRate!(merchantRating === "down" ? undefined : "down")}
               style={{
                 display: "flex", background: "none", border: "none", cursor: "pointer", padding: "2px",
-                color: merchantRating === "down" ? "#d82c0d" : "#c9cccf",
+                color: merchantRating === "down" ? "var(--color-critical)" : "var(--color-border)",
               }}
             >
               <ThumbIcon direction="down" filled={merchantRating === "down"} />

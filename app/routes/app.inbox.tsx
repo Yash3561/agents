@@ -642,17 +642,14 @@ export default function Inbox() {
             {purchasedCount > 0 && <span style={{ color: "var(--color-success)" }}>● {purchasedCount} purchased</span>}
             {inCartCount > 0 && <span style={{ color: "var(--color-primary)" }}>● {inCartCount} in cart</span>}
             {escalatedCount > 0 && <span style={{ color: "var(--color-critical)" }}>● {escalatedCount} escalated</span>}
-            {liveCount > 0 && <span style={{ color: "var(--color-live)", fontWeight: 600 }}>⬤ {liveCount} live</span>}
+            {liveCount > 0 && <s-badge tone="success">{liveCount} live</s-badge>}
             {thumbsUp + thumbsDown > 0 && (
               <span title={`${thumbsUp} rated helpful, ${thumbsDown} rated not helpful`}>
                 {Math.round((thumbsUp / (thumbsUp + thumbsDown)) * 100)}% rated helpful ({thumbsUp} helpful, {thumbsDown} not helpful)
               </span>
             )}
             <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--color-live)", display: "inline-block" }} />
-                <span style={{ fontSize: "12px", color: "var(--color-neutral)" }}>Live</span>
-              </span>
+              <s-badge tone="success">Live</s-badge>
               <button
                 onClick={() => (document.getElementById("inbox-win") as unknown as { show(): void })?.show()}
                 style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, padding: "4px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer" }}
@@ -761,7 +758,7 @@ export default function Inbox() {
                         {/* Unread dot */}
                         <div style={{ width: 8, height: 8, borderRadius: "50%", background: isUnread ? "var(--color-primary)" : "transparent", marginTop: 8, flexShrink: 0 }} />
 
-                        {/* Channel icon */}
+                        {/* Channel icon: keep custom color by channel; s-avatar has no confirmed color prop. */}
                         <div style={{
                           width: 32, height: 32, borderRadius: "50%", flexShrink: 0, marginTop: 4,
                           background: isWA ? "var(--color-channel-whatsapp)" : "var(--color-primary)",
@@ -789,19 +786,13 @@ export default function Inbox() {
                               {(conv.firstUserMessage ?? "").slice(0, 60) || "No messages yet"}
                             </span>
                             {needsReply && (
-                              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-warning-text)", background: "var(--color-warning-subdued)", border: "1px solid var(--color-warning-border)", borderRadius: 4, padding: "2px 8px", flexShrink: 0 }}>
-                                Needs reply
-                              </span>
+                              <s-badge tone="warning">Needs reply</s-badge>
                             )}
                             {aiResolved && (
-                              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-success-text)", background: "var(--color-success-subdued)", border: "1px solid var(--color-success-border)", borderRadius: 4, padding: "2px 8px", flexShrink: 0 }}>
-                                AI ✓
-                              </span>
+                              <s-badge tone="success">AI ✓</s-badge>
                             )}
                             {hasRevenue && (
-                              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-warning)", background: "var(--color-warning-subdued)", border: "1px solid var(--color-warning-border)", borderRadius: 4, padding: "2px 8px", flexShrink: 0 }}>
-                                ${((conv.orderRevenueCents ?? 0) / 100).toFixed(0)}
-                              </span>
+                              <s-badge tone="success">${((conv.orderRevenueCents ?? 0) / 100).toFixed(0)}</s-badge>
                             )}
                           </div>
                         </div>
@@ -825,8 +816,19 @@ export default function Inbox() {
         {/* ── Center Panel: Transcript ──────────────────────────────────────── */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
           {!selected ? (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-neutral-light)", fontSize: "14px" }}>
-              Select a conversation to view the transcript
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 24px", background: "var(--color-surface)" }}>
+              <div style={{ maxWidth: 360, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 56, height: 56, borderRadius: "var(--radius-base)", background: "var(--color-primary-subdued)", border: "1px solid var(--color-primary-border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-primary)" }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                    <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v5A3.5 3.5 0 0 1 15.5 15H11l-4.5 4v-4A3.5 3.5 0 0 1 5 11.5v-5Z" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M9 8h6M9 11h4" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)" }}>Select a conversation</div>
+                <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--color-neutral)" }}>
+                  Choose a conversation from the list to view the transcript and reply.
+                </div>
+              </div>
             </div>
           ) : (
             <>
@@ -842,11 +844,11 @@ export default function Inbox() {
                 </span>
                 {/* Status badge — 3 states; isAiPaused conveyed by Resume button label */}
                 {selected.resolved ? (
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-success-text)", background: "var(--color-success-subdued)", border: "1px solid var(--color-success-border)", borderRadius: 4, padding: "2px 8px" }}>Resolved</span>
+                  <s-badge tone="success">Resolved</s-badge>
                 ) : selected.escalated ? (
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-warning-text)", background: "var(--color-warning-subdued)", border: "1px solid var(--color-warning-border)", borderRadius: 4, padding: "2px 8px" }}>Needs Reply</span>
+                  <s-badge tone="warning">Needs Reply</s-badge>
                 ) : (
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-primary)", background: "var(--color-primary-subdued)", border: "1px solid var(--color-primary-border)", borderRadius: 4, padding: "2px 8px" }}>AI Handling</span>
+                  <s-badge tone="info">AI Handling</s-badge>
                 )}
                 {/* Resolve — moved from sidebar */}
                 {!selected.resolved && (
@@ -912,8 +914,10 @@ export default function Inbox() {
 
               {/* AI paused banner */}
               {isAiPaused && (
-                <div style={{ padding: "8px 16px", background: "var(--color-warning-subdued)", borderBottom: "1px solid var(--color-warning-border)", fontSize: "12px", color: "var(--color-warning)" }}>
-                  AI is paused — you&apos;re handling this conversation. Replies you send are from you, not the AI.
+                <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
+                  <s-banner tone="warning">
+                    AI is paused — you&apos;re handling this conversation. Replies you send are from you, not the AI.
+                  </s-banner>
                 </div>
               )}
 
@@ -1070,9 +1074,20 @@ export default function Inbox() {
         {/* ── Right Panel: Customer Sidebar ─────────────────────────────────── */}
         <div style={{ width: 280, flexShrink: 0, overflowY: "auto", padding: "16px", borderLeft: "1px solid var(--color-border)" }}>
           {!selected ? (
-            <div style={{ fontSize: "13px", color: "var(--color-neutral-light)" }}>No conversation selected</div>
+            <div style={{ minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "24px 12px" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 40, height: 40, borderRadius: "var(--radius-base)", background: "var(--color-neutral-subdued)", border: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-neutral)" }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                    <path d="M7 8h10M7 12h6" strokeLinecap="round" />
+                    <path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--color-text)" }}>No conversation selected</div>
+                <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--color-neutral)" }}>Customer details appear here after you select a conversation.</div>
+              </div>
+            </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>{/* Phase 5: Customer → Phone → Cart → Order → Discount → Escalate → AI trace → Details → Train → Channel */}
+            <s-stack direction="block" gap="base">{/* Phase 5: Customer → Phone → Cart → Order → Discount → Escalate → AI trace → Details → Train → Channel */}
               {/* Customer — name at top, Shopify link below */}
               <div>
                 <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Customer</div>
@@ -1113,7 +1128,7 @@ export default function Inbox() {
 
               {/* Order card */}
               {selected.orderId && (
-                <div style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)", padding: "12px 12px" }}>
+                <s-box padding="base" background="subdued" border="base" borderRadius="base">
                   <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Order</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
@@ -1130,7 +1145,7 @@ export default function Inbox() {
                       View →
                     </a>
                   </div>
-                </div>
+                </s-box>
               )}
 
               {/* Discount code */}
@@ -1147,7 +1162,7 @@ export default function Inbox() {
                   <Form method="post">
                     <input type="hidden" name="intent" value="escalate" />
                     <input type="hidden" name="conversationId" value={selected.id} />
-                    <div style={{ width: "100%" }}><s-button type="submit" tone="critical">Escalate — Enable Reply</s-button></div>
+                    <div style={{ width: "100%" }}><s-button type="submit" variant="secondary">Escalate — Enable Reply</s-button></div>
                   </Form>
                 </div>
               )}
@@ -1155,8 +1170,9 @@ export default function Inbox() {
               {/* AI tool trace — collapsed by default */}
               {aiActions.length > 0 && (
                 <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
-                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--color-neutral-border)", textTransform: "uppercase", letterSpacing: "0.06em", listStyle: "none", display: "flex", alignItems: "center", gap: 4 }}>
-                    Tool calls · {aiActions.length}
+                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--color-neutral)", textTransform: "uppercase", letterSpacing: "0.06em", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span>Tool calls · {aiActions.length}</span>
+                    <span style={{ fontSize: 12, fontWeight: 500, letterSpacing: 0, textTransform: "none", color: "var(--color-neutral-light)" }}>Click to view ›</span>
                   </summary>
                   <div style={{ padding: "4px 12px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
                     {aiActions.map((a, i) => (
@@ -1240,7 +1256,7 @@ export default function Inbox() {
                   {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
                 </s-badge>
               </div>
-            </div>
+            </s-stack>
           )}
         </div>
 
