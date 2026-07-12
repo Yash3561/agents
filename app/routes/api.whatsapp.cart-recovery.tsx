@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { decryptToken, sendTemplate, sendTextMessage, workerToken } from "~/lib/whatsapp.server";
 import { redis } from "~/redis.server";
+import prisma from "~/db.server";
 
 /**
  * POST /api/whatsapp/cart-recovery
@@ -67,12 +68,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }],
       );
     } catch {
-      // Template not yet approved — fall back to session-window text
-      const message = `Hey! You left something in your cart at ${body.storeName}:\n\n${body.items.map(i => `• ${i}`).join("\n")}\n\nYour cart is saved:\n${body.checkoutUrl}\n\nReply STOP to unsubscribe.`;
-      await sendTextMessage(body.waPhoneNumberId, accessToken, body.phone, message);
+      // Template not yet approved — plain text only delivers inside the 24h
+      // session window, i.e. when this phone has actually messaged the store.
+      // A cold free-form send here would be an unconsented business-initiated
+      // message (and Meta silently drops it anyway) — skip instead.
+      const hasWaConversation = !!(await prisma.conversation.findUnique({
+        where: { shopDomain_sessionId: { shopDomain: body.shop, sessionId: `whatsapp_${body.phone}` } },
+        select: { id: true },
+      }));
+      if (hasWaConversation) {
+        const message = `Hey! You left something in your cart at ${body.storeName}:\n\n${body.items.map(i => `• ${i}`).join("\n")}\n\nYour cart is saved:\n${body.checkoutUrl}\n\nReply STOP to unsubscribe.`;
+        await sendTextMessage(body.waPhoneNumberId, accessToken, body.phone, message);
+      }
     }
-  } catch {
-    // best-effort
+  } catch (err) {
+    console.error(`[cart-recovery] Send failed for checkout ${body.checkoutId}:`, err);
+    // Real failure (redis/decrypt/Meta API down) — 500 so QStash retries,
+    // instead of silently dropping the recovery message.
+    return new Response(null, { status: 500 });
   }
 
   return new Response(null, { status: 200 });

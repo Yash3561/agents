@@ -3,6 +3,8 @@ import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import type { InboxActionResult } from "~/lib/inbox.server";
 
+const WHATSAPP_MAX_CHARS = 4096;
+
 interface ReplyBoxProps {
   conversationId: string;
   channel?: string | null;
@@ -22,6 +24,11 @@ export function ReplyBox({ conversationId, channel, quickReplies }: ReplyBoxProp
 
   const isSubmitting = replyFetcher.state === "submitting";
   const filteredMacros = quickReplies.filter((r) => r.toLowerCase().includes(macroQuery.toLowerCase()));
+
+  // WhatsApp free-form messages are capped at 4096 chars by Meta's API — block
+  // send client-side rather than let the merchant find out via a failed send.
+  const isWhatsApp = channel === "whatsapp" && replyMode === "reply";
+  const isOverLimit = isWhatsApp && replyText.length > WHATSAPP_MAX_CHARS;
 
   // Clear textarea and reset mode only after a successful send — an error
   // leaves the draft in place so the merchant doesn't lose what they typed.
@@ -45,7 +52,7 @@ export function ReplyBox({ conversationId, channel, quickReplies }: ReplyBoxProp
   }, [replyFetcher.state, replyFetcher.data, shopify]);
 
   function submit() {
-    if (!replyText.trim()) return;
+    if (!replyText.trim() || isOverLimit) return;
     replyFetcher.submit(
       { intent: "reply", conversationId, isNote: replyMode === "note" ? "true" : "false", message: replyText },
       { method: "POST" },
@@ -131,11 +138,11 @@ export function ReplyBox({ conversationId, channel, quickReplies }: ReplyBoxProp
           )}
           <button
             type="button"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isOverLimit}
             onClick={submit}
             style={{
               padding: "8px 16px",
-              background: isSubmitting ? "var(--color-neutral)" : replyMode === "note" ? "var(--color-warning)" : "var(--color-selection)",
+              background: isSubmitting || isOverLimit ? "var(--color-neutral)" : replyMode === "note" ? "var(--color-warning)" : "var(--color-selection)",
               color: "var(--color-text-inverse)", border: "none",
               borderRadius: "var(--radius-sm)",
               cursor: isSubmitting ? "wait" : "pointer",
@@ -146,8 +153,13 @@ export function ReplyBox({ conversationId, channel, quickReplies }: ReplyBoxProp
             {isSubmitting ? "Saving…" : replyMode === "note" ? "Save Note" : "Send"}
           </button>
         </div>
-        <div style={{ fontSize: "12px", color: "var(--color-neutral-light)", marginTop: "4px" }}>
-          {replyMode === "note" ? "Internal only — not sent to customer or AI" : channel === "whatsapp" ? "Sends via WhatsApp to customer" : "Stored in conversation — AI picks up on next reply"}
+        <div style={{ fontSize: "12px", color: isOverLimit ? "var(--color-critical)" : "var(--color-neutral-light)", marginTop: "4px", display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <span>
+            {replyMode === "note" ? "Internal only — not sent to customer or AI" : channel === "whatsapp" ? "Sends via WhatsApp to customer" : "Stored in conversation — AI picks up on next reply"}
+          </span>
+          {isWhatsApp && replyText.length > WHATSAPP_MAX_CHARS - 500 && (
+            <span>{replyText.length}/{WHATSAPP_MAX_CHARS}{isOverLimit ? " — too long to send" : ""}</span>
+          )}
         </div>
       </div>
     </div>

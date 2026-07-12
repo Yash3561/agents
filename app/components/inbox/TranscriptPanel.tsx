@@ -43,6 +43,12 @@ export function TranscriptPanel({
   const msgs = Array.isArray(selected.messages) ? (selected.messages as unknown as ChatMessage[]) : [];
   const isSelectedFlagged = Boolean((selected.qaMeta as { flagged?: boolean } | null)?.flagged);
 
+  // WhatsApp only allows free-form replies within 24h of the customer's last
+  // inbound message — outside that window, Meta silently rejects the send and
+  // only template messages work. Warn before the merchant hits that wall.
+  const lastUserMsg = selected.channel === "whatsapp" ? [...msgs].reverse().find((m) => m.role === "user" && m.timestamp != null) : undefined;
+  const isOutsideWaWindow = lastUserMsg?.timestamp != null && Date.now() - lastUserMsg.timestamp > 24 * 60 * 60 * 1000;
+
   const fmtMoney = (dollars: number) =>
     new Intl.NumberFormat("en", { style: "currency", currency: currencyCode }).format(dollars);
   const agentTraceArr = Array.isArray(selected.agentTrace) ? (selected.agentTrace as string[]) : [];
@@ -167,7 +173,16 @@ export function TranscriptPanel({
       </div>
 
       {(selected.escalated || isAiPaused) && !selected.resolved ? (
-        <ReplyBox conversationId={selected.id} channel={selected.channel} quickReplies={quickReplies} />
+        <>
+          {isOutsideWaWindow && (
+            <div style={{ padding: "8px 16px", borderTop: "1px solid var(--color-border)" }}>
+              <s-banner tone="warning">
+                Outside the 24-hour WhatsApp window — this customer hasn&apos;t messaged in over a day, so a free-form reply won&apos;t deliver. Only a pre-approved template message can reach them now.
+              </s-banner>
+            </div>
+          )}
+          <ReplyBox conversationId={selected.id} channel={selected.channel} quickReplies={quickReplies} />
+        </>
       ) : !selected.resolved ? (
         <div style={{ padding: "12px 16px", borderTop: "1px solid var(--color-border)", background: "var(--color-surface)", fontSize: "12px", color: "var(--color-neutral-light)" }}>
           AI is handling this conversation · Escalate from sidebar to reply manually

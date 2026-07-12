@@ -24,6 +24,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const { redis } = await import("~/redis.server");
     if (await redis.exists(`wa:optout:${phone}`)) return new Response();
 
+    // Shopify retries webhook delivery on failure/timeout — guard against
+    // sending the confirmation/upsell/COD-nudge messages twice for the same order.
+    const orderIdGuard = payload.id != null ? String(payload.id) : undefined;
+    if (orderIdGuard) {
+      const isNew = await redis.set(`wa:sent:orderconfirm:${orderIdGuard}`, 1, "EX", 172800, "NX");
+      if (isNew === null) return new Response();
+    }
+
     const accessToken = decryptToken(merchant.waAccessToken);
     const storeName = shop.replace(".myshopify.com", "");
     const orderName = payload.name as string | undefined ?? `#${payload.order_number}`;

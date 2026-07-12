@@ -32,6 +32,11 @@ export async function action({ request }: ActionFunctionArgs) {
     if (await redis.exists(`wa:optout:${body.phone}`)) {
       return new Response("opted out", { status: 200 });
     }
+    // QStash guarantees at-least-once delivery — dedup by phone+order so a retry
+    // (or duplicate callback) doesn't send the customer the review request twice.
+    const dedupKey = `wa:review:sent:${body.phone}:${body.orderName}:${body.shopDomain}`;
+    const isNew = await redis.set(dedupKey, "1", "EX", 7 * 24 * 60 * 60, "NX");
+    if (isNew === null) return new Response("already sent", { status: 200 });
     await sendReplyButtons(
       body.waPhoneNumberId,
       decryptToken(body.waAccessToken),

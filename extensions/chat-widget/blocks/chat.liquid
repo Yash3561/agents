@@ -31,8 +31,15 @@
     the high-cart-value free-shipping discount.
   endcomment
   assign np_cart_cents = cart.total_price
+
+  comment
+    ponytail: website widget paused to focus on WhatsApp-only for now.
+    Flip this back to true to re-enable the storefront widget.
+  endcomment
+  assign np_enabled = false
 -%}
 
+{%- if np_enabled -%}
 <script>
   window.__neonping_cfg = {
     shop:                 {{ shop.permanent_domain | json }},
@@ -51,6 +58,7 @@
 </script>
 
 <link rel="stylesheet" href="{{ 'neonping-widget.css' | asset_url }}">
+{%- endif -%}
 
 {% schema %}
 {

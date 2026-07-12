@@ -4,7 +4,9 @@ import { redis } from "~/redis.server";
 const WA_STATE_TTL_SECONDS = 10 * 60;
 
 function stateSecret(): string {
-  return process.env.SHOPIFY_API_SECRET || process.env.SESSION_SECRET || process.env.SHOPIFY_API_KEY || "dev-wa-state-secret";
+  const secret = process.env.SHOPIFY_API_SECRET || process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SHOPIFY_API_SECRET or SESSION_SECRET is required for WhatsApp OAuth state");
+  return secret;
 }
 
 function signState(shop: string, nonce: string): string {
@@ -41,9 +43,13 @@ export async function verifyWhatsAppOAuthState(state: string | null): Promise<st
   if (!safeEqual(sig, expected)) return null;
 
   const nonceKey = `wa:oauth:${shop}:${nonce}`;
-  const exists = await redis.get(nonceKey).catch(() => null);
+  const exists = await redis.getdel(nonceKey).catch(() => null);
   if (!exists) return null;
-  await redis.del(nonceKey).catch(() => null);
 
   return shop;
+}
+
+export async function clearWhatsAppOAuthStates(shop: string): Promise<void> {
+  const keys = await redis.keys(`wa:oauth:${shop}:*`).catch(() => []);
+  if (keys.length) await redis.del(...keys).catch(() => null);
 }

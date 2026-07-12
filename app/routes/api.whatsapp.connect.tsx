@@ -13,9 +13,9 @@ import prisma from "~/db.server";
 import { encryptToken, sendTextMessage, registerDefaultTemplates } from "~/lib/whatsapp.server";
 import { verifyWhatsAppOAuthState } from "~/lib/whatsapp-oauth-state.server";
 
-const close = (msg: string) =>
+const close = (msg: string, status: "success" | "error" = "error") =>
   new Response(
-    `<!DOCTYPE html><html><body><script>window.close();</script><p>${msg}</p></body></html>`,
+    `<!DOCTYPE html><html><body><script>if(window.opener){window.opener.postMessage({type:'WA_CONNECT_${status.toUpperCase()}'},'*');}window.close();</script><p>${msg}</p></body></html>`,
     { headers: { "Content-Type": "text/html" } },
   );
 
@@ -24,7 +24,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const code = url.searchParams.get("code");
   const shop = await verifyWhatsAppOAuthState(url.searchParams.get("state"));
 
-  if (!code || !shop) return close("Missing params. You can close this window.");
+  if (!code || !shop) return close("Connection failed or expired. You can close this window.");
+  if (!process.env.WHATSAPP_APP_ID || !process.env.WHATSAPP_APP_SECRET || !process.env.SHOPIFY_APP_URL) {
+    console.error("[wa-connect] missing WhatsApp OAuth environment configuration");
+    return close("Connection is unavailable. Please try again later.");
+  }
 
   const redirectUri = `${process.env.SHOPIFY_APP_URL}/api/whatsapp/connect`;
 
@@ -97,10 +101,5 @@ export async function loader({ request }: LoaderFunctionArgs) {
     } catch { /* non-fatal, don't block the connect flow */ }
   }
 
-  const phone = displayPhone ?? "";
-  const phoneLiteral = JSON.stringify(phone);
-  return new Response(
-    `<!DOCTYPE html><html><body><script>if(window.opener){window.opener.postMessage({type:'WA_CONNECTED',phone:${phoneLiteral}},'*');}window.close();</script><p>Connected! Closing...</p></body></html>`,
-    { headers: { "Content-Type": "text/html" } },
-  );
+  return close("Connected! Closing...", "success");
 }

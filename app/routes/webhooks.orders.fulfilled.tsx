@@ -35,6 +35,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const fulfillments = payload.fulfillments as Array<Record<string, unknown>> | undefined ?? [];
     const trackingUrl = fulfillments[0]?.tracking_url as string | undefined;
 
+    // Shopify retries webhook delivery on failure/timeout — guard against
+    // sending the shipping notification twice for the same fulfillment event.
+    // Keyed by order id + fulfillment ids so a *later, distinct* fulfillment
+    // (partial shipment) still notifies, but a redelivery of the same event doesn't.
+    const orderIdGuard = payload.id != null ? String(payload.id) : undefined;
+    const fulfillmentIds = fulfillments.map((f) => String(f.id ?? "")).join(",");
+    if (orderIdGuard) {
+      const isNew = await redis.set(`wa:sent:shipped:${orderIdGuard}:${fulfillmentIds}`, 1, "EX", 172800, "NX");
+      if (isNew === null) return new Response();
+    }
+
     const message = trackingUrl
       ? `Your order ${orderName} from ${storeName} has shipped! Track it here:\n${trackingUrl}`
       : `Your order ${orderName} from ${storeName} has shipped! It's on its way.`;

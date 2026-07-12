@@ -223,7 +223,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const isNew = await redis.set(`wamsg:${messageId}`, 1, "EX", 86400, "NX");
     if (isNew === null) return new Response("OK", { status: 200 });
 
-    // STOP compliance — legal requirement; must run before any other processing
+    // STOP compliance — legal requirement; must run before any other processing.
+    // Opt-out check applies to EVERY inbound message type (text, button tap, list
+    // reply) — it was previously scoped to `if (textBody)` only, which let an
+    // opted-out user keep receiving replies by tapping buttons instead of typing.
     const STOP_RE = /^(stop|unsubscribe|opt[\s-]?out|cancel|quit|end)\s*$/i;
     const START_RE = /^start\s*$/i;
     if (textBody) {
@@ -243,10 +246,10 @@ export async function action({ request }: ActionFunctionArgs) {
         ).catch(() => null);
         return new Response("OK", { status: 200 });
       }
-      if (await redis.exists(`wa:optout:${from}`)) {
-        logGuardrail("optout_blocked", "opted_out", from, shopDomain);
-        return new Response("OK", { status: 200 });
-      }
+    }
+    if (await redis.exists(`wa:optout:${from}`)) {
+      logGuardrail("optout_blocked", "opted_out", from, shopDomain);
+      return new Response("OK", { status: 200 });
     }
 
     // Per-phone rate limit — 20 msgs/hour prevents one user burning merchant's quota
@@ -637,7 +640,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Human handoff detection — the escalate_human tool is the reliable signal (fires on an
     // explicit "talk to a human" ask); the regex is a fallback net for replies that read as
     // stuck/unhelpful even when the model didn't call the tool.
-    const NEEDS_HUMAN_RE = /contact support|order not found|unable to help|i['u2019]m not sure/i;
+    const NEEDS_HUMAN_RE = /contact support|order not found|unable to help|i['’]m not sure/i;
     const needsHuman = !!result.escalate_to_human || NEEDS_HUMAN_RE.test(replyText);
 
     // Output safety filter + PII scrub before any send
@@ -854,7 +857,6 @@ export async function action({ request }: ActionFunctionArgs) {
       ).catch((err) => console.error("[wa-webhook] escalation email failed:", err));
     }
 
-    // Log for dedup — Meta may resend if we're slow; idempotency by messageId would require Redis key
     console.log(`[wa-webhook] handled msg ${messageId} from ${from} on ${shopDomain}`);
   } catch (err) {
     console.error("[wa-webhook] error:", err);

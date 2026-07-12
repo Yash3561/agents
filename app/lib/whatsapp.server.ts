@@ -2,6 +2,10 @@ import crypto from "crypto";
 
 const META_BASE = "https://graph.facebook.com/v19.0";
 
+// WhatsApp free-form text messages are rejected outright above this length —
+// truncate defensively so a long agent reply degrades instead of silently failing.
+const MAX_TEXT_LEN = 4096;
+
 // ---------------------------------------------------------------------------
 // Token encryption — AES-256-CBC, key from ENCRYPTION_KEY env var (hex, 32 bytes)
 // ---------------------------------------------------------------------------
@@ -72,7 +76,7 @@ export async function sendTextMessage(
       messaging_product: "whatsapp",
       to,
       type: "text",
-      text: { body: text },
+      text: { body: text.length > MAX_TEXT_LEN ? text.slice(0, MAX_TEXT_LEN - 1) + "…" : text },
     }),
   });
   if (!res.ok) {
@@ -85,7 +89,7 @@ export function normalizePhone(raw: string): string | null {
   if (!raw) return null;
   const digits = raw.replace(/\D/g, "");
   if (digits.length < 7) return null;
-  return raw.startsWith("+") ? `+${digits}` : `+${digits}`;
+  return `+${digits}`;
 }
 
 export async function sendReplyButtons(

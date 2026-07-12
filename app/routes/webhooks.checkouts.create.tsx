@@ -16,9 +16,7 @@ import { normalizePhone, workerToken } from "~/lib/whatsapp.server";
  * Checkouts with no line items are also skipped — nothing to recover.
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, payload, topic } = await authenticate.webhook(request);
-
-  console.log(`Received ${topic} webhook for ${shop}`);
+  const { shop, payload } = await authenticate.webhook(request);
 
   try {
     const customer = payload.customer as { id?: number | string } | null | undefined;

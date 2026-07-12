@@ -78,8 +78,9 @@ const CUSTOM_PATH_RE = /^\/[a-zA-Z0-9\-_/.*]*$/;
 const HEX_RE = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
 type SettingsTab = "widget" | "ai" | "support" | "channels";
 
+// ponytail: Widget tab hidden while we focus on WhatsApp-only — re-add
+// { id: "widget", label: "Widget" } to bring the storefront widget settings back.
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: "widget", label: "Widget" },
   { id: "ai", label: "AI Behavior" },
   { id: "support", label: "Support" },
   { id: "channels", label: "Channels & Payments" },
@@ -141,7 +142,7 @@ export default function Settings() {
   const shopify = useAppBridge();
   const formRef = useRef<HTMLFormElement>(null);
   const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState<SettingsTab>(searchParams.has("whatsapp") ? "channels" : "widget");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(searchParams.has("whatsapp") ? "channels" : "ai");
 
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
   const [botName, setBotName] = useState(merchant.botName || "NeonPing");
@@ -337,15 +338,50 @@ export default function Settings() {
                     shopify.toast.show("WhatsApp connection is unavailable: WHATSAPP_APP_ID is not configured.", { isError: true });
                     return;
                   }
+                  if (!appUrl) {
+                    shopify.toast.show("WhatsApp connection is unavailable: SHOPIFY_APP_URL is not configured.", { isError: true });
+                    return;
+                  }
+                  const appOrigin = new URL(appUrl).origin;
                   const redirectUri = encodeURIComponent(`${appUrl}/api/whatsapp/connect`);
                   const scope = encodeURIComponent("whatsapp_business_management,whatsapp_business_messaging");
                   const extras = encodeURIComponent(JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
                   const state = encodeURIComponent(waOAuthState);
                   const url = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${waAppId}&display=popup&extras=${extras}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${state}`;
                   const popup = window.open(url, "waConnect", "width=660,height=750,scrollbars=yes");
-                  // Poll until the popup closes, then reload to pick up waConnectedAt from DB.
+                  if (!popup) {
+                    shopify.toast.show("WhatsApp popup was blocked. Allow popups and try again.", { isError: true });
+                    return;
+                  }
+                  let completed = false;
+
+                  function cleanup() {
+                    clearInterval(timer);
+                    window.removeEventListener("message", handleMessage);
+                  }
+
+                  function handleMessage(event: MessageEvent) {
+                    if (event.origin !== appOrigin) return;
+                    if (event.data?.type === "WA_CONNECT_SUCCESS") {
+                      completed = true;
+                      cleanup();
+                      window.location.reload();
+                    }
+                    if (event.data?.type === "WA_CONNECT_ERROR") {
+                      completed = true;
+                      cleanup();
+                      shopify.toast.show("WhatsApp connection failed or expired. Please try again.", { isError: true });
+                    }
+                  }
+
+                  window.addEventListener("message", handleMessage);
                   const timer = setInterval(() => {
-                    if (popup?.closed) { clearInterval(timer); window.location.reload(); }
+                    if (popup.closed) {
+                      cleanup();
+                      if (!completed) {
+                        shopify.toast.show("WhatsApp connection was not completed.", { isError: true });
+                      }
+                    }
                   }, 500);
                 }}
                 disabled={!waAppId}
