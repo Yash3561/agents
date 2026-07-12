@@ -96,23 +96,23 @@ describe("product descriptions are stripped of HTML before reaching the agent", 
   });
 });
 
-describe("out-of-stock products are filtered out of search results", () => {
-  it("drops a product whose only variant is unavailable", async () => {
+describe("search results preserve active products that Shopify marks unavailable", () => {
+  it("keeps a product whose only variant is unavailable-looking for oversell/backorder stores", async () => {
     callMcpToolMock.mockResolvedValue({
       structuredContent: {
         products: [
           rawProduct("gid://1", "In Stock Item", true),
-          rawProduct("gid://2", "Out Of Stock Item", false),
+          rawProduct("gid://2", "Oversell Item", false),
         ],
       },
     });
 
     const result = await searchCatalog(SHOP, "anything");
-    expect(result.products.map((p) => p.title)).toEqual(["In Stock Item"]);
-    expect(result.total).toBe(1);
+    expect(result.products.map((p) => p.title)).toEqual(["In Stock Item", "Oversell Item"]);
+    expect(result.total).toBe(2);
   });
 
-  it("keeps a product if at least one variant is available", async () => {
+  it("keeps all variants so WhatsApp can still offer real size/color choices", async () => {
     callMcpToolMock.mockResolvedValue({
       structuredContent: {
         products: [{
@@ -128,5 +128,6 @@ describe("out-of-stock products are filtered out of search results", () => {
 
     const result = await searchCatalog(SHOP, "anything");
     expect(result.products).toHaveLength(1);
+    expect(result.products[0].variants.map((v) => v.title)).toEqual(["Small", "Large"]);
   });
 });

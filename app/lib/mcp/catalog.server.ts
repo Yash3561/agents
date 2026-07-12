@@ -178,9 +178,10 @@ export async function searchCatalog(
   const raw = result.structuredContent;
   const rawProducts = (raw.products as Array<Record<string, unknown>>) ?? [];
 
-  // Shopify's search returns out-of-stock products too — never recommend something the
-  // customer can't actually buy. Keep a product only if at least one variant is available.
-  const mappedProducts = rawProducts.map(mapProduct).filter((p) => p.variants.some((v) => v.available));
+  // Shopify merchants can intentionally sell through zero/negative inventory
+  // (oversell/backorder). Storefront MCP may still mark those variants unavailable,
+  // so do not hide active catalog results based on inventory-derived availability.
+  const mappedProducts = rawProducts.map(mapProduct);
 
   const searchResult: CatalogSearchResult = {
     products: mappedProducts,

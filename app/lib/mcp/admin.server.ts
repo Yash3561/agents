@@ -301,6 +301,7 @@ export async function getCustomerOrdersAdmin(
           orders(first: 5, sortKey: CREATED_AT, reverse: true) {
             edges { node {
               name createdAt fulfillmentStatus
+              financialStatus: displayFinancialStatus
               totalPriceV2 { amount currencyCode }
               lineItems(first: 3) { edges { node { title quantity } } }
             }}

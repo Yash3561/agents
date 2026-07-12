@@ -740,18 +740,20 @@ export async function action({ request }: ActionFunctionArgs) {
               // ponytail: no outer wbSlice — fields are already individually bounded; sendCarousel clips to 160 anyway
               return [shortTitle, descLine, boldPrice].filter(Boolean).join("\n");
             })();
-        // Variant detection — cache variants for picker; variantId prefix drives button payload
-        const availableVariants = (p.variants ?? []).filter((v) => v.available);
+        // Variant detection — cache variants for picker; variantId prefix drives button payload.
+        // Do not filter by availability: active Shopify products may be oversold/backordered
+        // with zero or negative inventory while still being intentionally purchasable.
+        const variants = p.variants ?? [];
         let variantId: string;
-        if (availableVariants.length > 1) {
+        if (variants.length > 1) {
           void redis.set(
             `wa:variants:${p.id}`,
-            JSON.stringify(availableVariants.map((v) => ({ id: v.id, title: v.title, price: v.price, currency: v.currency }))),
+            JSON.stringify(variants.map((v) => ({ id: v.id, title: v.title, price: v.price, currency: v.currency }))),
             "EX", 3600,
           ).catch(() => null);
           variantId = `select_variant|${p.id}|${p.url ?? ""}`;
         } else {
-          variantId = `${availableVariants[0]?.id ?? p.variants?.[0]?.id ?? p.id}|${p.url ?? ""}`;
+          variantId = `${variants[0]?.id ?? p.id}|${p.url ?? ""}`;
         }
         const productRating = ratingsMap.get(p.id);
         const ratingLine = productRating
