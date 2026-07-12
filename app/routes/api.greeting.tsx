@@ -9,6 +9,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { fetchCustomerMemory } from "~/lib/agents/memory.server";
 import { getStorefrontAccessToken } from "~/lib/auth.server";
+import { checkChatRateLimit, getClientIp } from "~/lib/rate-limit.server";
 import prisma from "~/db.server";
 
 const ABANDONED_MIN_AGE_MS = 60 * 60 * 1000; // 1 hour — don't nag mid-session
@@ -44,6 +45,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const liquidFirstName = url.searchParams.get("first_name") || undefined;
 
   if (!shop || !customerId) {
+    return new Response(JSON.stringify({ greeting: null }), { headers });
+  }
+
+  // customer_id is client-supplied and unverified (no access-token check here) — an
+  // enumerable GID could otherwise be used to scrape PII (name/cart) at unbounded
+  // rate, each hit also costing an Admin API call. Reuse the chat endpoint's
+  // per-IP/per-shop limiter to bound that, same as api.chat.tsx does.
+  const rateLimit = await checkChatRateLimit(shop, getClientIp(request));
+  if (!rateLimit.allowed) {
     return new Response(JSON.stringify({ greeting: null }), { headers });
   }
 

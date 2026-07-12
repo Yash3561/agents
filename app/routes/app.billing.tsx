@@ -230,15 +230,18 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
+// ponytail: widget-specific line items removed while storefront widget is
+// paused for WhatsApp-only focus — restore "AI-powered chat widget on your
+// storefront" and "Widget customization (color, position, greeting)" if it
+// comes back.
 const ALL_FEATURES = [
-  "AI-powered chat widget on your storefront",
+  "AI-powered WhatsApp shopping assistant",
   "Live catalog search (always real-time, never stale)",
   "Personalized product recommendations",
   "Customer memory & personalized greetings",
   "Abandoned cart recovery",
   "Multi-tier discount negotiation",
   "Revenue attribution dashboard",
-  "Widget customization (color, position, greeting)",
   "GDPR compliant",
 ];
 
@@ -479,7 +482,7 @@ export default function BillingPage() {
               {activeSubscription && <s-badge tone="warning">Pending activation</s-badge>}
             </div>
             <s-text tone="neutral">
-              Choose a plan below to activate your NeonPing chat widget. All plans include a 7-day free trial — no charge until the trial ends.
+              Choose a plan below to activate your NeonPing AI assistant. All plans include a 7-day free trial — no charge until the trial ends.
             </s-text>
           </s-box>
         ) : (

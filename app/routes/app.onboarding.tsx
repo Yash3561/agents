@@ -8,6 +8,7 @@ import prisma from "../db.server";
 import { PLAN_CONFIG, PLAN_LIMITS } from "../lib/plans";
 import { sendTestMessage } from "../lib/test-chat";
 import { WidgetPreview } from "~/components/WidgetPreview";
+import { createWhatsAppOAuthState } from "~/lib/whatsapp-oauth-state.server";
 
 const VOICE_PRESETS = [
   {
@@ -68,7 +69,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // fall back to false — merchant sees plan cards, worst case re-subscribing is blocked by Shopify
   }
 
-  return { shop, merchant, hasShopifySub, appUrl: process.env.SHOPIFY_APP_URL ?? "" };
+  return {
+    shop,
+    merchant,
+    hasShopifySub,
+    appUrl: process.env.SHOPIFY_APP_URL ?? "",
+    // ponytail: Step 2 now connects WhatsApp instead of the (disabled) storefront
+    // widget — mirrors the connect flow in app.settings.tsx's Channels tab.
+    waAppId: process.env.WHATSAPP_APP_ID ?? "",
+    waOAuthState: await createWhatsAppOAuthState(shop),
+  };
 };
 
 const VALID_VOICES_ONBOARDING = new Set([
@@ -267,7 +277,7 @@ const ONBOARDING_PLANS: Array<{
 ];
 
 const PLAN_FEATURES = [
-  "AI shopping assistant on your storefront",
+  "AI shopping assistant on WhatsApp",
   "Abandoned cart recovery",
   "Personalized customer greetings",
   "Live catalog search (always real-time)",
@@ -392,14 +402,14 @@ function OnboardingFreePlanCard({ onContinue, isLoading }: { onContinue: () => v
         <span style={{ fontSize: "14px", color: "#6d7175" }}> / month</span>
       </div>
       <div style={{ fontSize: "13px", color: "#6d7175", fontStyle: "italic" }}>
-        Start with the widget live and upgrade when you need more volume
+        Start on WhatsApp and upgrade when you need more volume
       </div>
       <div style={{ fontSize: "13px", fontWeight: 600, color: "#6d7175" }}>
         {PLAN_LIMITS.free} conversations / mo
       </div>
       <ul style={{ margin: "4px 0 0", paddingLeft: "18px", color: "#202223", fontSize: "13px" }}>
-        <li style={{ marginBottom: "4px" }}>AI shopping assistant on your storefront</li>
-        <li style={{ marginBottom: "4px" }}>Basic storefront chat activation</li>
+        <li style={{ marginBottom: "4px" }}>AI shopping assistant on WhatsApp</li>
+        <li style={{ marginBottom: "4px" }}>Basic WhatsApp chat activation</li>
         <li style={{ marginBottom: "4px" }}>Upgrade any time from Billing</li>
       </ul>
       <div style={{ marginTop: "auto", paddingTop: "12px" }}>
@@ -434,7 +444,7 @@ function OnboardingFreePlanCard({ onContinue, isLoading }: { onContinue: () => v
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function Onboarding() {
-  const { shop, merchant, hasShopifySub, appUrl } = useLoaderData<typeof loader>();
+  const { shop, merchant, hasShopifySub, appUrl, waAppId, waOAuthState } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const revalidator = useRevalidator();
@@ -444,7 +454,6 @@ export default function Onboarding() {
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
   const [brandVoice, setBrandVoice] = useState(merchant.brandVoice);
-  const [themeConfirmed, setThemeConfirmed] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [choosingPlan, setChoosingPlan] = useState<string | null>(null);
@@ -524,9 +533,62 @@ export default function Onboarding() {
     }
   };
 
-  const storeHandle = shop.replace(".myshopify.com", "");
-  const themeEditorUrl = `https://admin.shopify.com/store/${storeHandle}/themes/current/editor?context=apps`;
   const isBillingLoading = fetcher.state !== "idle" && choosingPlan !== null;
+
+  // ponytail: connect flow copied from app.settings.tsx's Channels tab (same
+  // popup + postMessage handshake) — no shared helper exists yet, extract one
+  // if a third caller shows up.
+  const connectWhatsApp = () => {
+    if (!waAppId) {
+      shopify.toast.show("WhatsApp connection is unavailable: WHATSAPP_APP_ID is not configured.", { isError: true });
+      return;
+    }
+    if (!appUrl) {
+      shopify.toast.show("WhatsApp connection is unavailable: SHOPIFY_APP_URL is not configured.", { isError: true });
+      return;
+    }
+    const appOrigin = new URL(appUrl).origin;
+    const redirectUri = encodeURIComponent(`${appUrl}/api/whatsapp/connect`);
+    const scope = encodeURIComponent("whatsapp_business_management,whatsapp_business_messaging");
+    const extras = encodeURIComponent(JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
+    const state = encodeURIComponent(waOAuthState);
+    const url = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${waAppId}&display=popup&extras=${extras}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${state}`;
+    const popup = window.open(url, "waConnect", "width=660,height=750,scrollbars=yes");
+    if (!popup) {
+      shopify.toast.show("WhatsApp popup was blocked. Allow popups and try again.", { isError: true });
+      return;
+    }
+    let completed = false;
+
+    function cleanup() {
+      clearInterval(timer);
+      window.removeEventListener("message", handleMessage);
+    }
+
+    function handleMessage(event: MessageEvent) {
+      if (event.origin !== appOrigin) return;
+      if (event.data?.type === "WA_CONNECT_SUCCESS") {
+        completed = true;
+        cleanup();
+        window.location.reload();
+      }
+      if (event.data?.type === "WA_CONNECT_ERROR") {
+        completed = true;
+        cleanup();
+        shopify.toast.show("WhatsApp connection failed or expired. Please try again.", { isError: true });
+      }
+    }
+
+    window.addEventListener("message", handleMessage);
+    const timer = setInterval(() => {
+      if (popup.closed) {
+        cleanup();
+        if (!completed) {
+          shopify.toast.show("WhatsApp connection was not completed.", { isError: true });
+        }
+      }
+    }, 500);
+  };
 
   return (
     <s-page heading="Welcome to NeonPing">
@@ -603,39 +665,29 @@ export default function Onboarding() {
       )}
 
       {step === 2 && (
-        <s-section heading="Step 2 of 3 — Go live">
+        <s-section heading="Step 2 of 3 — Go live on WhatsApp">
           <s-paragraph>
-            Enable the NeonPing chat widget on your storefront by opening your theme editor
-            and turning on the App Embed.
+            NeonPing runs on WhatsApp Business. Connect your WhatsApp Business number so
+            customers can chat with your AI assistant there.
           </s-paragraph>
-          <div style={{ margin: "12px 0" }}>
-            <a
-              href={themeEditorUrl}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: "inline-block",
-                padding: "10px 20px",
-                background: "#1a1a1a",
-                color: "#ffffff",
-                borderRadius: "8px",
-                fontWeight: 700,
-                fontSize: "14px",
-                textDecoration: "none",
-              }}
-            >
-              Open Theme Editor →
-            </a>
-          </div>
-          <s-text tone="neutral">
-            In the theme editor: click <strong>Add block</strong> → find <strong>NeonPing Chat Widget</strong> → click <strong>Save</strong>. That{"'"}s it — the widget is live on your store.
-          </s-text>
 
-          <s-checkbox
-            label="I've added the widget to my theme"
-            checked={themeConfirmed}
-            onChange={(e: Event) => setThemeConfirmed((e.target as HTMLInputElement).checked)}
-          ></s-checkbox>
+          {merchant.waConnectedAt ? (
+            <div style={{ margin: "12px 0", display: "flex", alignItems: "center", gap: "12px" }}>
+              <s-badge tone="success">Connected</s-badge>
+              <s-text>{merchant.waPhone ?? merchant.waPhoneNumberId}</s-text>
+            </div>
+          ) : (
+            <div style={{ margin: "12px 0" }}>
+              <s-button type="button" variant="primary" onClick={connectWhatsApp} disabled={!waAppId}>
+                Connect WhatsApp Business
+              </s-button>
+              {!waAppId && (
+                <p style={{ fontSize: 12, color: "#b42318", margin: "8px 0 0" }}>
+                  WhatsApp connection is unavailable because WHATSAPP_APP_ID is not configured.
+                </p>
+              )}
+            </div>
+          )}
 
           <s-button onClick={runTest} {...(testLoading ? { loading: true } : {})}>
             Send test message
@@ -650,12 +702,12 @@ export default function Onboarding() {
             <s-button onClick={() => goToStep(1)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={() => goToStep(3)} variant="primary" disabled={!themeConfirmed || fetcher.state !== "idle"}>
+            <s-button onClick={() => goToStep(3)} variant="primary" disabled={!merchant.waConnectedAt || fetcher.state !== "idle"}>
               Continue
             </s-button>
           </s-stack>
-          {!themeConfirmed && (
-            <s-banner tone="warning">Please confirm you&apos;ve added the widget to your theme before continuing.</s-banner>
+          {!merchant.waConnectedAt && (
+            <s-banner tone="warning">Please connect WhatsApp Business before continuing.</s-banner>
           )}
         </s-section>
       )}

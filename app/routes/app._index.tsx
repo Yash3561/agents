@@ -575,7 +575,6 @@ export default function Index() {
     usage,
     routingData,
     dailyData,
-    shopDomain,
     conversionByRoute,
     topIntents,
     currencyCode,
@@ -663,15 +662,16 @@ export default function Index() {
             }}
           >
             {[
+              // ponytail: storefront widget step swapped for WhatsApp connect since the
+              // widget is gated off (np_enabled = false) — re-add the theme-editor step
+              // if the widget comes back. Old href/copy:
+              // https://admin.shopify.com/store/{shop}/themes/current/editor?context=apps
               {
                 n: "1",
-                title: "Install widget",
-                desc: "Enable the NeonPing app embed in your theme editor to show the chat widget on your storefront.",
-                href: `https://admin.shopify.com/store/${shopDomain.replace(
-                  ".myshopify.com",
-                  ""
-                )}/themes/current/editor?context=apps`,
-                cta: "Open Theme Editor",
+                title: "Connect WhatsApp",
+                desc: "Link your WhatsApp Business number so customers can start chatting with your AI assistant.",
+                href: "/app/settings?whatsapp",
+                cta: "Connect WhatsApp",
               },
               {
                 n: "2",
