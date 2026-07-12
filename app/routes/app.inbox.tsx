@@ -73,11 +73,10 @@ function formatPhone(sessionId: string): string {
   return `+${digits}`;
 }
 
-type StatusKey = "needsReply" | "aiHandling" | "aiPaused" | "resolved";
+type StatusKey = "needsReply" | "aiHandling" | "resolved";
 
-function getConversationStatus(conv: { resolved?: boolean | null; escalated?: boolean | null; aiPaused?: boolean | null }, isAiPaused?: boolean): StatusKey {
+function getConversationStatus(conv: { resolved?: boolean | null; escalated?: boolean | null }): StatusKey {
   if (conv.resolved) return "resolved";
-  if (isAiPaused ?? conv.aiPaused) return "aiPaused";
   if (conv.escalated) return "needsReply";
   return "aiHandling";
 }
@@ -87,13 +86,11 @@ function statusLabel(status: StatusKey) {
     ? "Needs reply"
     : status === "aiHandling"
     ? "AI handling"
-    : status === "aiPaused"
-    ? "AI paused"
     : "Resolved";
 }
 
 function statusTone(status: StatusKey): "success" | "warning" | "info" {
-  return status === "resolved" ? "success" : status === "needsReply" || status === "aiPaused" ? "warning" : "info";
+  return status === "resolved" ? "success" : status === "needsReply" ? "warning" : "info";
 }
 
 function ChannelIndicator({ channel, size = 32 }: { channel?: string | null; size?: number }) {
@@ -529,7 +526,7 @@ export default function Inbox() {
   const isAiPaused = pauseFetcher.formData
     ? pauseFetcher.formData.get("pause") === "true"
     : selected?.aiPaused ?? false;
-  const selectedStatus = selected ? getConversationStatus(selected, isAiPaused) : null;
+  const selectedStatus = selected ? getConversationStatus(selected) : null;
 
   // One-time: auto-request notification permission on inbox load
   useEffect(() => {
@@ -738,6 +735,15 @@ export default function Inbox() {
     .map((step) => (step in TOOL_LABELS ? TOOL_LABELS[step] : null))
     .filter((a): a is string => a !== null);
   const isSelectedFlagged = Boolean((selected?.qaMeta as { flagged?: boolean } | null)?.flagged);
+  const journeyBrowsed = agentTraceArr.includes("search_catalog");
+  const journeySummary = selected
+    ? [
+        "Started",
+        ...(journeyBrowsed || selected.cartId || selected.orderId ? ["Browsed"] : []),
+        ...(selected.cartId ? [selected.cartValue != null ? `Cart ${fmtMoney(selected.cartValue)}` : "Cart added"] : []),
+        ...(selected.orderId ? [selected.orderRevenueCents != null ? `Purchased ${fmtMoney(selected.orderRevenueCents / 100)}` : "Purchased"] : []),
+      ].join(" → ")
+    : null;
 
   return (
     <s-page heading="Inbox">
@@ -897,7 +903,7 @@ export default function Inbox() {
                               {(conv.firstUserMessage ?? "").slice(0, 60) || "No messages yet"}
                             </span>
                             <span style={{ fontSize: 11, lineHeight: 1.4, padding: "1px 6px", borderRadius: "var(--radius-pill)", border: "1px solid var(--color-border)", color: "var(--color-neutral)", background: "var(--color-surface)" }}>
-                              {statusLabel(rowStatus)}
+                              {statusLabel(rowStatus)}{rowStatus === "needsReply" && conv.aiPaused ? " · AI paused" : ""}
                             </span>
                             {hasRevenue && (
                               <s-badge tone="success">${((conv.orderRevenueCents ?? 0) / 100).toFixed(0)}</s-badge>
@@ -935,7 +941,16 @@ export default function Inbox() {
                   <span style={{ fontWeight: 600, fontSize: "var(--type-panel-title)", flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
                   </span>
-                  {selectedStatus && <s-badge tone={statusTone(selectedStatus)}>{statusLabel(selectedStatus)}</s-badge>}
+                  {journeySummary && (
+                    <span style={{ fontSize: "var(--type-metadata)", color: "var(--color-neutral)", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-pill)", padding: "2px 8px", flexShrink: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      Journey: {journeySummary}
+                    </span>
+                  )}
+                  {selectedStatus && (
+                    <s-badge tone={statusTone(selectedStatus)}>
+                      {statusLabel(selectedStatus)}{selectedStatus === "needsReply" && isAiPaused ? " · AI paused" : ""}
+                    </s-badge>
+                  )}
                 </div>
                 {!selected.resolved && (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "var(--spacing-sm)", flexShrink: 0 }}>
@@ -976,19 +991,6 @@ export default function Inbox() {
                   )}
                 </div>
               )}
-
-              {/* Journey funnel */}
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
-                <JourneyFunnel
-                  browsed={agentTraceArr.includes("search_catalog")}
-                  inCart={!!selected.cartId}
-                  purchased={!!selected.orderId}
-                  cartValue={selected.cartValue}
-                  orderRevenue={selected.orderRevenueCents}
-                  currency={currencyCode}
-                  compact={true}
-                />
-              </div>
 
               {/* Handling notice */}
               {(selected.escalated && !selected.resolved) || isAiPaused ? (
@@ -1160,15 +1162,12 @@ export default function Inbox() {
               <EmptyState heading="No conversation selected" subtext="Customer details appear here after you select a conversation." />
             </div>
           ) : (
-            <s-stack direction="block" gap="base">{/* Phase 5: Customer → Phone → Cart → Order → Discount → Escalate → AI trace → Details → Train → Channel */}
+            <s-stack direction="block" gap="base">
               {/* Customer — name at top, Shopify link below */}
               <div>
                 <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Customer</div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
                   {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
-                </div>
-                <div style={{ fontSize: "12px", color: "var(--color-neutral)", marginTop: "4px" }}>
-                  {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
                 </div>
                 {selected.customerId && (
                   <div style={{ marginTop: 4 }}>
@@ -1182,6 +1181,14 @@ export default function Inbox() {
                 )}
               </div>
 
+              {/* Channel */}
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Channel</div>
+                <span style={{ fontSize: "13px", color: "var(--color-text)" }}>
+                  {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
+                </span>
+              </div>
+
               {/* Phone (WhatsApp only) */}
               {selected.channel === "whatsapp" && (
                 <div>
@@ -1192,45 +1199,59 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Cart value */}
-              {selected.cartValue != null && (
-                <div>
-                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Cart Value</div>
-                  <span style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-cart)" }}>
-                    {fmtMoney(selected.cartValue)}
-                  </span>
-                </div>
-              )}
-
-              {/* Order card */}
-              {selected.orderId && (
-                <s-box padding="base" background="subdued" border="base" borderRadius="base">
-                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Order</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)" }}>
-                        {selected.orderRevenueCents != null ? fmtMoney(selected.orderRevenueCents / 100) : "Order placed"}
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--color-success)", marginTop: 4 }}>Revenue attributed ✓</div>
-                    </div>
-                    <a
-                      href={`https://${storeHandle}.myshopify.com/admin/orders/${selected.orderId.replace("gid://shopify/Order/", "")}`}
-                      target="_top"
-                      style={{ fontSize: "var(--type-metadata)", color: "var(--color-text)", textDecoration: "none", fontWeight: 500 }}
-                    >
-                      View →
-                    </a>
+              {/* Commerce */}
+              <div>
+                <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Commerce</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ overflowX: "auto", paddingBottom: "4px" }}>
+                    <JourneyFunnel
+                      browsed={journeyBrowsed}
+                      inCart={!!selected.cartId}
+                      purchased={!!selected.orderId}
+                      cartValue={selected.cartValue}
+                      orderRevenue={selected.orderRevenueCents}
+                      currency={currencyCode}
+                    />
                   </div>
-                </s-box>
-              )}
 
-              {/* Discount code */}
-              {selected.discountCode && (
-                <div>
-                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Discount Used</div>
-                  <s-badge>{selected.discountCode}</s-badge>
+                  {selected.cartValue != null && (
+                    <div>
+                      <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Cart Value</div>
+                      <span style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-cart)" }}>
+                        {fmtMoney(selected.cartValue)}
+                      </span>
+                    </div>
+                  )}
+
+                  {selected.orderId && (
+                    <s-box padding="base" background="subdued" border="base" borderRadius="base">
+                      <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Order</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)" }}>
+                            {selected.orderRevenueCents != null ? fmtMoney(selected.orderRevenueCents / 100) : "Order placed"}
+                          </div>
+                          <div style={{ fontSize: 12, color: "var(--color-success)", marginTop: 4 }}>Revenue attributed ✓</div>
+                        </div>
+                        <a
+                          href={`https://${storeHandle}.myshopify.com/admin/orders/${selected.orderId.replace("gid://shopify/Order/", "")}`}
+                          target="_top"
+                          style={{ fontSize: "var(--type-metadata)", color: "var(--color-text)", textDecoration: "none", fontWeight: 500 }}
+                        >
+                          View →
+                        </a>
+                      </div>
+                    </s-box>
+                  )}
+
+                  {selected.discountCode && (
+                    <div>
+                      <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Discount Used</div>
+                      <s-badge>{selected.discountCode}</s-badge>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
 
               {/* Quick Actions — Resolve moved to center header; Escalate stays here */}
               {!selected.escalated && !selected.resolved && (
@@ -1243,77 +1264,79 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Details */}
-              <div>
-                <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Details</div>
-                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", fontSize: "12px" }}>
-                  <span style={{ color: "var(--color-neutral)" }}>Started</span>
-                  <span>{new Date(selected.startedAt as unknown as string).toLocaleDateString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-                  <span style={{ color: "var(--color-neutral)" }}>Messages</span>
-                  <span>{selected.messageCount}</span>
-                  {selected.qualityScore != null && (
-                    <>
-                      <span style={{ color: "var(--color-neutral)" }}>AI Quality</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                        <span style={{
-                          fontWeight: 600, fontSize: "13px",
-                          color: selected.qualityScore >= 4 ? "var(--color-success)" : selected.qualityScore >= 3 ? "var(--color-warning)" : "var(--color-critical)",
-                        }}>
-                          {selected.qualityScore.toFixed(1)}/5
-                        </span>
-                        {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
-                          <span style={{ fontSize: "12px", color: "var(--color-critical)" }}>● Needs review</span>
-                        )}
-                      </span>
-                    </>
+              <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
+                <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--color-neutral)", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <span>AI details</span>
+                </summary>
+                <div style={{ padding: "4px 12px 12px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Details</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px", fontSize: "12px" }}>
+                      <span style={{ color: "var(--color-neutral)" }}>Started</span>
+                      <span>{new Date(selected.startedAt as unknown as string).toLocaleDateString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                      <span style={{ color: "var(--color-neutral)" }}>Messages</span>
+                      <span>{selected.messageCount}</span>
+                      {selected.qualityScore != null && (
+                        <>
+                          <span style={{ color: "var(--color-neutral)" }}>AI Quality</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            <span style={{
+                              fontWeight: 600, fontSize: "13px",
+                              color: selected.qualityScore >= 4 ? "var(--color-success)" : selected.qualityScore >= 3 ? "var(--color-warning)" : "var(--color-critical)",
+                            }}>
+                              {selected.qualityScore.toFixed(1)}/5
+                            </span>
+                            {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
+                              <span style={{ fontSize: "12px", color: "var(--color-critical)" }}>● Needs review</span>
+                            )}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {aiActions.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Tool calls</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        {aiActions.map((a, i) => (
+                          <div key={i} style={{ fontSize: 12, color: "var(--color-neutral)" }}>{a}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
+                    <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: "12px" }}>
+                      <s-banner tone="warning">
+                        <s-text><strong>AI flagged this conversation</strong></s-text>
+                        <s-text tone="neutral">{(selected.qaMeta as { reason?: string } | null)?.reason ?? "Low quality response detected."}</s-text>
+                      </s-banner>
+                      <div style={{ marginTop: "12px" }}>
+                        <Form method="post">
+                          <input type="hidden" name="intent" value="train" />
+                          <input type="hidden" name="conversationId" value={selected.id} />
+                          <s-stack direction="block">
+                            <s-text-field
+                              label="Customer question"
+                              name="question"
+                              value={selected.firstUserMessage ?? ""}
+                            ></s-text-field>
+                            <s-text-field
+                              label="Correct answer"
+                              name="answer"
+                              placeholder="Correct answer to add to FAQ…"
+                            ></s-text-field>
+                            <div>
+                              <s-button type="submit" variant="primary">Add to Knowledge Base</s-button>
+                            </div>
+                          </s-stack>
+                        </Form>
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-
-              {/* AI tool trace — collapsed by default */}
-              {aiActions.length > 0 && (
-                <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
-                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--color-neutral)", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <span>AI activity · {aiActions.length} actions</span>
-                  </summary>
-                  <div style={{ padding: "4px 12px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
-                    {aiActions.map((a, i) => (
-                      <div key={i} style={{ fontSize: 12, color: "var(--color-neutral)" }}>{a}</div>
-                    ))}
-                  </div>
-                </details>
-              )}
-
-              {/* Train from this — visible on flagged conversations */}
-              {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
-                <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: "12px" }}>
-                  <s-banner tone="warning">
-                    <s-text><strong>AI flagged this conversation</strong></s-text>
-                    <s-text tone="neutral">{(selected.qaMeta as { reason?: string } | null)?.reason ?? "Low quality response detected."}</s-text>
-                  </s-banner>
-                  <div style={{ marginTop: "12px" }}>
-                    <Form method="post">
-                      <input type="hidden" name="intent" value="train" />
-                      <input type="hidden" name="conversationId" value={selected.id} />
-                      <s-stack direction="block">
-                        <s-text-field
-                          label="Customer question"
-                          name="question"
-                          value={selected.firstUserMessage ?? ""}
-                        ></s-text-field>
-                        <s-text-field
-                          label="Correct answer"
-                          name="answer"
-                          placeholder="Correct answer to add to FAQ…"
-                        ></s-text-field>
-                        <div>
-                          <s-button type="submit" variant="primary">Add to Knowledge Base</s-button>
-                        </div>
-                      </s-stack>
-                    </Form>
-                  </div>
-                </div>
-              )}
+              </details>
 
             </s-stack>
           )}
