@@ -24,7 +24,7 @@ export function InboxView({ variant }: InboxViewProps) {
     conversations,
     totalCount, purchasedCount, inCartCount, escalatedCount, liveCount,
     page, hasMore,
-    search, dateRange, statusTab, channel,
+    search, dateRange, statusTab,
     currencyCode, storeHandle,
     quickReplies,
     thumbsUp, thumbsDown,
@@ -280,8 +280,6 @@ export function InboxView({ variant }: InboxViewProps) {
         onTabChange={(tab) => { setActiveTab(tab); setFilter("statusTab", tab); }}
         dateRange={dateRange}
         onDateRangeChange={(v) => setFilter("dateRange", v)}
-        channel={channel}
-        onChannelChange={(v) => setFilter("channel", v)}
         hasMore={hasMore}
         onLoadMore={nextPage}
         notifPermission={variant === "panel" ? notifPermission : undefined}

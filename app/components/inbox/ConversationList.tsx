@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChannelIndicator } from "./ChannelIndicator";
 import { EmptyState } from "./EmptyState";
 import { FilterButtonGroup } from "~/components/FilterButtonGroup";
-import { DATE_OPTIONS, CHANNEL_OPTS, formatPhone, getConversationStatus, statusLabel, statusTone, relTime } from "~/lib/inbox-shared";
+import { DATE_OPTIONS, formatPhone, getConversationStatus, statusLabel, statusTone, relTime } from "~/lib/inbox-shared";
 import type { InboxLoaderData } from "~/lib/inbox.server";
 
 type ConvItem = InboxLoaderData["conversations"][number];
@@ -27,8 +27,6 @@ interface ConversationListProps {
   onTabChange: (tab: string) => void;
   dateRange: string;
   onDateRangeChange: (v: string) => void;
-  channel: string;
-  onChannelChange: (v: string) => void;
   hasMore: boolean;
   onLoadMore: () => void;
   /** Panel-only extras — omit for the full-screen view */
@@ -50,7 +48,7 @@ export function ConversationList({
   totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, thumbsUp, thumbsDown,
   search, onSearchChange, searchInputRef,
   activeTab, onTabChange,
-  dateRange, onDateRangeChange, channel, onChannelChange,
+  dateRange, onDateRangeChange,
   hasMore, onLoadMore,
   notifPermission, onRequestNotifPermission, onOpenFullScreen,
 }: ConversationListProps) {
@@ -125,10 +123,12 @@ export function ConversationList({
         ))}
       </div>
 
-      {/* Filters */}
+      {/* Filters — channel filter hidden while WhatsApp is the only active
+          channel; the inbox query is hard-scoped to WhatsApp server-side
+          (see inbox.server.ts), so old website conversations aren't shown
+          here at all. Bring CHANNEL_OPTS back if the widget is re-enabled. */}
       <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: "4px" }}>
         <FilterButtonGroup options={DATE_OPTIONS} value={dateRange} onChange={onDateRangeChange} />
-        <FilterButtonGroup options={CHANNEL_OPTS} value={channel} onChange={onChannelChange} />
       </div>
 
       {/* Conversation rows */}
@@ -136,8 +136,8 @@ export function ConversationList({
         {conversations.length === 0 ? (
           <div style={{ padding: "var(--spacing-lg) var(--spacing-md)" }}>
             <EmptyState
-              heading={search || channel !== "all" || dateRange !== "all" ? "No matching conversations" : "No conversations yet"}
-              subtext={search || channel !== "all" || dateRange !== "all" ? "Try a different search, channel, or date filter." : "Customer conversations will appear here when NeonPing receives them."}
+              heading={search || dateRange !== "all" ? "No matching conversations" : "No conversations yet"}
+              subtext={search || dateRange !== "all" ? "Try a different search or date filter." : "Customer conversations will appear here when NeonPing receives them."}
             />
           </div>
         ) : (

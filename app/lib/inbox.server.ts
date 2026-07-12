@@ -22,9 +22,6 @@ export async function getInboxData(opts: { request: Request; session: { shop: st
 
   const url = new URL(request.url);
   const selectedId = url.searchParams.get("id") ?? null;
-  // ponytail: defaults to WhatsApp since it's the only active channel now —
-  // revert to "all" if the website widget comes back.
-  const channel = url.searchParams.get("channel") ?? "whatsapp";
   const statusTab = url.searchParams.get("statusTab") ?? "pending";
   const dateRange = url.searchParams.get("dateRange") ?? "all";
   const search = url.searchParams.get("search") ?? "";
@@ -48,11 +45,10 @@ export async function getInboxData(opts: { request: Request; session: { shop: st
     ];
   }
 
-  if (channel === "whatsapp") {
-    where.channel = "whatsapp";
-  } else if (channel === "web") {
-    where.NOT = { channel: "whatsapp" };
-  }
+  // ponytail: hard-scoped to WhatsApp since it's the only active channel —
+  // old website conversations are intentionally not reachable from the
+  // inbox. Revert to a channel query-param toggle if the widget comes back.
+  where.channel = "whatsapp";
 
   if (statusTab === "open") {
     where.escalated = true;
@@ -65,8 +61,9 @@ export async function getInboxData(opts: { request: Request; session: { shop: st
     where.resolved = false;
   }
 
-  // Summary counts use global shop scope (not filtered by date/outcome/channel)
-  const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
+  // Summary counts use global shop scope (not filtered by date/outcome) but
+  // stay WhatsApp-scoped like the row list, so the header numbers match.
+  const countBase: Prisma.ConversationWhereInput = { shopDomain: shop, channel: "whatsapp" };
 
   const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg, selected, currencyCode] =
     await Promise.all([
@@ -125,7 +122,7 @@ export async function getInboxData(opts: { request: Request; session: { shop: st
     selected,
     totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount,
     page, hasMore: conversations.length === 50,
-    search, dateRange, statusTab, channel,
+    search, dateRange, statusTab, channel: "whatsapp" as const,
     currencyCode,
     storeHandle,
     quickReplies: merchant?.quickReplies ?? [],
