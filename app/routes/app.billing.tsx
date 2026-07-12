@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useFetcher, useRouteError } from "react-router";
+import { useLoaderData, useFetcher, useRevalidator, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { getUsage } from "../lib/billing.server";
@@ -90,6 +90,74 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export async function action({ request }: ActionFunctionArgs) {
   const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
+  const intent = String(formData.get("intent") ?? "subscribe");
+
+  if (intent === "cancel") {
+    const confirmed = formData.get("confirmCancel") === "true";
+    if (!confirmed) {
+      return { error: "cancel_not_confirmed", detail: "Confirm cancellation before continuing." };
+    }
+
+    try {
+      const subscriptionResponse = await admin.graphql(`#graphql
+        {
+          currentAppInstallation {
+            activeSubscriptions {
+              id
+              name
+              status
+            }
+          }
+        }
+      `);
+      const subscriptionData = await subscriptionResponse.json() as {
+        data?: { currentAppInstallation?: { activeSubscriptions?: Array<{ id: string; name: string; status: string }> } };
+      };
+      const activeSubscription = subscriptionData.data?.currentAppInstallation?.activeSubscriptions
+        ?.find((subscription) => subscription.status === "ACTIVE");
+
+      if (!activeSubscription) {
+        return { error: "cancel_unavailable", detail: "No active subscription was found to cancel." };
+      }
+
+      const response = await admin.graphql(
+        `#graphql
+        mutation AppSubscriptionCancel($id: ID!, $prorate: Boolean) {
+          appSubscriptionCancel(id: $id, prorate: $prorate) {
+            userErrors { field message }
+            appSubscription { id status }
+          }
+        }`,
+        {
+          variables: {
+            id: activeSubscription.id,
+            prorate: false,
+          },
+        },
+      );
+
+      const data = await response.json() as {
+        data?: { appSubscriptionCancel?: { userErrors: { message: string }[]; appSubscription?: { id: string; status: string } } };
+      };
+      const result = data.data?.appSubscriptionCancel;
+
+      if (result?.userErrors?.length) {
+        console.error("[billing/cancel] userErrors:", result.userErrors);
+        return { error: "cancel_error", detail: result.userErrors[0].message };
+      }
+
+      if (!result?.appSubscription) {
+        console.error("[billing/cancel] no appSubscription:", JSON.stringify(data));
+        return { error: "cancel_error", detail: "No cancelled subscription was returned" };
+      }
+
+      return { cancelled: true, status: result.appSubscription.status };
+    } catch (e) {
+      console.error("[billing/cancel] unexpected error:", e);
+      return { error: "cancel_error", detail: String(e) };
+    }
+  }
+
   const plan = String(formData.get("plan"));
 
   if (!VALID_PLANS.includes(plan as PlanKey)) {
@@ -208,9 +276,10 @@ interface PlanCardProps {
   plan: (typeof PLANS)[number];
   isCurrent: boolean;
   currentPlanRank: number;
+  hasActivePlan: boolean;
 }
 
-function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
+function PlanCard({ plan, isCurrent, currentPlanRank, hasActivePlan }: PlanCardProps) {
   const fetcher = useFetcher<typeof action>();
   const isSubmitting = fetcher.state === "submitting";
   const billingError = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
@@ -263,13 +332,24 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
         <span style={{ color: "var(--color-neutral)" }}> / month</span>
       </div>
       <s-text tone="neutral">{plan.conversations}</s-text>
-      <ul style={{ margin: "0", paddingLeft: "20px", color: "var(--color-text)" }}>
-        {ALL_FEATURES.map((f) => (
-          <li key={f} style={{ marginBottom: "4px" }}>
-            <s-text>{f}</s-text>
-          </li>
-        ))}
-      </ul>
+      {hasActivePlan ? (
+        <div style={{ display: "grid", gap: "6px" }}>
+          <s-text>
+            <strong>Conversation cap:</strong> {plan.conversations}
+          </s-text>
+          <s-text>
+            <strong>Monthly price:</strong> {plan.price}
+          </s-text>
+        </div>
+      ) : (
+        <ul style={{ margin: "0", paddingLeft: "20px", color: "var(--color-text)" }}>
+          {ALL_FEATURES.map((f) => (
+            <li key={f} style={{ marginBottom: "4px" }}>
+              <s-text>{f}</s-text>
+            </li>
+          ))}
+        </ul>
+      )}
       <div style={{ marginTop: "auto" }}>
         {billingError && (
           <div style={{ marginBottom: "8px" }}>
@@ -281,6 +361,7 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
           </div>
         )}
         <fetcher.Form method="POST">
+          <input type="hidden" name="intent" value="subscribe" />
           <input type="hidden" id={`plan-input-${plan.key}`} name="plan" value={plan.key} />
           <div style={{ width: "100%" }}>
           <s-button
@@ -304,6 +385,73 @@ function PlanCard({ plan, isCurrent, currentPlanRank }: PlanCardProps) {
         </fetcher.Form>
       </div>
     </div>
+  );
+}
+
+function CancelSubscriptionPanel() {
+  const cancelFetcher = useFetcher<typeof action>();
+  const revalidator = useRevalidator();
+  const [confirmed, setConfirmed] = useState(false);
+  const isCancelling = cancelFetcher.state === "submitting";
+  const cancelError = cancelFetcher.data && "error" in cancelFetcher.data ? cancelFetcher.data.error : null;
+  const cancelSuccess = cancelFetcher.data && "cancelled" in cancelFetcher.data ? cancelFetcher.data.cancelled : false;
+
+  useEffect(() => {
+    if (cancelSuccess) {
+      revalidator.revalidate();
+    }
+  }, [cancelSuccess, revalidator]);
+
+  return (
+    <s-box padding="base" background="subdued" borderRadius="base">
+      <div style={{ display: "grid", gap: "12px" }}>
+        <s-heading>Cancel subscription</s-heading>
+        <s-text tone="neutral">
+          Cancel your paid NeonPing subscription in Shopify. Your plan will move to Free after Shopify confirms the cancellation.
+        </s-text>
+        {cancelSuccess && (
+          <s-banner tone="success">
+            Subscription cancellation requested. Shopify will send a billing update shortly.
+          </s-banner>
+        )}
+        {cancelError && (
+          <s-banner tone="critical">
+            {"detail" in (cancelFetcher.data ?? {})
+              ? `Cancellation error: ${(cancelFetcher.data as { detail?: string }).detail}`
+              : "Something went wrong cancelling your subscription. Please try again."}
+          </s-banner>
+        )}
+        <cancelFetcher.Form method="POST">
+          <input type="hidden" name="intent" value="cancel" />
+          <input type="hidden" name="confirmCancel" value={confirmed ? "true" : "false"} />
+          <label
+            htmlFor="confirm-cancel-subscription"
+            style={{ display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "12px" }}
+          >
+            <input
+              id="confirm-cancel-subscription"
+              type="checkbox"
+              checked={confirmed}
+              disabled={isCancelling}
+              onChange={(event) => setConfirmed(event.currentTarget.checked)}
+              style={{ marginTop: "2px" }}
+            />
+            <span style={{ color: "var(--color-text)" }}>
+              I understand this cancels my paid subscription and returns NeonPing to the Free plan.
+            </span>
+          </label>
+          <s-button
+            type="submit"
+            variant="secondary"
+            tone="critical"
+            {...(!confirmed || isCancelling || cancelSuccess ? { disabled: true } : {})}
+            {...(isCancelling ? { loading: true } : {})}
+          >
+            {isCancelling ? "Cancelling..." : cancelSuccess ? "Cancellation requested" : "Cancel subscription"}
+          </s-button>
+        </cancelFetcher.Form>
+      </div>
+    </s-box>
   );
 }
 
@@ -385,7 +533,7 @@ export default function BillingPage() {
         </s-banner>
       )}
 
-      <s-section heading={hasActivePlan ? "Manage Plan" : "Choose a Plan"} id="plans">
+      <s-section heading={hasActivePlan ? "Change or Cancel Plan" : "Choose a Plan"} id="plans">
         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
           {PLANS.map((plan) => (
             <PlanCard
@@ -393,16 +541,24 @@ export default function BillingPage() {
               plan={plan}
               isCurrent={usage.plan === plan.key}
               currentPlanRank={currentPlanRank}
+              hasActivePlan={hasActivePlan}
             />
           ))}
         </div>
         <div style={{ marginTop: "16px" }}>
           <s-text tone="neutral">
-            All plans include a 7-day free trial. You will not be charged until
-            the trial ends.
+            {hasActivePlan
+              ? "You can switch plans or cancel your subscription from this page."
+              : "All plans include a 7-day free trial. You will not be charged until the trial ends."}
           </s-text>
         </div>
       </s-section>
+
+      {hasActivePlan && (
+        <s-section heading="Subscription">
+          <CancelSubscriptionPanel />
+        </s-section>
+      )}
 
     </s-page>
   );

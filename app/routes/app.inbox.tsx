@@ -391,7 +391,11 @@ export async function action({ request }: ActionFunctionArgs) {
     const pause = formData.get("pause") === "true";
     await prisma.conversation.update({
       where: { id: conversationId },
-      data: { aiPaused: pause },
+      // Pausing the AI means the merchant is taking over — also enable the reply
+      // box (escalated: true) in the same action, so "AI is paused" never leaves
+      // the merchant with no way to actually reply. Resuming AI doesn't force
+      // un-escalation, since the merchant may still want manual control.
+      data: pause ? { aiPaused: true, escalated: true, resolved: false } : { aiPaused: false },
     });
   } else if (intent === "rate-message") {
     const messageTimestamp = Number(formData.get("messageTimestamp"));
@@ -945,7 +949,7 @@ export default function Inbox() {
                     <input type="hidden" name="conversationId" value={selected.id} />
                     <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
                     <button type="submit" style={{ fontSize: "var(--type-metadata)", padding: "var(--spacing-xs) var(--spacing-md-sm)", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer", color: isAiPaused ? "var(--color-warning)" : "var(--color-neutral)" }}>
-                      {isAiPaused ? "Resume AI" : "Pause AI"}
+                      {isAiPaused ? "Return to AI" : "Take over"}
                     </button>
                   </pauseFetcher.Form>
                 </div>
@@ -1036,8 +1040,8 @@ export default function Inbox() {
                 })}
               </div>
 
-              {/* Reply box (escalated only) or status hint */}
-              {selected.escalated && !selected.resolved ? (
+              {/* Reply box — shown once a merchant has taken over (escalated or AI paused) */}
+              {(selected.escalated || isAiPaused) && !selected.resolved ? (
                 <div style={{ borderTop: "1px solid var(--color-border)", background: "var(--color-surface-default)" }}>
                   {/* Mode tabs */}
                   <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)" }}>

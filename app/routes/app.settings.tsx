@@ -415,6 +415,17 @@ export default function Settings() {
           </s-stack>
         </s-section>
 
+        {/* ---- Payments ---- */}
+        <s-section heading="Payments">
+          <s-switch
+            label="Accept Cash on Delivery"
+            name="codEnabled"
+            help-text="Only turn this on if your store actually offers a Cash on Delivery / manual payment option at checkout. When off, the AI only ever offers Pay Online."
+            checked={codEnabled}
+            onChange={(e: Event) => setCodEnabled((e.target as HTMLInputElement).checked)}
+          ></s-switch>
+        </s-section>
+
         {/* ---- Support & Escalation ---- */}
         <s-section heading="Support & Escalation">
           <s-stack direction="block" gap="base">
@@ -523,15 +534,6 @@ export default function Settings() {
                 )}
               </div>
             )}
-            <div style={{ marginTop: 16 }}>
-              <s-switch
-                label="Accept Cash on Delivery"
-                name="codEnabled"
-                help-text="Only turn this on if your store actually offers a Cash on Delivery / manual payment option at checkout. When off, the AI only ever offers Pay Online."
-                checked={codEnabled}
-                onChange={(e: Event) => setCodEnabled((e.target as HTMLInputElement).checked)}
-              ></s-switch>
-            </div>
           </div>
         ) : (
           <div>
