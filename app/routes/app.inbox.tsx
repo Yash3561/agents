@@ -7,7 +7,7 @@ import type { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { adminGraphql } from "../lib/mcp/admin.server";
+import { getShopCurrencyCode } from "../lib/mcp/admin.server";
 import { sendTextMessage, decryptToken } from "../lib/whatsapp.server";
 import { appendMessage } from "../lib/session.server";
 import { runQAJudge } from "../lib/agents/merchant-analyst.server";
@@ -223,7 +223,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Summary counts use global shop scope (not filtered by date/outcome/channel)
   const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
 
-  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg, selected, currencyResult] =
+  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg, selected, currencyCode] =
     await Promise.all([
       prisma.conversation.findMany({
         where,
@@ -270,14 +270,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       selectedId
         ? prisma.conversation.findFirst({ where: { id: selectedId, shopDomain: shop } })
         : Promise.resolve(null),
-      adminGraphql<{ shop: { currencyCode: string } }>(
-        session.shop,
-        session.accessToken ?? "",
-        `{ shop { currencyCode } }`,
-      ).catch(() => null),
+      getShopCurrencyCode(session.shop, session.accessToken ?? ""),
     ]);
-
-  const currencyCode = currencyResult?.shop?.currencyCode ?? "USD";
 
   const storeHandle = shop.replace(".myshopify.com", "");
 

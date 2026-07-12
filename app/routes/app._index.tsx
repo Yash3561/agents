@@ -7,7 +7,7 @@ import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getUsage } from "../lib/billing.server";
-import { adminGraphql } from "../lib/mcp/admin.server";
+import { getShopCurrencyCode } from "../lib/mcp/admin.server";
 import { runInsightsAnalysis, runRevenueNarrator } from "../lib/agents/merchant-analyst.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -62,7 +62,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     rawConversionByRoute,
     rawIntents,
     dailyCounts,
-    currencyResult,
+    currencyCode,
     merchantData,
   ] = await Promise.all([
     prisma.conversation.count({ where: baseWhere }),
@@ -134,11 +134,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       GROUP BY DATE("startedAt")
       ORDER BY date ASC
     `,
-    adminGraphql<{ shop: { currencyCode: string } }>(
-      session.shop,
-      session.accessToken ?? "",
-      `{ shop { currencyCode } }`,
-    ).catch(() => null),
+    getShopCurrencyCode(session.shop, session.accessToken ?? ""),
     prisma.merchant.findUnique({
       where: { shopDomain: shop },
       select: { insightsJson: true, revenueNarrative: true },
@@ -176,11 +172,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     date: String(r.date).slice(0, 10),
     count: Number(r.count),
   }));
-
-  // currencyResult is null if the GraphQL call threw (caught inline above so it can
-  // run inside the same Promise.all as everything else, rather than needing its own
-  // try/catch after an awaited batch)
-  const currencyCode = currencyResult?.shop?.currencyCode ?? "USD";
 
   // Fetch cached AI insights + revenue narrative; auto-refresh if stale (non-blocking)
   const insightsRaw = merchantData?.insightsJson as { generatedAt?: string; topics?: unknown[] } | null;

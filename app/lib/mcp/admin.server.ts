@@ -116,6 +116,36 @@ export async function lookupCustomerByPhone(
 }
 
 /**
+ * Shop currency code, cached 24h in Redis — this changes essentially never,
+ * but the dashboard and inbox loaders were each hitting Admin GraphQL for it
+ * on every single page load.
+ */
+export async function getShopCurrencyCode(
+  shopDomain: string,
+  accessToken: string,
+): Promise<string> {
+  const { redis } = await import("~/redis.server");
+  const cacheKey = `shop:currency:${shopDomain}`;
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) return cached;
+  } catch { /* fall through to live fetch */ }
+
+  try {
+    const data = await adminGraphql<{ shop: { currencyCode: string } }>(
+      shopDomain,
+      accessToken,
+      `{ shop { currencyCode } }`,
+    );
+    const currencyCode = data.shop?.currencyCode ?? "USD";
+    await redis.set(cacheKey, currencyCode, "EX", 86400).catch(() => null);
+    return currencyCode;
+  } catch {
+    return "USD";
+  }
+}
+
+/**
  * Fetch product star ratings from Shopify metafields.
  * Tries the native "reviews" namespace (Shopify Product Reviews app + native ratings).
  * Results cached in Redis 1h — ratings don't change per-minute.

@@ -75,6 +75,7 @@ model Conversation {
 
   @@unique([shopDomain, sessionId])
   @@index([shopDomain])
+  @@index([shopDomain, startedAt])
   @@index([sessionId])
   @@index([orderId])
   @@index([checkoutToken])
