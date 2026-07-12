@@ -661,145 +661,6 @@ export default function Index() {
         </s-banner>
       )}
 
-      {/* ── Needs attention ── */}
-      {recentEscalations.length > 0 && (
-        <s-section
-          heading={`Needs attention (${recentEscalations.length})`}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "1px",
-              background: "var(--color-border)",
-              borderRadius: "8px",
-              overflow: "hidden",
-            }}
-          >
-            {recentEscalations.map((e) => (
-              <div
-                key={e.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "12px 16px",
-                  background: "#fff",
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      fontSize: "13px",
-                      fontWeight: 500,
-                      color: "var(--color-text)",
-                    }}
-                  >
-                    Session {e.sessionId.slice(0, 8)}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
-                    {e.messageCount} message
-                    {e.messageCount !== 1 ? "s" : ""} ·{" "}
-                    {new Date(e.lastMessageAt).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  </div>
-                </div>
-                <s-link href={`/app/inbox?id=${e.id}&statusTab=open`}>Review</s-link>
-              </div>
-            ))}
-          </div>
-        </s-section>
-      )}
-
-      {/* ── Conversations over time ── */}
-      <s-section heading="Conversations over time">
-        <s-select
-          label="Date range"
-          value={days}
-          onChange={(e: Event) => {
-            const next = new URLSearchParams(searchParams);
-            next.set("days", (e.target as HTMLSelectElement).value);
-            // preserve channel filter
-            if (channel !== "all") next.set("channel", channel);
-            setSearchParams(next);
-          }}
-        >
-          {DAY_OPTIONS.map((opt) => (
-            <s-option key={opt.value} value={opt.value}>
-              {opt.label}
-            </s-option>
-          ))}
-        </s-select>
-        <LineChart data={dailyData} daysNum={daysNum} />
-      </s-section>
-
-      {/* ── Performance (6 KPI grid) ── */}
-      <s-section heading="Performance">
-        {/* Channel toggle */}
-        <div style={{ marginBottom: "16px" }}>
-          <FilterButtonGroup
-            options={CHANNEL_TOGGLE}
-            value={channel}
-            onChange={(v) => {
-              const next = new URLSearchParams(searchParams);
-              next.set("channel", v);
-              if (days !== "30") next.set("days", days);
-              setSearchParams(next);
-            }}
-          />
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "14px",
-          }}
-        >
-          <Metric
-            label="Conversations"
-            value={stats.totalConversations.toLocaleString()}
-            sub={`last ${days} days`}
-            borderColor="#2c6ecb"
-          />
-          <Metric
-            label="Revenue attributed"
-            value={revenue}
-            sub={`from ${stats.conversionsCount} order${stats.conversionsCount !== 1 ? "s" : ""}`}
-            borderColor="#008060"
-          />
-          <Metric
-            label="Conversion rate"
-            value={stats.totalConversations > 0 ? `${conversionRatePct}%` : "—"}
-            sub={`${stats.conversionsCount} of ${stats.totalConversations} converted`}
-            borderColor="#008060"
-          />
-          <Metric
-            label="Avg order value"
-            value={stats.conversionsCount > 0 ? aov : "—"}
-            sub="per attributed order"
-            borderColor="#2c6ecb"
-          />
-          <Metric
-            label="Plan usage"
-            value={`${usage.used} / ${usage.limit > 0 ? usage.limit.toLocaleString() : "∞"}`}
-            sub={
-              usage.limit > 0 ? `${usagePercent}% of billing cycle` : "Unlimited"
-            }
-            borderColor={usagePercent >= 100 ? "#d82c0d" : usagePercent >= 80 ? "#ffc453" : "#008060"}
-          />
-          <Metric
-            label="Avg response time"
-            value={fmtResponseTime(avgResponseMs)}
-            sub={avgResponseMs !== null ? (avgResponseMs < 180000 ? "Excellent (< 3 min)" : avgResponseMs < 600000 ? "Good (< 10 min)" : "Slow (> 10 min)") : "No data yet"}
-            borderColor={responseColor}
-          />
-        </div>
-      </s-section>
-
       {/* ── Get started (shown only when no data yet) ── */}
       {stats.totalConversations === 0 && (
         <s-section heading="Get started">
@@ -908,6 +769,216 @@ export default function Index() {
           </div>
         </s-section>
       )}
+
+      {/* ── Needs attention ── */}
+      {recentEscalations.length > 0 && (
+        <s-section
+          heading={`Needs attention (${recentEscalations.length})`}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "1px",
+              background: "var(--color-border)",
+              borderRadius: "8px",
+              overflow: "hidden",
+            }}
+          >
+            {recentEscalations.map((e) => (
+              <div
+                key={e.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "12px 16px",
+                  background: "#fff",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "var(--color-text)",
+                    }}
+                  >
+                    Session {e.sessionId.slice(0, 8)}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
+                    {e.messageCount} message
+                    {e.messageCount !== 1 ? "s" : ""} ·{" "}
+                    {new Date(e.lastMessageAt).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </div>
+                </div>
+                <s-link href={`/app/inbox?id=${e.id}&statusTab=open`}>Review</s-link>
+              </div>
+            ))}
+          </div>
+        </s-section>
+      )}
+
+      {stats.totalConversations > 0 && (
+        <>
+      {/* ── Performance ── */}
+      <s-section heading="Performance">
+        {/* Channel toggle */}
+        <div style={{ marginBottom: "16px" }}>
+          <FilterButtonGroup
+            options={CHANNEL_TOGGLE}
+            value={channel}
+            onChange={(v) => {
+              const next = new URLSearchParams(searchParams);
+              next.set("channel", v);
+              if (days !== "30") next.set("days", days);
+              setSearchParams(next);
+            }}
+          />
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: "14px",
+          }}
+        >
+          <Metric
+            label="Revenue attributed"
+            value={revenue}
+            sub={`from ${stats.conversionsCount} order${stats.conversionsCount !== 1 ? "s" : ""}`}
+            borderColor="#008060"
+          />
+          <Metric
+            label="Conversion rate"
+            value={stats.totalConversations > 0 ? `${conversionRatePct}%` : "—"}
+            sub={`${stats.conversionsCount} of ${stats.totalConversations} converted`}
+            borderColor="#008060"
+          />
+          <Metric
+            label="Conversations"
+            value={stats.totalConversations.toLocaleString()}
+            sub={`last ${days} days`}
+            borderColor="#2c6ecb"
+          />
+          <Metric
+            label="Avg order value"
+            value={stats.conversionsCount > 0 ? aov : "—"}
+            sub="per attributed order"
+            borderColor="#2c6ecb"
+          />
+          <Metric
+            label="Avg response time"
+            value={fmtResponseTime(avgResponseMs)}
+            sub={avgResponseMs !== null ? (avgResponseMs < 180000 ? "Excellent (< 3 min)" : avgResponseMs < 600000 ? "Good (< 10 min)" : "Slow (> 10 min)") : "No data yet"}
+            borderColor={responseColor}
+          />
+        </div>
+      </s-section>
+
+      {/* ── AI Insights card ── */}
+      <s-section heading="AI Insights — What customers need help with">
+        {!insights?.topics?.length ? (
+          <div style={{ padding: "24px", textAlign: "center" }}>
+            <s-text tone="neutral">
+              {insightsJson === null
+                ? "Analyzing your conversations… check back in a few minutes."
+                : "Not enough conversations yet to surface patterns."}
+            </s-text>
+            <Form method="post" style={{ marginTop: "12px" }}>
+              <input type="hidden" name="intent" value="refresh-insights" />
+              <s-button type="submit">Analyze now</s-button>
+            </Form>
+          </div>
+        ) : (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <span style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
+                Based on last 7 days · Updated {insights.generatedAt ? new Date(insights.generatedAt).toLocaleDateString("en", { month: "short", day: "numeric" }) : "recently"}
+              </span>
+              <Form method="post" style={{ display: "inline" }}>
+                <input type="hidden" name="intent" value="refresh-insights" />
+                <s-button type="submit" variant="tertiary">↻ Refresh</s-button>
+              </Form>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {(insights.topics as InsightsTopic[]).map((topic, i) => (
+                <div key={i} style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "8px", padding: "14px 16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
+                    <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--color-text)" }}>{topic.label}</div>
+                    <span style={{ fontSize: "12px", color: "var(--color-neutral)", flexShrink: 0, marginLeft: "12px" }}>{topic.count} conversations</span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontStyle: "italic", marginBottom: "8px" }}>&ldquo;{topic.sample}&rdquo;</div>
+                  <div style={{ fontSize: "12px", color: "var(--color-primary)", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <span style={{ fontWeight: 600 }}>Suggestion:</span>
+                    <span>{topic.suggestion}</span>
+                    {topic.suggestion?.toLowerCase().includes("faq") && (
+                      <a
+                        href={`/app/ai-config?${new URLSearchParams({
+                          faqQuestion: topic.label,
+                          faqAnswer: topic.suggestion,
+                        }).toString()}`}
+                        style={{ marginLeft: "8px", fontSize: "11px", color: "var(--color-primary)", fontWeight: 600 }}
+                      >
+                        Add to FAQ →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </s-section>
+
+      {/* ── Revenue Attribution Narrator ── */}
+      {(narrative?.bullets?.length ?? 0) > 0 && (
+        <s-section heading="This Month's AI Impact">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+            <span style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
+              {narrative?.month ? new Date(narrative.month).toLocaleString("default", { month: "long", year: "numeric" }) : "Current month"}
+            </span>
+            <Form method="post" style={{ display: "inline" }}>
+              <input type="hidden" name="intent" value="refresh-revenue" />
+              <s-button type="submit" variant="tertiary">↻ Refresh</s-button>
+            </Form>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {(narrative!.bullets as string[]).map((bullet, i) => (
+              <div key={i} style={{ display: "flex", gap: "10px", fontSize: "14px", color: "var(--color-text)", lineHeight: "1.5" }}>
+                <span style={{ color: "var(--color-success)", flexShrink: 0 }}>✓</span>
+                <span>{bullet}</span>
+              </div>
+            ))}
+          </div>
+        </s-section>
+      )}
+      {/* ── Conversations over time ── */}
+      <s-section heading="Conversations over time">
+        <s-select
+          label="Date range"
+          value={days}
+          onChange={(e: Event) => {
+            const next = new URLSearchParams(searchParams);
+            next.set("days", (e.target as HTMLSelectElement).value);
+            // preserve channel filter
+            if (channel !== "all") next.set("channel", channel);
+            setSearchParams(next);
+          }}
+        >
+          {DAY_OPTIONS.map((opt) => (
+            <s-option key={opt.value} value={opt.value}>
+              {opt.label}
+            </s-option>
+          ))}
+        </s-select>
+        <LineChart data={dailyData} daysNum={daysNum} />
+      </s-section>
 
       {/* ── What customers ask about ── */}
       {(routingData.length > 0 || topIntents.length > 0) && (
@@ -1124,82 +1195,7 @@ export default function Index() {
         </s-section>
       )}
 
-      {/* ── AI Insights card ── */}
-      <s-section heading="AI Insights — What customers need help with">
-        {!insights?.topics?.length ? (
-          <div style={{ padding: "24px", textAlign: "center" }}>
-            <s-text tone="neutral">
-              {insightsJson === null
-                ? "Analyzing your conversations… check back in a few minutes."
-                : "Not enough conversations yet to surface patterns."}
-            </s-text>
-            <Form method="post" style={{ marginTop: "12px" }}>
-              <input type="hidden" name="intent" value="refresh-insights" />
-              <s-button type="submit">Analyze now</s-button>
-            </Form>
-          </div>
-        ) : (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <span style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
-                Based on last 7 days · Updated {insights.generatedAt ? new Date(insights.generatedAt).toLocaleDateString("en", { month: "short", day: "numeric" }) : "recently"}
-              </span>
-              <Form method="post" style={{ display: "inline" }}>
-                <input type="hidden" name="intent" value="refresh-insights" />
-                <s-button type="submit" variant="tertiary">↻ Refresh</s-button>
-              </Form>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {(insights.topics as InsightsTopic[]).map((topic, i) => (
-                <div key={i} style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "8px", padding: "14px 16px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
-                    <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--color-text)" }}>{topic.label}</div>
-                    <span style={{ fontSize: "12px", color: "var(--color-neutral)", flexShrink: 0, marginLeft: "12px" }}>{topic.count} conversations</span>
-                  </div>
-                  <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontStyle: "italic", marginBottom: "8px" }}>&ldquo;{topic.sample}&rdquo;</div>
-                  <div style={{ fontSize: "12px", color: "var(--color-primary)", display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ fontWeight: 600 }}>Suggestion:</span>
-                    <span>{topic.suggestion}</span>
-                    {topic.suggestion?.toLowerCase().includes("faq") && (
-                      <a
-                        href={`/app/ai-config?${new URLSearchParams({
-                          faqQuestion: topic.label,
-                          faqAnswer: topic.suggestion,
-                        }).toString()}`}
-                        style={{ marginLeft: "8px", fontSize: "11px", color: "var(--color-primary)", fontWeight: 600 }}
-                      >
-                        Add to FAQ →
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </s-section>
-
-      {/* ── Revenue Attribution Narrator ── */}
-      {(narrative?.bullets?.length ?? 0) > 0 && (
-        <s-section heading="This Month's AI Impact">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-            <span style={{ fontSize: "12px", color: "var(--color-neutral)" }}>
-              {narrative?.month ? new Date(narrative.month).toLocaleString("default", { month: "long", year: "numeric" }) : "Current month"}
-            </span>
-            <Form method="post" style={{ display: "inline" }}>
-              <input type="hidden" name="intent" value="refresh-revenue" />
-              <s-button type="submit" variant="tertiary">↻ Refresh</s-button>
-            </Form>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-            {(narrative!.bullets as string[]).map((bullet, i) => (
-              <div key={i} style={{ display: "flex", gap: "10px", fontSize: "14px", color: "var(--color-text)", lineHeight: "1.5" }}>
-                <span style={{ color: "var(--color-success)", flexShrink: 0 }}>✓</span>
-                <span>{bullet}</span>
-              </div>
-            ))}
-          </div>
-        </s-section>
+        </>
       )}
     </s-page>
   );
