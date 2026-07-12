@@ -9,6 +9,7 @@ import prisma from "../db.server";
 import { getUsage } from "../lib/billing.server";
 import { getShopCurrencyCode } from "../lib/mcp/admin.server";
 import { runInsightsAnalysis, runRevenueNarrator } from "../lib/agents/merchant-analyst.server";
+import { getWaStats } from "../lib/whatsapp.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -64,6 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     dailyCounts,
     currencyCode,
     merchantData,
+    waStats,
   ] = await Promise.all([
     prisma.conversation.count({ where: baseWhere }),
     prisma.conversation.count({ where: { ...baseWhere, orderId: { not: null } } }),
@@ -139,6 +141,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { shopDomain: shop },
       select: { insightsJson: true, revenueNarrative: true },
     }),
+    getWaStats(shop),
   ]);
 
   // Compute avg first-response time from messages JSON
@@ -206,6 +209,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     dailyData,
     conversionByRoute: Object.fromEntries(conversionByRoute),
     topIntents,
+    waStats,
   };
 };
 
@@ -580,7 +584,21 @@ export default function Index() {
     currencyCode,
     insightsJson,
     revenueNarrative,
+    waStats,
   } = loaderData;
+
+  const WA_TYPE_LABELS: Record<keyof typeof waStats, string> = {
+    cartRecovery: "Cart recovery",
+    orderConfirm: "Order confirmations",
+    shipped: "Shipping updates",
+  };
+  // ponytail: fixed threshold/min-sample constants, not merchant-configurable — revisit if requested
+  const WA_FAILURE_THRESHOLD_PCT = 10;
+  const WA_MIN_SAMPLE = 5;
+  const waTroubledTypes = (Object.keys(waStats) as Array<keyof typeof waStats>).filter((t) => {
+    const s = waStats[t];
+    return s.total >= WA_MIN_SAMPLE && s.deliveredPct !== null && 100 - s.deliveredPct > WA_FAILURE_THRESHOLD_PCT;
+  });
 
   type InsightsTopic = { label: string; count: number; sample: string; suggestion: string };
   const insights = insightsJson as { topics?: InsightsTopic[]; generatedAt?: string } | null;
@@ -647,6 +665,17 @@ export default function Index() {
           {usage.limit}
           {" conversation limit this billing cycle. "}
           <a href="/app/billing">View plan options</a>
+          {"."}
+        </s-banner>
+      )}
+      {waTroubledTypes.length > 0 && (
+        <s-banner tone="warning">
+          {"WhatsApp delivery trouble: "}
+          {waTroubledTypes
+            .map((t) => `${WA_TYPE_LABELS[t]} ${waStats[t].deliveredPct}% delivered (${waStats[t].sent}/${waStats[t].total})`)
+            .join(", ")}
+          {". Check your WhatsApp connection and template approval status in "}
+          <a href="/app/settings?whatsapp">Settings</a>
           {"."}
         </s-banner>
       )}
@@ -869,6 +898,31 @@ export default function Index() {
             sub={avgResponseMs !== null ? (avgResponseMs < 180000 ? "Excellent (< 3 min)" : avgResponseMs < 600000 ? "Good (< 10 min)" : "Slow (> 10 min)") : "No data yet"}
             borderColor={responseColor}
           />
+        </div>
+      </s-section>
+
+      {/* ── WhatsApp delivery reliability ── */}
+      <s-section heading="WhatsApp delivery reliability">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: "14px",
+          }}
+        >
+          {(Object.keys(waStats) as Array<keyof typeof waStats>).map((t) => {
+            const s = waStats[t];
+            const borderColor = s.deliveredPct === null ? "#8c9196" : s.deliveredPct >= 90 ? "#008060" : s.deliveredPct >= 75 ? "#b98900" : "#d82c0d";
+            return (
+              <Metric
+                key={t}
+                label={WA_TYPE_LABELS[t]}
+                value={s.deliveredPct !== null ? `${s.deliveredPct}% delivered` : "No sends yet"}
+                sub={s.total > 0 ? `${s.sent}/${s.total} delivered · rolling 35 days` : "rolling 35 days"}
+                borderColor={borderColor}
+              />
+            );
+          })}
         </div>
       </s-section>
 

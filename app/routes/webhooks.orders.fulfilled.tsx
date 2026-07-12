@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { decryptToken, normalizePhone, sendTextMessage, workerToken } from "~/lib/whatsapp.server";
+import { decryptToken, normalizePhone, sendTextMessage, trackWaSend, workerToken } from "~/lib/whatsapp.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, payload } = await authenticate.webhook(request);
@@ -50,7 +50,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ? `Your order ${orderName} from ${storeName} has shipped! Track it here:\n${trackingUrl}`
       : `Your order ${orderName} from ${storeName} has shipped! It's on its way.`;
 
-    await sendTextMessage(merchant.waPhoneNumberId, accessToken, phone, message);
+    try {
+      await sendTextMessage(merchant.waPhoneNumberId, accessToken, phone, message);
+      await trackWaSend(shop, "shipped", true);
+    } catch (err) {
+      await trackWaSend(shop, "shipped", false);
+      throw err; // preserve original behavior: a send failure skips the review-request scheduling below
+    }
 
     // Schedule a review request 3 days out via QStash — replaces the old Redis
     // sorted set + self-ping, which stalled for low-volume merchants (the queue

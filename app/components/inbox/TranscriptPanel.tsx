@@ -3,6 +3,7 @@ import { MessageBubble } from "~/components/MessageBubble";
 import { ChannelIndicator } from "./ChannelIndicator";
 import { EmptyState } from "./EmptyState";
 import { ReplyBox } from "./ReplyBox";
+import { PendingApprovalCard } from "./PendingApprovalCard";
 import { formatPhone, statusLabel, statusTone, type ChatMessage, type StatusKey } from "~/lib/inbox-shared";
 import type { InboxLoaderData } from "~/lib/inbox.server";
 
@@ -134,6 +135,17 @@ export function TranscriptPanel({
         {msgs.length === 0 ? (
           <EmptyState heading="No messages yet" subtext="Transcript messages will appear here as the conversation progresses." />
         ) : msgs.map((msg, i) => {
+          if (msg.role === "pending_approval") {
+            return <PendingApprovalCard key={i} conversationId={selected.id} message={msg} />;
+          }
+          if (msg.role === "withdrawn") {
+            return (
+              <div key={i} style={{ margin: "4px 0", padding: "8px 12px", background: "var(--color-surface)", border: "1px dashed var(--color-border)", borderRadius: "var(--radius-base)", opacity: 0.6 }}>
+                <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, marginBottom: "4px" }}>Draft rejected — not sent to customer</div>
+                <div style={{ fontSize: "13px", color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word", textDecoration: "line-through" }}>{msg.content}</div>
+              </div>
+            );
+          }
           if (msg.role === "note") {
             return (
               <div key={i} style={{ margin: "4px 0", padding: "8px 12px", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-base)", borderLeft: isSelectedFlagged ? "3px solid var(--color-warning)" : "1px solid var(--color-border)" }}>

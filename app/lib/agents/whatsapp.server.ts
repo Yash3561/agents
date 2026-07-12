@@ -77,6 +77,21 @@ async function buildCartAssistHint(
 }
 
 // ---------------------------------------------------------------------------
+// High-stakes reply detection — merchant-approval gate (opt-in, see
+// Merchant.requireApprovalForOffers). No refund/cancel-order tool exists yet,
+// so those can only ever show up as free text (a promise the agent made), not
+// a tool call — this is a text heuristic, not a tool-trace check. A discount
+// counts as high-stakes whenever offer_discount actually succeeded this turn.
+// ---------------------------------------------------------------------------
+
+const REFUND_RE = /\b(refund|reimburse(?:d|ment)?|money back)\b/i;
+const CANCEL_MODIFY_ORDER_RE = /\b(cancel(?:l?ed|l?ing)?|modify|change)\b[^.!?]{0,40}\border\b/i;
+
+function isHighStakesReply(replyText: string, discountOffered: boolean): boolean {
+  return discountOffered || REFUND_RE.test(replyText) || CANCEL_MODIFY_ORDER_RE.test(replyText);
+}
+
+// ---------------------------------------------------------------------------
 // Output type
 // ---------------------------------------------------------------------------
 
@@ -96,6 +111,10 @@ export interface WhatsAppAgentOutput {
    *  attempts too, not just successes. See offer_discount tool. */
   discount_negotiation: { offered_codes: string[]; level: number };
   escalate_to_human?: boolean;
+  /** True when this reply is high-stakes (discount/refund/order change) AND the
+   *  merchant has requireApprovalForOffers on — caller must hold it for review
+   *  instead of sending it via WhatsApp. */
+  requires_approval?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -485,6 +504,9 @@ export async function runWhatsAppAgent(opts: {
     void updateCustomerMemory(shopDomain, accessToken, customerId, session, state.lastSearchQuery).catch(() => null);
   }
 
+  const requiresApproval =
+    !!merchant.requireApprovalForOffers && isHighStakesReply(result.text, !!discountCode);
+
   return {
     text: result.text,
     products: state.products,
@@ -498,5 +520,6 @@ export async function runWhatsAppAgent(opts: {
     cart_value_cents: lastCartValueCents,
     discount_negotiation: { offered_codes: offered_codes_local, level: discountLevel_local },
     escalate_to_human: state.escalateToHuman || undefined,
+    requires_approval: requiresApproval || undefined,
   };
 }

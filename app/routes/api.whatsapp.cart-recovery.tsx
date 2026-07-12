@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { decryptToken, sendTemplate, sendTextMessage, workerToken } from "~/lib/whatsapp.server";
+import { decryptToken, sendTemplate, sendTextMessage, trackWaSend, workerToken } from "~/lib/whatsapp.server";
 import { redis } from "~/redis.server";
 import prisma from "~/db.server";
 
@@ -67,6 +67,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           ],
         }],
       );
+      await trackWaSend(body.shop, "cartRecovery", true);
     } catch {
       // Template not yet approved — plain text only delivers inside the 24h
       // session window, i.e. when this phone has actually messaged the store.
@@ -78,8 +79,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }));
       if (hasWaConversation) {
         const message = `Hey! You left something in your cart at ${body.storeName}:\n\n${body.items.map(i => `• ${i}`).join("\n")}\n\nYour cart is saved:\n${body.checkoutUrl}\n\nReply STOP to unsubscribe.`;
-        await sendTextMessage(body.waPhoneNumberId, accessToken, body.phone, message);
+        try {
+          await sendTextMessage(body.waPhoneNumberId, accessToken, body.phone, message);
+          await trackWaSend(body.shop, "cartRecovery", true);
+        } catch (err) {
+          await trackWaSend(body.shop, "cartRecovery", false);
+          throw err;
+        }
       }
+      // else: no fallback possible — an unconsented cold send, not a delivery
+      // failure, so it's intentionally not counted either way.
     }
   } catch (err) {
     console.error(`[cart-recovery] Send failed for checkout ${body.checkoutId}:`, err);

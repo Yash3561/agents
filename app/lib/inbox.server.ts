@@ -245,6 +245,66 @@ export async function handleInboxAction(opts: { request: Request; session: { sho
       // un-escalation, since the merchant may still want manual control.
       data: pause ? { aiPaused: true, escalated: true, resolved: false } : { aiPaused: false },
     });
+  } else if (intent === "approve-draft" || intent === "reject-draft") {
+    // Approve/reject a pending_approval draft (see requireApprovalForOffers gate in
+    // api.whatsapp.webhook.tsx). Same optimistic-lock pattern as rate-message below —
+    // this mutates an existing array element in place, not a pure append.
+    const messageTimestamp = Number(formData.get("messageTimestamp"));
+    if (!Number.isFinite(messageTimestamp)) return { error: "Invalid message" };
+
+    const existing = Array.isArray(conversation.messages)
+      ? (conversation.messages as Array<{ role?: string; content?: string; timestamp?: number }>)
+      : [];
+    const target = existing.find((m) => m.timestamp === messageTimestamp && m.role === "pending_approval");
+    if (!target) return { error: "Draft not found — it may have already been handled." };
+
+    if (intent === "approve-draft") {
+      const editedText = ((formData.get("message") as string) ?? "").trim();
+      const finalText = editedText || target.content?.trim();
+      if (!finalText) return { error: "Empty message" };
+
+      if (conversation.channel === "whatsapp") {
+        const phone = conversation.sessionId.replace("whatsapp_", "");
+        const merchant = await prisma.merchant.findFirst({
+          where: { shopDomain: shop },
+          select: { waPhoneNumberId: true, waAccessToken: true },
+        });
+        if (!merchant?.waPhoneNumberId || !merchant?.waAccessToken) {
+          return { error: "WhatsApp is not connected. Message was not sent." };
+        }
+        try {
+          await sendTextMessage(
+            merchant.waPhoneNumberId,
+            decryptToken(merchant.waAccessToken),
+            phone,
+            finalText,
+          );
+        } catch {
+          return { error: "WhatsApp send failed. Message was not sent." };
+        }
+      }
+
+      target.role = "assistant";
+      target.content = finalText;
+
+      // Mirror into the Redis session — same as the "reply" intent above — so the
+      // AI's next turn sees this as something it (via merchant approval) actually said.
+      await appendMessage(shop, conversation.sessionId, {
+        role: "assistant",
+        content: finalText,
+        timestamp: Date.now(),
+      }).catch(() => null);
+    } else {
+      target.role = "withdrawn";
+    }
+
+    const { count } = await prisma.conversation.updateMany({
+      where: { id: conversationId, lastMessageAt: conversation.lastMessageAt },
+      data: { messages: existing as unknown as Prisma.InputJsonValue },
+    });
+    if (count === 0) {
+      return { error: "This conversation changed — refresh and try again." };
+    }
   } else if (intent === "rate-message") {
     const messageTimestamp = Number(formData.get("messageTimestamp"));
     const rawRating = formData.get("rating");

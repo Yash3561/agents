@@ -652,6 +652,40 @@ export async function action({ request }: ActionFunctionArgs) {
       .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[removed]")
       .replace(/(\+\d{1,3}[\s-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/g, "[removed]");
 
+    // 9b. Approval gate — opt-in (Merchant.requireApprovalForOffers, default off).
+    // High-stakes replies (discount code, refund, order cancel/change) are held as
+    // a draft for the merchant to approve/edit/reject in the Inbox instead of being
+    // sent to the customer. The draft lives only in Postgres (Conversation.messages),
+    // not in the Redis session — mirrors how merchant "notes" already work, so the
+    // AI never sees an unsent draft as something it already said.
+    if (result.requires_approval) {
+      const currentSession = await getSession(shopDomain, sessionId);
+      const pendingMsg = { role: "pending_approval", content: filteredReply, timestamp: Date.now() };
+      const messagesWithDraft = [...currentSession.conversation_history, pendingMsg];
+      await prisma.conversation.upsert({
+        where: { shopDomain_sessionId: { shopDomain, sessionId } },
+        update: {
+          messages: messagesWithDraft as unknown as import("@prisma/client").Prisma.InputJsonValue,
+          messageCount: messagesWithDraft.length,
+          channel: "whatsapp",
+          lastMessageAt: new Date(),
+          escalated: true,
+          resolved: false,
+        },
+        create: {
+          shopDomain,
+          sessionId,
+          messages: messagesWithDraft as unknown as import("@prisma/client").Prisma.InputJsonValue,
+          messageCount: messagesWithDraft.length,
+          channel: "whatsapp",
+          firstUserMessage: agentInput.slice(0, 255),
+          escalated: true,
+        },
+      }).catch((err) => console.error("[wa-webhook] pending-approval persist failed:", err));
+      console.log(`[wa-webhook] held for approval, msg ${messageId} from ${from} on ${shopDomain}`);
+      return new Response("OK", { status: 200 });
+    }
+
     // 10. Send reply — when ≥2 products, carousel replaces the text message
     const products = result.products;
     const CURRENCY_SYM: Record<string, string> = { USD: "$", INR: "₹", EUR: "€", GBP: "£" };

@@ -369,6 +369,60 @@ export async function registerDefaultTemplates(wabaId: string, accessToken: stri
   }
 }
 
+// ---------------------------------------------------------------------------
+// Delivery reliability counters — per-shop, per-message-type Redis INCR.
+// Rolling operational signal (not a historical record), matches the
+// inbox:dirty / presence-set TTL'd-key style already used in this codebase.
+// ---------------------------------------------------------------------------
+
+export type WaMessageType = "cartRecovery" | "orderConfirm" | "shipped";
+
+const WA_STATS_TTL_SEC = 35 * 86400; // 35 days, same convention as api.events.tsx presence keys
+
+/**
+ * Record a confirmed send outcome. Call only on a definite result — a thrown
+ * error/non-2xx from Meta ("failed"), or an awaited call that resolved
+ * without throwing ("sent"). Never call for idempotency/consent skips.
+ * Best-effort: never throws, so a Redis blip can't break a send path.
+ */
+export async function trackWaSend(shop: string, type: WaMessageType, ok: boolean): Promise<void> {
+  try {
+    const { redis } = await import("~/redis.server");
+    const key = `wa:stats:${shop}:${type}:${ok ? "sent" : "failed"}`;
+    await redis.incr(key);
+    await redis.expire(key, WA_STATS_TTL_SEC);
+  } catch {
+    // best-effort — observability must never take down a send path
+  }
+}
+
+export interface WaTypeStats {
+  sent: number;
+  failed: number;
+  total: number;
+  deliveredPct: number | null; // null when no attempts yet in the current window
+}
+
+/** Read the rolling reliability counters for the merchant Dashboard. */
+export async function getWaStats(shop: string): Promise<Record<WaMessageType, WaTypeStats>> {
+  const { redis } = await import("~/redis.server");
+  const types: WaMessageType[] = ["cartRecovery", "orderConfirm", "shipped"];
+  const entries = await Promise.all(
+    types.map(async (type) => {
+      const [sent, failed] = await Promise.all([
+        redis.get(`wa:stats:${shop}:${type}:sent`).catch(() => null),
+        redis.get(`wa:stats:${shop}:${type}:failed`).catch(() => null),
+      ]);
+      const s = Number(sent ?? 0);
+      const f = Number(failed ?? 0);
+      const total = s + f;
+      const stats: WaTypeStats = { sent: s, failed: f, total, deliveredPct: total > 0 ? Math.round((s / total) * 100) : null };
+      return [type, stats] as const;
+    }),
+  );
+  return Object.fromEntries(entries) as Record<WaMessageType, WaTypeStats>;
+}
+
 export interface TemplateStatus {
   name: string;
   status: string; // APPROVED | PENDING | REJECTED | PAUSED | ...

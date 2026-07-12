@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { decryptToken, normalizePhone, sendTextMessage, sendReplyButtons, sendTemplate } from "~/lib/whatsapp.server";
+import { decryptToken, normalizePhone, sendTextMessage, sendReplyButtons, sendTemplate, trackWaSend } from "~/lib/whatsapp.server";
 import { getActiveDiscounts } from "~/lib/mcp/discounts.server";
 import { getProductRecommendation } from "~/lib/mcp/admin.server";
 
@@ -66,23 +66,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           "en",
           [{ type: "body", parameters: [{ type: "text", text: storeName }, { type: "text", text: orderName }, { type: "text", text: totalStr }] }],
         );
+        await trackWaSend(shop, "orderConfirm", true);
       } catch {
         if (hasWaConversation) {
-          await sendTextMessage(
-            merchant.waPhoneNumberId,
-            accessToken,
-            phone,
-            `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
-          );
+          try {
+            await sendTextMessage(
+              merchant.waPhoneNumberId,
+              accessToken,
+              phone,
+              `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
+            );
+            await trackWaSend(shop, "orderConfirm", true);
+          } catch (err) {
+            await trackWaSend(shop, "orderConfirm", false);
+            throw err; // preserve original behavior: a confirm failure aborts the rest of this webhook
+          }
         }
+        // else: no fallback possible — unconsented cold send, not counted.
       }
     } else if (hasWaConversation) {
-      await sendTextMessage(
-        merchant.waPhoneNumberId,
-        accessToken,
-        phone,
-        `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
-      );
+      try {
+        await sendTextMessage(
+          merchant.waPhoneNumberId,
+          accessToken,
+          phone,
+          `Your order ${orderName} at ${storeName} is confirmed! We'll keep you updated.`,
+        );
+        await trackWaSend(shop, "orderConfirm", true);
+      } catch (err) {
+        await trackWaSend(shop, "orderConfirm", false);
+        throw err; // preserve original behavior: a confirm failure aborts the rest of this webhook
+      }
     }
 
     // Post-purchase upsell — immediate, rides the free-form session window the

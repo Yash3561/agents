@@ -94,6 +94,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const escalationEmailEnabled = formData.get("escalationEmailEnabled") === "true";
   const proactiveEngagementEnabled = formData.get("proactiveEngagementEnabled") === "true";
   const codEnabled = formData.get("codEnabled") === "true";
+  const requireApprovalForOffers = formData.get("requireApprovalForOffers") === "true";
   const hardcodedExcluded = (formData.getAll("excludedPages") as string[]).filter((p) => HARDCODED_PAGES.includes(p));
   const customPaths = (formData.getAll("customExcludedPaths") as string[]).filter(
     (p) => CUSTOM_PATH_RE.test(p) && p.length <= 200,
@@ -126,6 +127,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         escalationEmailEnabled,
         proactiveEngagementEnabled,
         codEnabled,
+        requireApprovalForOffers,
         excludedPages,
       },
     });
@@ -155,6 +157,7 @@ export default function Settings() {
   const [escalationEmailEnabled, setEscalationEmailEnabled] = useState(merchant.escalationEmailEnabled);
   const [proactiveEngagementEnabled, setProactiveEngagementEnabled] = useState(merchant.proactiveEngagementEnabled);
   const [codEnabled, setCodEnabled] = useState(merchant.codEnabled);
+  const [requireApprovalForOffers, setRequireApprovalForOffers] = useState(merchant.requireApprovalForOffers);
   const [excludedPages, setExcludedPages] = useState(merchant.excludedPages);
   const [customPathInput, setCustomPathInput] = useState("");
   const [customPathError, setCustomPathError] = useState<string | null>(null);
@@ -220,6 +223,7 @@ export default function Settings() {
     formData.append("escalationEmailEnabled", String(escalationEmailEnabled));
     formData.append("proactiveEngagementEnabled", String(proactiveEngagementEnabled));
     formData.append("codEnabled", String(codEnabled));
+    formData.append("requireApprovalForOffers", String(requireApprovalForOffers));
     excludedPages.filter((p) => HARDCODED_PAGES.includes(p)).forEach((page) => formData.append("excludedPages", page));
     excludedPages.filter((p) => !HARDCODED_PAGES.includes(p)).forEach((path) => formData.append("customExcludedPaths", path));
     fetcher.submit(formData, { method: "POST" });
@@ -593,6 +597,13 @@ export default function Settings() {
                 checked={proactiveEngagementEnabled}
                 onChange={(e: Event) => setProactiveEngagementEnabled((e.target as HTMLInputElement).checked)}
               ></s-checkbox>
+              <s-switch
+                label="Require my approval for high-stakes replies"
+                name="requireApprovalForOffers"
+                help-text="When enabled, AI replies that offer a discount code, promise a refund, or cancel/modify an order are held in the Inbox for you to approve, edit, or reject before they're sent. All other replies still send automatically."
+                checked={requireApprovalForOffers}
+                onChange={(e: Event) => setRequireApprovalForOffers((e.target as HTMLInputElement).checked)}
+              ></s-switch>
             </s-stack>
           </s-section>
         )}

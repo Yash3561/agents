@@ -41,6 +41,7 @@ vi.mock("~/lib/whatsapp.server", () => ({
   sendTextMessage: vi.fn().mockResolvedValue(undefined),
   sendReplyButtons: vi.fn().mockResolvedValue(undefined),
   sendTemplate: vi.fn().mockResolvedValue(undefined),
+  trackWaSend: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/lib/mcp/discounts.server", () => ({
