@@ -228,14 +228,19 @@ export default function AiConfig() {
 
   const isTestLoading = testFetcher.state !== "idle";
 
-  const runTest = () => {
-    if (!testMessage.trim()) return;
+  const submitTestMessage = (message: string) => {
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage || isTestLoading) return;
     const fd = new FormData();
     fd.set("intent", "test-chat");
-    fd.set("testMessage", testMessage);
-    setChatHistory((prev) => [...prev, { role: "user", text: testMessage }]);
+    fd.set("testMessage", trimmedMessage);
+    setChatHistory((prev) => [...prev, { role: "user", text: trimmedMessage }]);
     setTestMessage("");
     testFetcher.submit(fd, { method: "POST" });
+  };
+
+  const runTest = () => {
+    submitTestMessage(testMessage);
   };
 
   // --- Conversation starters state ---
@@ -253,45 +258,9 @@ export default function AiConfig() {
   return (
     <s-page heading="Knowledge Base">
       {/* ------------------------------------------------------------------ */}
-      {/* Section 1 — Conversation starters (customers see these first)       */}
+      {/* Section 1 — FAQ Knowledge Base                                      */}
       {/* ------------------------------------------------------------------ */}
-      <s-section heading="Conversation starters">
-        <s-banner tone="info">Up to 5 conversation starter buttons shown to customers at the start of a conversation. Leave blank to skip a slot.</s-banner>
-        {quickReplies.map((reply, i) => (
-          <s-text-field
-            key={i}
-            label={`Starter ${i + 1}`}
-            name={`quickReply${i}`}
-            value={reply}
-            placeholder={QUICK_REPLY_PLACEHOLDERS[i]}
-            onInput={(e: Event) => {
-              const next = [...quickReplies];
-              next[i] = (e.target as HTMLInputElement).value;
-              setQuickReplies(next);
-            }}
-          ></s-text-field>
-        ))}
-        {quickReplies.some((r) => r.trim()) && (
-          <s-box padding="base" background="subdued" borderRadius="base">
-            <s-stack direction="block" gap="base">
-              <s-text tone="neutral">Preview — how customers will see these:</s-text>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                {quickReplies.filter((r) => r.trim()).map((r, i) => (
-                  <s-badge key={i} tone="success">{r}</s-badge>
-                ))}
-              </div>
-            </s-stack>
-          </s-box>
-        )}
-        <s-button variant="primary" onClick={submitQuickReplies}>
-          Save conversation starters
-        </s-button>
-      </s-section>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Section 2 — Custom Knowledge Base (FAQs)                            */}
-      {/* ------------------------------------------------------------------ */}
-      <s-section heading="Custom knowledge base">
+      <s-section heading="FAQ knowledge base">
         <s-banner tone="info">Add up to 20 Q&amp;A pairs. The support agent will answer these questions exactly as written.</s-banner>
 
         {faqs.length === 0 ? (
@@ -331,9 +300,10 @@ export default function AiConfig() {
                     <s-button
                       variant="tertiary"
                       onClick={() => {
-                        setTestMessage(faq.question);
+                        submitTestMessage(faq.question);
                         playgroundRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                       }}
+                      {...(isTestLoading || !faq.question.trim() ? { disabled: true } : {})}
                     >
                       → Test this FAQ
                     </s-button>
@@ -367,7 +337,43 @@ export default function AiConfig() {
       </s-section>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Section 3 — Chat Playground                                          */}
+      {/* Section 2 — Conversation starters                                    */}
+      {/* ------------------------------------------------------------------ */}
+      <s-section heading="Conversation starters">
+        <s-banner tone="info">Up to 5 conversation starter buttons shown to customers at the start of a conversation. Leave blank to skip a slot.</s-banner>
+        {quickReplies.map((reply, i) => (
+          <s-text-field
+            key={i}
+            label={`Starter ${i + 1}`}
+            name={`quickReply${i}`}
+            value={reply}
+            placeholder={QUICK_REPLY_PLACEHOLDERS[i]}
+            onInput={(e: Event) => {
+              const next = [...quickReplies];
+              next[i] = (e.target as HTMLInputElement).value;
+              setQuickReplies(next);
+            }}
+          ></s-text-field>
+        ))}
+        {quickReplies.some((r) => r.trim()) && (
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-stack direction="block" gap="base">
+              <s-text tone="neutral">Preview — how customers will see these:</s-text>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                {quickReplies.filter((r) => r.trim()).map((r, i) => (
+                  <s-badge key={i} tone="success">{r}</s-badge>
+                ))}
+              </div>
+            </s-stack>
+          </s-box>
+        )}
+        <s-button variant="primary" onClick={submitQuickReplies}>
+          Save conversation starters
+        </s-button>
+      </s-section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Section 3 — Chat Playground                                         */}
       {/* ------------------------------------------------------------------ */}
       <div ref={playgroundRef}>
         <s-section heading="Chat playground">
