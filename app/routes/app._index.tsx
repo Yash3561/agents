@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, redirect, useLoaderData, useSearchParams } from "react-router";
-import { FilterButtonGroup } from "~/components/FilterButtonGroup";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
@@ -30,24 +29,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const rawDays = parseInt(url.searchParams.get("days") ?? "30", 10);
   const daysNum = Number.isFinite(rawDays) ? Math.min(365, Math.max(1, rawDays)) : 30;
   const days = String(daysNum);
-  const requestedChannel = url.searchParams.get("channel");
-  const channel = requestedChannel === "web" || requestedChannel === "whatsapp" ? requestedChannel : "all";
   const since = new Date(Date.now() - daysNum * 86400000);
 
-  const channelFilter: Prisma.ConversationWhereInput =
-    channel === "whatsapp" ? { channel: "whatsapp" }
-    : channel === "web" ? { OR: [{ channel: null }, { NOT: { channel: "whatsapp" } }] }
-    : {};
-
-  const channelSql =
-    channel === "whatsapp" ? Prisma.sql`AND "channel" = 'whatsapp'`
-    : channel === "web" ? Prisma.sql`AND ("channel" IS NULL OR "channel" != 'whatsapp')`
-    : Prisma.sql``;
-
-  const baseWhere: Prisma.ConversationWhereInput = { shopDomain: shop, startedAt: { gte: since }, ...channelFilter };
+  // ponytail: hard-scoped to WhatsApp since it's the only active channel —
+  // old website conversations are intentionally not reachable from the
+  // dashboard. Revert to a channel query-param toggle if the widget comes back.
+  const baseWhere: Prisma.ConversationWhereInput = { shopDomain: shop, startedAt: { gte: since }, channel: "whatsapp" };
 
   // All of these are independent — none depend on another's result, only on shop/since/
-  // channelSql/session, all already known. Previously the 4 raw SQL queries, the Admin
+  // session, all already known. Previously the 4 raw SQL queries, the Admin
   // GraphQL currency call, and the insights/narrative fetch ran as separate sequential
   // `await`s AFTER this Promise.all — 6 extra full network round-trips on every single
   // dashboard load. Merged into one parallel batch: a production load of this route was
@@ -78,6 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.conversation.findMany({
       where: {
         shopDomain: shop,
+        channel: "whatsapp",
         escalated: true,
         lastMessageAt: { gte: new Date(Date.now() - 48 * 3600000) },
       },
@@ -100,7 +91,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       WHERE "shopDomain" = ${shop}
         AND "startedAt" >= ${since}
         AND "agentTrace" IS NOT NULL
-        ${channelSql}
+        AND "channel" = 'whatsapp'
       GROUP BY 1
       ORDER BY count DESC
     `,
@@ -113,7 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       WHERE "shopDomain" = ${shop}
         AND "startedAt" >= ${since}
         AND "agentTrace" IS NOT NULL
-        ${channelSql}
+        AND "channel" = 'whatsapp'
       GROUP BY 1
     `,
     prisma.$queryRaw<Array<{ reason: string; count: bigint }>>`
@@ -123,7 +114,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         AND "startedAt" >= ${since}
         AND "routeReason" IS NOT NULL
         AND "routeReason" != ''
-        ${channelSql}
+        AND "channel" = 'whatsapp'
       GROUP BY "routeReason"
       ORDER BY count DESC
       LIMIT 10
@@ -133,7 +124,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       FROM "Conversation"
       WHERE "shopDomain" = ${shop}
       AND "startedAt" >= ${since}
-      ${channelSql}
+      AND "channel" = 'whatsapp'
       GROUP BY DATE("startedAt")
       ORDER BY date ASC
     `,
@@ -199,7 +190,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     days,
-    channel,
     shopDomain: shop,
     currencyCode,
     insightsJson: insightsRaw ?? null,
@@ -310,7 +300,7 @@ function LineChart({
 
   // tooltip.idx is only ever set from a live mouse move over the CURRENT points array,
   // so it can't go stale during a hover — but it's local state, so it survives a
-  // days/channel filter change that shrinks `data` (e.g. 90 days -> 7 days). Without
+  // days filter change that shrinks `data` (e.g. 90 days -> 7 days). Without
   // this reset, a hover index left over from the larger dataset points past the end
   // of the new, shorter `pts` array on the next render, crashing render (was hit in
   // production: "Cannot read properties of undefined (reading '0')").
@@ -581,7 +571,6 @@ export default function Index() {
   const {
     stats,
     days,
-    channel,
     avgResponseMs,
     recentEscalations,
     usage,
@@ -644,12 +633,6 @@ export default function Index() {
     : avgResponseMs < 180000 ? "#008060"
     : avgResponseMs < 600000 ? "#b98900"
     : "#d82c0d";
-
-  const CHANNEL_TOGGLE = [
-    { value: "all", label: "All channels" },
-    { value: "web", label: "Web Widget" },
-    { value: "whatsapp", label: "WhatsApp" },
-  ] as const;
 
   return (
     <s-page heading="Dashboard">
@@ -855,19 +838,6 @@ export default function Index() {
         <>
       {/* ── Performance ── */}
       <s-section heading="Performance">
-        {/* Channel toggle */}
-        <div style={{ marginBottom: "16px" }}>
-          <FilterButtonGroup
-            options={CHANNEL_TOGGLE}
-            value={channel}
-            onChange={(v) => {
-              const next = new URLSearchParams(searchParams);
-              next.set("channel", v);
-              if (days !== "30") next.set("days", days);
-              setSearchParams(next);
-            }}
-          />
-        </div>
         <div
           style={{
             display: "grid",
@@ -1018,8 +988,6 @@ export default function Index() {
           onChange={(e: Event) => {
             const next = new URLSearchParams(searchParams);
             next.set("days", (e.target as HTMLSelectElement).value);
-            // preserve channel filter
-            if (channel !== "all") next.set("channel", channel);
             setSearchParams(next);
           }}
         >
