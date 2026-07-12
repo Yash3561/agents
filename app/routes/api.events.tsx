@@ -72,9 +72,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
             if (updated.length > 0) {
               lastCheck = new Date();
+
+              // The list-row select above deliberately excludes `messages` — it's
+              // fine for badges/timestamps on 20 rows, but it silently starved the
+              // merchant's open transcript of new message content (the client-side
+              // merge never overwrote a field that was never sent). Widen the
+              // payload for exactly the conversation currently on screen, if it's
+              // one of the ones that just changed — no cost for the other rows.
+              let payload: typeof updated | Array<(typeof updated)[number] & { messages?: unknown }> = updated;
+              if (convId && updated.some((c) => c.id === convId)) {
+                const withMessages = await prisma.conversation.findUnique({
+                  where: { id: convId },
+                  select: { id: true, messages: true },
+                }).catch(() => null);
+                if (withMessages) {
+                  payload = updated.map((c) => (c.id === convId ? { ...c, messages: withMessages.messages } : c));
+                }
+              }
+
               controller.enqueue(
                 encoder.encode(
-                  `event: update\ndata: ${JSON.stringify({ conversations: updated, ts: lastCheck.toISOString() })}\n\n`,
+                  `event: update\ndata: ${JSON.stringify({ conversations: payload, ts: lastCheck.toISOString() })}\n\n`,
                 ),
               );
             }

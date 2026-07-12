@@ -31,6 +31,7 @@ vi.mock("~/db.server", () => ({
     conversation: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     merchant: {
       findUnique: vi.fn(),
@@ -45,6 +46,7 @@ const mockPrisma = prisma as unknown as {
   conversation: {
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -61,6 +63,8 @@ const AI_MESSAGE = { role: "assistant", content: "Here are some options!", times
 const MERCHANT_MESSAGE = { role: "assistant", content: "[Merchant] Let me check on that.", timestamp: 2000 };
 const USER_MESSAGE = { role: "user", content: "show me shoes", timestamp: 500 };
 
+const LAST_MESSAGE_AT = new Date("2026-01-01T00:00:00Z");
+
 function makeConversation(messages: unknown[], overrides: Record<string, unknown> = {}) {
   return {
     id: "conv-1",
@@ -68,6 +72,7 @@ function makeConversation(messages: unknown[], overrides: Record<string, unknown
     messages,
     merchantThumbsUp: 0,
     merchantThumbsDown: 0,
+    lastMessageAt: LAST_MESSAGE_AT,
     ...overrides,
   };
 }
@@ -91,8 +96,8 @@ describe("rate-message action", () => {
       }),
     } as never);
 
-    expect(mockPrisma.conversation.update).toHaveBeenCalledWith({
-      where: { id: "conv-1" },
+    expect(mockPrisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: { id: "conv-1", lastMessageAt: LAST_MESSAGE_AT },
       data: expect.objectContaining({
         merchantThumbsUp: { increment: 1 },
         messages: [USER_MESSAGE, { ...AI_MESSAGE, merchantRating: "up" }],
@@ -114,8 +119,8 @@ describe("rate-message action", () => {
       }),
     } as never);
 
-    expect(mockPrisma.conversation.update).toHaveBeenCalledWith({
-      where: { id: "conv-1" },
+    expect(mockPrisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: { id: "conv-1", lastMessageAt: LAST_MESSAGE_AT },
       data: expect.objectContaining({
         merchantThumbsUp: { increment: -1 },
         merchantThumbsDown: { increment: 1 },
@@ -137,7 +142,7 @@ describe("rate-message action", () => {
       }),
     } as never);
 
-    const call = mockPrisma.conversation.update.mock.calls[0][0];
+    const call = mockPrisma.conversation.updateMany.mock.calls[0][0];
     expect(call.data.merchantThumbsUp).toEqual({ increment: -1 });
     expect(call.data.merchantThumbsDown).toBeUndefined(); // no-op delta omitted entirely
     const savedMessages = call.data.messages as Array<{ merchantRating?: string }>;
@@ -159,7 +164,7 @@ describe("rate-message action", () => {
     } as never);
 
     expect(result).toEqual({ error: "Message not ratable" });
-    expect(mockPrisma.conversation.update).not.toHaveBeenCalled();
+    expect(mockPrisma.conversation.updateMany).not.toHaveBeenCalled();
   });
 
   it("refuses to rate a customer's own message (role: user)", async () => {
@@ -177,7 +182,7 @@ describe("rate-message action", () => {
     } as never);
 
     expect(result).toEqual({ error: "Message not ratable" });
-    expect(mockPrisma.conversation.update).not.toHaveBeenCalled();
+    expect(mockPrisma.conversation.updateMany).not.toHaveBeenCalled();
   });
 
   it("rejects a non-numeric messageTimestamp instead of throwing", async () => {
