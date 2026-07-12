@@ -166,6 +166,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const config = PLAN_CONFIG[plan as PlanKey];
   const isTest = process.env.BILLING_TEST_MODE === "true";
+  const merchantTrial = await db.merchant.findUnique({
+    where: { shopDomain: session.shop },
+    select: { trialUsedAt: true },
+  });
+  const trialDays = merchantTrial?.trialUsedAt ? 0 : config.trialDays;
   // Return to the app ROOT only — not a sub-path. Shopify stores this URL as
   // the "Manage" link in its billing settings. Sub-paths like /app/billing cause
   // a Shopify admin server-side 404 because embedded app deep links only work
@@ -197,7 +202,7 @@ export async function action({ request }: ActionFunctionArgs) {
           name: config.name,
           returnUrl,
           test: isTest,
-          trialDays: config.trialDays,
+          trialDays,
           price: String(config.amount),
         },
       },
