@@ -3,23 +3,27 @@ import { authenticate } from "../shopify.server";
 import db from "../db.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-    const { payload, session, topic, shop } = await authenticate.webhook(request);
-    console.log(`Received ${topic} webhook for ${shop}`);
+  const { payload, session, shop } = await authenticate.webhook(request);
 
-    const current = payload.current as string[];
-    if (session) {
-        try {
-            await db.session.update({
-                where: {
-                    id: session.id
-                },
-                data: {
-                    scope: current.toString(),
-                },
-            });
-        } catch (err) {
-            console.error(`[app/scopes_update] Error updating session scope for ${shop}:`, err);
-        }
+  try {
+    const current = Array.isArray(payload.current) ? payload.current.map(String) : [];
+    const scope = current.join(",");
+
+    if (session?.id) {
+      await db.session.updateMany({
+        where: { id: session.id },
+        data: { scope },
+      });
     }
-    return new Response();
+
+    await db.session.updateMany({
+      where: { shop, isOnline: false },
+      data: { scope },
+    });
+
+    return new Response(null, { status: 200 });
+  } catch (err) {
+    console.error(`[app/scopes_update] Error processing webhook for ${shop}:`, err);
+    return Response.json({ error: "internal_error" }, { status: 500 });
+  }
 };

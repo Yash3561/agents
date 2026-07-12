@@ -10,24 +10,48 @@ import { wipeCustomerMemory } from "../lib/agents/memory.server";
  * and any Conversation rows (which contain message transcripts).
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, payload, topic, session } = await authenticate.webhook(request);
+  const { shop, payload, session } = await authenticate.webhook(request);
 
-  console.log(`Received ${topic} webhook for ${shop}`);
+  try {
+    const customer = payload.customer as { id?: number | string; email?: string } | undefined;
+    const customerIdRaw = customer?.id != null ? String(customer.id) : null;
+    const customerEmail = customer?.email;
 
-  const customerIdNum = (payload.customer as { id?: number } | undefined)?.id;
-  if (!customerIdNum) return new Response();
+    if (!customerIdRaw && !customerEmail) {
+      return new Response(null, { status: 200 });
+    }
 
-  const customerId = `gid://shopify/Customer/${customerIdNum}`;
+    const customerId = customerIdRaw ? `gid://shopify/Customer/${customerIdRaw}` : null;
+    if (session?.accessToken && customerId) {
+      await wipeCustomerMemory(shop, session.accessToken, customerId).catch((err) =>
+        console.error("[gdpr] wipeCustomerMemory failed:", err),
+      );
+    }
 
-  if (session?.accessToken) {
-    await wipeCustomerMemory(shop, session.accessToken, customerId).catch((err) =>
-      console.error("[gdpr] wipeCustomerMemory failed:", err),
-    );
+    const customerWhere =
+      customerId && customerEmail
+        ? { OR: [{ customerId }, { customerEmail }] }
+        : customerId
+          ? { customerId }
+          : { customerEmail };
+
+    await db.conversation.deleteMany({
+      where: { shopDomain: shop, ...customerWhere },
+    });
+
+    const fallbackFilters = [
+      ...(customerIdRaw ? [{ customerId: customerIdRaw }] : []),
+      ...(customerEmail ? [{ customerEmail: { equals: customerEmail, mode: "insensitive" as const } }] : []),
+    ];
+    if (fallbackFilters.length) {
+      await db.conversation.deleteMany({
+        where: { shopDomain: shop, OR: fallbackFilters },
+      });
+    }
+
+    return new Response(null, { status: 200 });
+  } catch (err) {
+    console.error(`[customers/redact] Error processing webhook for ${shop}:`, err);
+    return Response.json({ error: "internal_error" }, { status: 500 });
   }
-
-  await db.conversation
-    .deleteMany({ where: { shopDomain: shop, customerId } })
-    .catch((err) => console.error("[gdpr] conversation deleteMany failed:", err));
-
-  return new Response();
 };

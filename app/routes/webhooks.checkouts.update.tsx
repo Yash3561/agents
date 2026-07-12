@@ -14,9 +14,7 @@ import { writeAbandonedCart } from "~/lib/agents/memory.server";
  * orders/paid will clear the signal when the order is confirmed.
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, payload, topic } = await authenticate.webhook(request);
-
-  console.log(`Received ${topic} webhook for ${shop}`);
+  const { shop, payload } = await authenticate.webhook(request);
 
   try {
     // Skip completed checkouts — the purchase already happened

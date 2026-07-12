@@ -244,7 +244,7 @@ export async function runWhatsAppAgent(opts: {
   // it), while customer metafields carry durable cross-channel history from the
   // web widget (summary, recent_products, last_search). Identified customers
   // get both, merged.
-  const waMem = await fetchWhatsAppMemory(customerPhone);
+  const waMem = await fetchWhatsAppMemory(shopDomain, customerPhone);
   const metaMem = customerId
     ? await fetchCustomerMemory(shopDomain, accessToken, customerId)
     : {};
@@ -494,7 +494,7 @@ export async function runWhatsAppAgent(opts: {
   // skipped it, so agent-created carts were lost on the next turn. Identified
   // customers additionally enrich the durable cross-channel metafield memory.
   if (lastCartId || state.lastSearchQuery || searchedProductTitles.length > 0) {
-    void updateWhatsAppMemory(customerPhone, {
+    void updateWhatsAppMemory(shopDomain, customerPhone, {
       ...(lastCartId ? { cart_id: lastCartId } : {}),
       ...(state.lastSearchQuery ? { last_search: state.lastSearchQuery } : {}),
       ...(searchedProductTitles.length > 0 ? { recent_products: searchedProductTitles } : {}),

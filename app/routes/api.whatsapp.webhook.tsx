@@ -355,7 +355,7 @@ export async function action({ request }: ActionFunctionArgs) {
         const variantId = parts[1];
         const relativeProductUrl = parts[2] ?? "";
         try {
-          const waMem = await fetchWhatsAppMemory(from);
+          const waMem = await fetchWhatsAppMemory(shopDomain, from);
           let cart;
           if (waMem.cart_id) {
             try {
@@ -367,7 +367,7 @@ export async function action({ request }: ActionFunctionArgs) {
             cart = await createCart(shopDomain, [{ item: { id: variantId }, quantity: 1 }]);
           }
           const addedTitle = cart.lines?.[0]?.merchandise?.product?.title ?? cart.lines?.[0]?.merchandise?.title;
-          void updateWhatsAppMemory(from, {
+          void updateWhatsAppMemory(shopDomain, from, {
             cart_id: cart.id,
             ...(addedTitle ? { recent_products: [...(waMem.recent_products ?? []), addedTitle].slice(0, 5) } : {}),
           }).catch(() => null);
@@ -472,7 +472,7 @@ export async function action({ request }: ActionFunctionArgs) {
         const variantId = parts[1];
         const relativeProductUrl = parts[2] ?? "";
         try {
-          const waMem = await fetchWhatsAppMemory(from);
+          const waMem = await fetchWhatsAppMemory(shopDomain, from);
           let cart;
           if (waMem.cart_id) {
             try {
@@ -484,7 +484,7 @@ export async function action({ request }: ActionFunctionArgs) {
             cart = await createCart(shopDomain, [{ item: { id: variantId }, quantity: 1 }]);
           }
           const addedTitle = cart.lines?.[0]?.merchandise?.product?.title ?? cart.lines?.[0]?.merchandise?.title;
-          void updateWhatsAppMemory(from, { cart_id: cart.id }).catch(() => null);
+          void updateWhatsAppMemory(shopDomain, from, { cart_id: cart.id }).catch(() => null);
           const checkoutUrl = `${cart.checkoutUrl}${cart.checkoutUrl.includes("?") ? "&" : "?"}checkout[phone]=%2B${from}`;
           const productPageUrl = relativeProductUrl ? `https://${shopDomain}${relativeProductUrl}` : `https://${shopDomain}`;
           await sendCheckoutMessage(phoneNumberId, accessToken, from, addedTitle ?? listReply.title ?? "your item", "", checkoutUrl, productPageUrl);

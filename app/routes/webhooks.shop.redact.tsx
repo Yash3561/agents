@@ -10,24 +10,24 @@ import { redis } from "../redis.server";
  * (chat sessions, rate-limit counters).
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic } = await authenticate.webhook(request);
-
-  console.log(`Received ${topic} webhook for ${shop}`);
-
-  await db.conversation
-    .deleteMany({ where: { shopDomain: shop } })
-    .catch((err) => console.error("[gdpr] conversation deleteMany failed:", err));
-
-  await db.merchant
-    .delete({ where: { shopDomain: shop } })
-    .catch(() => null); // already gone is fine
+  const { shop } = await authenticate.webhook(request);
 
   try {
+    await db.$transaction([
+      db.conversation.deleteMany({ where: { shopDomain: shop } }),
+      db.session.deleteMany({ where: { shop } }),
+      db.merchant.deleteMany({ where: { shopDomain: shop } }),
+    ]);
+
     const keys = await redis.keys(`*${shop}*`);
     if (keys.length) await redis.del(...keys);
-  } catch (err) {
-    console.error("[gdpr] redis cleanup failed:", err);
-  }
 
-  return new Response();
+    return new Response(null, { status: 200 });
+  } catch (err) {
+    console.error(`[shop/redact] Error processing webhook for ${shop}:`, err);
+    return new Response(JSON.stringify({ error: "internal_error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 };

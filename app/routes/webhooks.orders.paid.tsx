@@ -4,6 +4,20 @@ import db from "../db.server";
 import { clearAbandonedCart } from "~/lib/agents/memory.server";
 import { redis } from "~/redis.server";
 
+async function clearCustomerAbandonedCart(shop: string, customerGid: string): Promise<void> {
+  try {
+    const session = await db.session.findFirst({
+      where: { shop, isOnline: false },
+      select: { accessToken: true },
+    });
+    if (session?.accessToken) {
+      await clearAbandonedCart(shop, session.accessToken, customerGid);
+    }
+  } catch {
+    // Clearing the metafield is best-effort — don't fail/retry the paid webhook.
+  }
+}
+
 /**
  * Matches a completed order back to the conversation that produced it, using
  * the cart token embedded in the checkout_url we stored on the Conversation
@@ -11,9 +25,7 @@ import { redis } from "~/redis.server";
  * the same token as cart_token (and checkout_token for completed checkouts).
  */
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, payload, topic } = await authenticate.webhook(request);
-
-  console.log(`Received ${topic} webhook for ${shop}`);
+  const { shop, payload } = await authenticate.webhook(request);
 
   try {
     const cartToken = (payload.cart_token ?? payload.checkout_token) as
@@ -26,7 +38,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // checkout_token are a different, opaque value and never match it.
     const checkoutId = payload.checkout_id != null ? String(payload.checkout_id) : undefined;
     if (checkoutId) {
-      void redis.set(`wa:abcart:paid:${checkoutId}`, 1, "EX", 86400).catch(() => null);
+      await redis.set(`wa:abcart:paid:${checkoutId}`, 1, "EX", 86400);
     }
 
     const totalPrice = payload.total_price as string | undefined;
@@ -49,13 +61,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // No matching conversation — order wasn't facilitated through the widget.
       // Still clear the abandoned cart signal if we have a customer id.
       if (customerGid) {
-        const session = await db.session.findFirst({
-          where: { shop, isOnline: false },
-          select: { accessToken: true },
-        });
-        if (session?.accessToken) {
-          void clearAbandonedCart(shop, session.accessToken, customerGid).catch(() => null);
-        }
+        void clearCustomerAbandonedCart(shop, customerGid);
       }
       return new Response();
     }
@@ -72,22 +78,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // This is the correct place to clear it — not during cart pre-population,
     // which fires when the widget opens but before the customer confirms a purchase.
     if (customerGid) {
-      try {
-        const session = await db.session.findFirst({
-          where: { shop, isOnline: false },
-          select: { accessToken: true },
-        });
-        if (session?.accessToken) {
-          void clearAbandonedCart(shop, session.accessToken, customerGid).catch(() => null);
-        }
-      } catch {
-        // Clearing the metafield is best-effort — don't fail the webhook
-      }
+      void clearCustomerAbandonedCart(shop, customerGid);
     }
   } catch (err) {
     console.error(`[orders/paid] Error processing webhook for ${shop}:`, err);
-    // Still return 200 so Shopify doesn't retry — the order data isn't critical
-    // enough to cause repeated webhook failures that inflate the error rate.
+    // Retry critical paid-state/revenue failures so we don't message customers
+    // after purchase or permanently lose dashboard attribution.
+    return new Response(null, { status: 500 });
   }
 
   return new Response();

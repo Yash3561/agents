@@ -43,6 +43,7 @@ model Merchant {
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
   conversations       Conversation[]
+  llmUsages           LlmUsage[]
 }
 
 model Conversation {
@@ -55,7 +56,7 @@ model Conversation {
   cartId            String?
   checkoutToken     String?           // real Shopify cart/checkout token parsed from checkout_url, used to match orders/paid webhooks
   cartValue         Float?
-  channel           String?           @default("shopify_widget")
+  channel           String?
   resolved          Boolean  @default(false)
   escalated         Boolean  @default(false)
   discountCode      String?
@@ -79,6 +80,7 @@ model Conversation {
   @@unique([shopDomain, sessionId])
   @@index([shopDomain])
   @@index([shopDomain, startedAt])
+  @@index([shopDomain, channel, startedAt])
   @@index([sessionId])
   @@index([orderId])
   @@index([checkoutToken])
@@ -98,6 +100,7 @@ model LlmUsage {
   outputTokens      Int      @default(0)
   cachedInputTokens Int      @default(0) // subset of inputTokens served from the provider's prompt cache
   callCount         Int      @default(0)
+  merchant          Merchant @relation(fields: [shopDomain], references: [shopDomain], onDelete: Cascade)
 
   @@unique([shopDomain, date, agent])
   @@index([shopDomain])

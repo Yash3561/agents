@@ -342,9 +342,9 @@ async function summarize(shopDomain: string, history: Message[]): Promise<string
 
 const WA_MEM_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
 
-export async function fetchWhatsAppMemory(phone: string): Promise<CustomerMemory> {
+export async function fetchWhatsAppMemory(shopDomain: string, phone: string): Promise<CustomerMemory> {
   try {
-    const val = await redis.get(`wamem:${phone}`);
+    const val = await redis.get(`wamem:${shopDomain}:${phone}`);
     return val ? (JSON.parse(String(val)) as CustomerMemory) : {};
   } catch {
     return {};
@@ -352,11 +352,12 @@ export async function fetchWhatsAppMemory(phone: string): Promise<CustomerMemory
 }
 
 export async function updateWhatsAppMemory(
+  shopDomain: string,
   phone: string,
   updates: Partial<CustomerMemory>,
 ): Promise<void> {
   try {
-    const existing = await fetchWhatsAppMemory(phone);
+    const existing = await fetchWhatsAppMemory(shopDomain, phone);
     const merged = { ...existing, ...updates };
     if (updates.recent_products) {
       // Union with what's already remembered (newest first) — a plain replace
@@ -368,7 +369,7 @@ export async function updateWhatsAppMemory(
     if (merged.recent_products) {
       merged.recent_products = merged.recent_products.slice(0, 5);
     }
-    await redis.setex(`wamem:${phone}`, WA_MEM_TTL, JSON.stringify(merged));
+    await redis.setex(`wamem:${shopDomain}:${phone}`, WA_MEM_TTL, JSON.stringify(merged));
   } catch {
     // ponytail: fails open — never block the agent on memory writes
   }
