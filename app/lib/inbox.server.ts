@@ -22,7 +22,9 @@ export async function getInboxData(opts: { request: Request; session: { shop: st
 
   const url = new URL(request.url);
   const selectedId = url.searchParams.get("id") ?? null;
-  const channel = url.searchParams.get("channel") ?? "all";
+  // ponytail: defaults to WhatsApp since it's the only active channel now —
+  // revert to "all" if the website widget comes back.
+  const channel = url.searchParams.get("channel") ?? "whatsapp";
   const statusTab = url.searchParams.get("statusTab") ?? "pending";
   const dateRange = url.searchParams.get("dateRange") ?? "all";
   const search = url.searchParams.get("search") ?? "";
