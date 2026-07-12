@@ -51,9 +51,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   // Whether a real Shopify subscription exists (ACTIVE or PENDING). Used to
-  // distinguish "waiting for the billing webhook" from "merchant skipped the
-  // plan step" — both leave onboardingStep at 4, but only the former should
-  // show a 'verifying your subscription' state.
+  // distinguish "waiting for the billing webhook" from "merchant continued on
+  // free" so the final plan step can show a 'verifying your subscription' state.
   let hasShopifySub = false;
   try {
     const result = await admin.graphql(
@@ -69,7 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // fall back to false — merchant sees plan cards, worst case re-subscribing is blocked by Shopify
   }
 
-  return { shop, merchant, hasShopifySub, appUrl: process.env.SHOPIFY_APP_URL ?? "", waAppId: process.env.WHATSAPP_APP_ID ?? "" };
+  return { shop, merchant, hasShopifySub, appUrl: process.env.SHOPIFY_APP_URL ?? "" };
 };
 
 const VALID_VOICES_ONBOARDING = new Set([
@@ -87,7 +86,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (formData.get("intent") === "save-step") {
     try {
       const rawStep = Number(formData.get("step")) || 1;
-      const updateData: Record<string, unknown> = { onboardingStep: Math.min(4, Math.max(1, rawStep)) };
+      const updateData: Record<string, unknown> = { onboardingStep: Math.min(3, Math.max(1, rawStep)) };
       const botName = formData.get("botName");
       const widgetGreeting = formData.get("widgetGreeting");
       const widgetColor = formData.get("widgetColor");
@@ -121,7 +120,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const config = PLAN_CONFIG[plan as OnboardingPlanKey];
     const isTest = process.env.BILLING_TEST_MODE === "true";
     const shopHandle = session.shop.replace(".myshopify.com", "");
-    // Return merchant to Step 4 (Go Live) after Shopify billing confirmation
+    // Return merchant to onboarding after Shopify billing confirmation.
     const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}`;
 
     try {
@@ -169,10 +168,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return { error: "No confirmation URL returned. Please try again." };
       }
 
-      // Save step progress so merchant resumes at step 4 if they return later
+      // Save step progress so merchant resumes at the final plan step if they return later.
       await prisma.merchant.update({
         where: { shopDomain: session.shop },
-        data: { onboardingStep: 4 },
+        data: { onboardingStep: 3 },
       }).catch(() => null);
 
       return { redirectUrl: result.confirmationUrl };
@@ -186,7 +185,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       await prisma.merchant.update({
         where: { shopDomain: session.shop },
-        data: { onboardingStep: 4 },
+        data: { onboardingStep: 3 },
       });
     } catch {
       return { error: "Failed to save progress. Please try again." };
@@ -213,7 +212,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         botName,
         brandVoice,
         onboardedAt: new Date(),
-        onboardingStep: 4,
+        onboardingStep: 3,
       },
     });
   } catch {
@@ -365,14 +364,76 @@ function OnboardingPlanCard({ plan, onChoose, isLoading, choosingPlan }: Onboard
   );
 }
 
+function OnboardingFreePlanCard({ onContinue, isLoading }: { onContinue: () => void; isLoading: boolean }) {
+  return (
+    <div
+      style={{
+        flex: "1 1 220px",
+        border: "1px solid #e1e3e5",
+        borderRadius: "12px",
+        padding: "20px",
+        background: "#ffffff",
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <span style={{ fontSize: "20px", color: "#6d7175" }}>●</span>
+        <span style={{ fontSize: "18px", fontWeight: 700, color: "#202223" }}>Free</span>
+      </div>
+      <div>
+        <span style={{ fontSize: "32px", fontWeight: 800, color: "#202223" }}>$0</span>
+        <span style={{ fontSize: "14px", color: "#6d7175" }}> / month</span>
+      </div>
+      <div style={{ fontSize: "13px", color: "#6d7175", fontStyle: "italic" }}>
+        Start with the widget live and upgrade when you need more volume
+      </div>
+      <div style={{ fontSize: "13px", fontWeight: 600, color: "#6d7175" }}>
+        {PLAN_LIMITS.free} conversations / mo
+      </div>
+      <ul style={{ margin: "4px 0 0", paddingLeft: "18px", color: "#202223", fontSize: "13px" }}>
+        <li style={{ marginBottom: "4px" }}>AI shopping assistant on your storefront</li>
+        <li style={{ marginBottom: "4px" }}>Basic storefront chat activation</li>
+        <li style={{ marginBottom: "4px" }}>Upgrade any time from Billing</li>
+      </ul>
+      <div style={{ marginTop: "auto", paddingTop: "12px" }}>
+        <button
+          type="button"
+          onClick={onContinue}
+          disabled={isLoading}
+          style={{
+            width: "100%",
+            padding: "11px 16px",
+            background: "#1a1a1a",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "8px",
+            cursor: isLoading ? "default" : "pointer",
+            fontWeight: 700,
+            fontSize: "14px",
+            opacity: isLoading ? 0.65 : 1,
+            transition: "opacity 0.15s",
+          }}
+        >
+          Continue on free
+        </button>
+        <div style={{ textAlign: "center", marginTop: "6px", fontSize: "11px", color: "#6d7175" }}>
+          No subscription needed
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function Onboarding() {
-  const { shop, merchant, hasShopifySub, appUrl, waAppId } = useLoaderData<typeof loader>();
+  const { shop, merchant, hasShopifySub, appUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
-  const [step, setStep] = useState(merchant.onboardingStep || 1);
+  const [step, setStep] = useState(Math.min(3, Math.max(1, merchant.onboardingStep || 1)));
   const [botName, setBotName] = useState(merchant.botName || "");
   const [widgetColor, setWidgetColor] = useState(merchant.widgetColor);
   const [widgetGreeting, setWidgetGreeting] = useState(merchant.widgetGreeting);
@@ -403,10 +464,6 @@ export default function Onboarding() {
       return;
     }
 
-    if ("skippedPlan" in data && data.skippedPlan === true) {
-      setStep(4);
-      return;
-    }
   }, [fetcher.state, fetcher.data, shopify]);
 
   const selectedPreset = VOICE_PRESETS.find((p) => p.value === brandVoice);
@@ -423,7 +480,7 @@ export default function Onboarding() {
   };
 
   const skipPlan = () => {
-    fetcher.submit({ intent: "skip-plan" }, { method: "POST" });
+    finish();
   };
 
   const finish = () => {
@@ -459,7 +516,7 @@ export default function Onboarding() {
     <s-page heading="Welcome to NeonPing">
       {/* Visual step progress bar */}
       <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "24px", padding: "0 4px" }}>
-        {[1, 2, 3, 4].map((s) => (
+        {[1, 2, 3].map((s) => (
           <div key={s} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div
               style={{
@@ -477,13 +534,13 @@ export default function Onboarding() {
             >
               {s < step ? "✓" : s}
             </div>
-            {s < 4 && <div style={{ width: "40px", height: "2px", background: s < step ? "#1a1a1a" : "#e1e1e1" }} />}
+            {s < 3 && <div style={{ width: "40px", height: "2px", background: s < step ? "#1a1a1a" : "#e1e1e1" }} />}
           </div>
         ))}
       </div>
 
       {step === 1 && (
-        <s-section heading="Step 1 of 4 — Brand setup">
+        <s-section heading="Step 1 of 3 — Brand identity">
           <s-text-field
             label="Bot name"
             value={botName}
@@ -503,17 +560,6 @@ export default function Onboarding() {
             onInput={(e: Event) => setWidgetColor((e.target as HTMLInputElement).value)}
             help-text="Choose a color that matches your brand."
           ></s-color-field>
-          <WidgetPreview color={widgetColor} greeting={widgetGreeting} botName={botName} position="bottom-right" />
-          <s-stack direction="inline" gap="base">
-            <s-button onClick={() => goToStep(2, { botName, widgetGreeting, widgetColor, brandVoice })} variant="primary">
-              Next
-            </s-button>
-          </s-stack>
-        </s-section>
-      )}
-
-      {step === 2 && (
-        <s-section heading="Step 2 of 4 — AI personality">
           <s-select
             label="Brand voice"
             value={brandVoice}
@@ -531,118 +577,17 @@ export default function Onboarding() {
               <s-text>{'"'}{selectedPreset.preview}{'"'}</s-text>
             </s-paragraph>
           ) : null}
+          <WidgetPreview color={widgetColor} greeting={widgetGreeting} botName={botName} position="bottom-right" />
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => goToStep(1)} variant="tertiary">
-              Back
-            </s-button>
-            <s-button onClick={() => goToStep(3)} variant="primary">
+            <s-button onClick={() => goToStep(2, { botName, widgetGreeting, widgetColor, brandVoice })} variant="primary">
               Next
             </s-button>
           </s-stack>
         </s-section>
       )}
 
-      {step === 3 && (
-        <s-section heading="Step 3 of 4 — Choose Your Plan">
-          {isActivePlan ? (
-            /* Merchant already subscribed — show confirmation state */
-            <div>
-              <div style={{ marginBottom: "20px" }}>
-                <s-banner tone="success">
-                  <s-text><strong>You&apos;re on the {merchant.plan.charAt(0).toUpperCase() + merchant.plan.slice(1)} plan</strong></s-text>
-                  <s-text tone="neutral">Your plan is active and ready to go.</s-text>
-                </s-banner>
-              </div>
-              <s-stack direction="inline" gap="base">
-                <s-button onClick={() => goToStep(2)} variant="tertiary">
-                  Back
-                </s-button>
-                <s-button onClick={() => goToStep(4)} variant="primary">
-                  Continue to Go Live →
-                </s-button>
-              </s-stack>
-            </div>
-          ) : hasShopifySub ? (
-            /* Real Shopify subscription exists but the webhook hasn't written the plan yet.
-               Checked against Shopify directly — a skipped plan step no longer traps the
-               merchant in this state (#199). */
-            <div style={{ textAlign: "center", padding: "48px 24px" }}>
-              <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
-              <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 8 }}>Verifying your subscription…</p>
-              <p style={{ color: "#6d7175", fontSize: 14 }}>
-                Your Shopify subscription is being confirmed. This usually takes a few seconds.
-                Refresh the page if this message persists.
-              </p>
-            </div>
-          ) : (
-            /* Show plan selection cards */
-            <div>
-              <div style={{ marginBottom: "8px" }}>
-                <s-text tone="neutral">
-                  All plans include a 7-day free trial — no charge today. Cancel any time.
-                </s-text>
-              </div>
-
-              {billingError && (
-                <div style={{ marginBottom: "16px" }}>
-                  <s-banner tone="critical">{billingError}</s-banner>
-                </div>
-              )}
-
-              {/* Plan cards */}
-              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", paddingTop: "16px" }}>
-                {ONBOARDING_PLANS.map((plan) => (
-                  <OnboardingPlanCard
-                    key={plan.key}
-                    plan={plan}
-                    onChoose={choosePlan}
-                    isLoading={isBillingLoading}
-                    choosingPlan={choosingPlan}
-                  />
-                ))}
-              </div>
-
-              <div style={{ marginTop: "24px" }}>
-                <s-stack direction="inline" gap="base">
-                  <s-button onClick={() => goToStep(2)} variant="tertiary">
-                    Back
-                  </s-button>
-                </s-stack>
-              </div>
-
-              {/* Subtle skip link */}
-              <div style={{ marginTop: "16px", textAlign: "center" }}>
-                <s-button variant="tertiary" onClick={skipPlan} {...(fetcher.state !== "idle" ? { disabled: true } : {})}>
-                  Skip for now
-                </s-button>
-              </div>
-            </div>
-          )}
-        </s-section>
-      )}
-
-      {step === 4 && (
-        <s-section heading="Step 4 of 4 — Go live">
-          {/* Plan status banner at step 4 */}
-          {!isActivePlan && (
-            <div style={{ marginBottom: "16px" }}>
-              {hasShopifySub ? (
-                /* Merchant returned from billing but webhook hasn't fired yet — show pending state, not "no plan" warning */
-                <div style={{ textAlign: "center", padding: "24px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
-                  <p style={{ fontWeight: 600, fontSize: 14, color: "#1e40af", marginBottom: 4 }}>Your trial is being confirmed…</p>
-                  <p style={{ color: "#3b82f6", fontSize: 13, margin: 0 }}>Shopify is activating your subscription. Refresh if this persists.</p>
-                </div>
-              ) : (
-                <s-banner tone="warning">
-                  Free plan active — customers can chat now, up to {PLAN_LIMITS.free} conversations per month.{" "}
-                  <button type="button" onClick={() => goToStep(3)} style={{ background: "none", border: "none", color: "inherit", fontWeight: 600, cursor: "pointer", textDecoration: "underline", padding: 0, fontSize: "inherit" }}>
-                    View plan options →
-                  </button>
-                </s-banner>
-              )}
-            </div>
-          )}
-
+      {step === 2 && (
+        <s-section heading="Step 2 of 3 — Go live">
           <s-paragraph>
             Enable the NeonPing chat widget on your storefront by opening your theme editor
             and turning on the App Embed.
@@ -669,50 +614,6 @@ export default function Onboarding() {
           <s-text tone="neutral">
             In the theme editor: click <strong>Add block</strong> → find <strong>NeonPing Chat Widget</strong> → click <strong>Save</strong>. That{"'"}s it — the widget is live on your store.
           </s-text>
-          {/* WhatsApp channel prompt */}
-          {!merchant.waConnectedAt && (
-            <div style={{ marginBottom: 24, padding: 16, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#25d366", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700, fontSize: 16 }}>W</div>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>Add WhatsApp (optional)</div>
-                  <div style={{ fontSize: 12, color: "#6d7175" }}>Reach customers on WhatsApp with the same AI</div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!waAppId) {
-                    shopify.toast.show("WhatsApp connection is unavailable: WHATSAPP_APP_ID is not configured.", { isError: true });
-                    return;
-                  }
-                  const redirectUri = encodeURIComponent(`${appUrl}/api/whatsapp/connect`);
-                  const scope = encodeURIComponent("whatsapp_business_management,whatsapp_business_messaging");
-                  const extras = encodeURIComponent(JSON.stringify({ setup: {}, featureType: "", sessionInfoVersion: "3" }));
-                  const url = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${waAppId}&display=popup&extras=${extras}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${encodeURIComponent(merchant.shopDomain)}`;
-                  const popup = window.open(url, "waConnect", "width=660,height=750,scrollbars=yes");
-                  const timer = setInterval(() => {
-                    if (popup?.closed) { clearInterval(timer); window.location.reload(); }
-                  }, 500);
-                }}
-                disabled={!waAppId}
-                style={{ background: "#25d366", color: "white", border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
-              >
-                Connect WhatsApp Business
-              </button>
-              <span style={{ fontSize: 12, color: "#6d7175", marginLeft: 10 }}>
-                {waAppId ? "Takes ~2 minutes · Can skip for now" : "Unavailable: WhatsApp app ID is not configured"}
-              </span>
-            </div>
-          )}
-
-          {/* If already connected, show a success badge instead */}
-          {merchant.waConnectedAt && merchant.waPhone && (
-            <div style={{ marginBottom: 24, padding: 12, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ color: "#25d366", fontWeight: 700 }}>✓</span>
-              <span style={{ fontSize: 13, color: "#027a48" }}>WhatsApp connected — {merchant.waPhone}</span>
-            </div>
-          )}
 
           <s-checkbox
             label="I've added the widget to my theme"
@@ -730,15 +631,87 @@ export default function Onboarding() {
           ) : null}
 
           <s-stack direction="inline" gap="base">
-            <s-button onClick={() => goToStep(3)} variant="tertiary">
+            <s-button onClick={() => goToStep(1)} variant="tertiary">
               Back
             </s-button>
-            <s-button onClick={finish} variant="primary" disabled={!themeConfirmed || fetcher.state !== "idle"}>
-              Finish
+            <s-button onClick={() => goToStep(3)} variant="primary" disabled={!themeConfirmed || fetcher.state !== "idle"}>
+              Continue
             </s-button>
           </s-stack>
           {!themeConfirmed && (
-            <s-banner tone="warning">Please confirm you&apos;ve added the widget to your theme before finishing.</s-banner>
+            <s-banner tone="warning">Please confirm you&apos;ve added the widget to your theme before continuing.</s-banner>
+          )}
+        </s-section>
+      )}
+
+      {step === 3 && (
+        <s-section heading="Step 3 of 3 — Plan options">
+          {isActivePlan ? (
+            /* Merchant already subscribed — show confirmation state */
+            <div>
+              <div style={{ marginBottom: "20px" }}>
+                <s-banner tone="success">
+                  <s-text><strong>You&apos;re on the {merchant.plan.charAt(0).toUpperCase() + merchant.plan.slice(1)} plan</strong></s-text>
+                  <s-text tone="neutral">Your plan is active and ready to go.</s-text>
+                </s-banner>
+              </div>
+              <s-stack direction="inline" gap="base">
+                <s-button onClick={() => goToStep(2)} variant="tertiary">
+                  Back
+                </s-button>
+                <s-button onClick={finish} variant="primary" disabled={fetcher.state !== "idle"}>
+                  Finish
+                </s-button>
+              </s-stack>
+            </div>
+          ) : hasShopifySub ? (
+            /* Real Shopify subscription exists but the webhook hasn't written the plan yet.
+               Checked against Shopify directly — a skipped plan step no longer traps the
+               merchant in this state (#199). */
+            <div style={{ textAlign: "center", padding: "48px 24px" }}>
+              <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
+              <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 8 }}>Verifying your subscription…</p>
+              <p style={{ color: "#6d7175", fontSize: 14 }}>
+                Your Shopify subscription is being confirmed. This usually takes a few seconds.
+                Refresh the page if this message persists.
+              </p>
+            </div>
+          ) : (
+            /* Show plan selection cards */
+            <div>
+              <div style={{ marginBottom: "8px" }}>
+                <s-text tone="neutral">
+                  Your assistant is ready. Continue on free, or choose a paid plan for more monthly conversations.
+                </s-text>
+              </div>
+
+              {billingError && (
+                <div style={{ marginBottom: "16px" }}>
+                  <s-banner tone="critical">{billingError}</s-banner>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", paddingTop: "16px" }}>
+                <OnboardingFreePlanCard onContinue={skipPlan} isLoading={fetcher.state !== "idle"} />
+                {ONBOARDING_PLANS.map((plan) => (
+                  <OnboardingPlanCard
+                    key={plan.key}
+                    plan={plan}
+                    onChoose={choosePlan}
+                    isLoading={isBillingLoading}
+                    choosingPlan={choosingPlan}
+                  />
+                ))}
+              </div>
+
+              <div style={{ marginTop: "24px" }}>
+                <s-stack direction="inline" gap="base">
+                  <s-button onClick={() => goToStep(2)} variant="tertiary">
+                    Back
+                  </s-button>
+                </s-stack>
+              </div>
+            </div>
           )}
         </s-section>
       )}
