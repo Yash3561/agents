@@ -2,6 +2,7 @@
 // No <s-page> wrapper; <ui-title-bar> registers the admin chrome heading.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Form, useActionData, useFetcher, useLoaderData, useRouteError, useSearchParams, useNavigation } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -67,10 +68,113 @@ function relTime(d: Date | string) {
   return `${Math.floor(s / 86400)}d`;
 }
 
-function formatPhone(sessionId: string) {
-  const raw = sessionId.replace(/^whatsapp_/, "");
-  if (raw.length < 6) return raw;
-  return raw.slice(0, 2) + " •••• " + raw.slice(-4);
+function formatPhone(sessionId: string): string {
+  const digits = sessionId.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+  return `+${digits}`;
+}
+
+type StatusKey = "needsReply" | "aiHandling" | "aiPaused" | "resolved";
+
+function getConversationStatus(conv: { resolved?: boolean | null; escalated?: boolean | null; aiPaused?: boolean | null }, isAiPaused?: boolean): StatusKey {
+  if (conv.resolved) return "resolved";
+  if (isAiPaused ?? conv.aiPaused) return "aiPaused";
+  if (conv.escalated) return "needsReply";
+  return "aiHandling";
+}
+
+function statusLabel(status: StatusKey) {
+  return status === "needsReply"
+    ? "Needs reply"
+    : status === "aiHandling"
+    ? "AI handling"
+    : status === "aiPaused"
+    ? "AI paused"
+    : "Resolved";
+}
+
+function statusTone(status: StatusKey): "success" | "warning" | "info" {
+  return status === "resolved" ? "success" : status === "needsReply" || status === "aiPaused" ? "warning" : "info";
+}
+
+function ChannelIndicator({ channel, size = 32 }: { channel?: string | null; size?: number }) {
+  const isWA = channel === "whatsapp";
+  return (
+    <div style={{
+      width: size,
+      height: size,
+      borderRadius: "50%",
+      flexShrink: 0,
+      background: "var(--color-surface-default)",
+      border: `1px solid ${isWA ? "var(--color-channel-whatsapp)" : "var(--color-border)"}`,
+      color: isWA ? "var(--color-channel-whatsapp)" : "var(--color-channel-web)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}>
+      <svg width={size > 24 ? 16 : 12} height={size > 24 ? 16 : 12} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+        {isWA ? (
+          <path d="M4.2 13.2 2.5 14l.5-1.9A6 6 0 1 1 4.2 13.2Zm1.5-7.7c.2-.2.5-.2.7 0l.8 1c.2.2.2.5 0 .7l-.4.5c.4.8 1 1.4 1.8 1.8l.5-.4c.2-.2.5-.2.7 0l1 .8c.2.2.2.5 0 .7-.4.5-.9.8-1.5.7-2.1-.3-4-2.2-4.3-4.3-.1-.6.2-1.1.7-1.5Z" strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
+          <path d="M2.5 4.5h11v7h-11v-7Zm4 9h3M8 11.5v2" strokeLinecap="round" strokeLinejoin="round" />
+        )}
+      </svg>
+    </div>
+  );
+}
+
+function EmptyState({
+  heading,
+  subtext,
+  action,
+}: {
+  heading: string;
+  subtext: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--spacing-sm)", color: "var(--color-neutral)" }}>
+      <div style={{ width: 48, height: 48, borderRadius: "var(--radius-base)", background: "var(--color-surface-default)", border: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-neutral)" }}>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+          <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v5A3.5 3.5 0 0 1 15.5 15H11l-4.5 4v-4A3.5 3.5 0 0 1 5 11.5v-5Z" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M9 8h6M9 11h4" strokeLinecap="round" />
+        </svg>
+      </div>
+      <div style={{ fontSize: "var(--type-empty-heading)", fontWeight: 700, color: "var(--color-text)" }}>{heading}</div>
+      <div style={{ fontSize: "var(--type-empty-subtext)", lineHeight: "var(--line-body)", maxWidth: 320 }}>{subtext}</div>
+      {action}
+    </div>
+  );
+}
+
+function ThreePanelSkeleton() {
+  const line = (width: string, height = "12px") => (
+    <div style={{ width, height, borderRadius: "var(--radius-pill)", background: "var(--color-skeleton)" }} />
+  );
+  return (
+    <div style={{ display: "flex", height: "100vh" }}>
+      <div style={{ width: 300, flexShrink: 0, borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "var(--spacing-sm) var(--spacing-md-sm)", borderBottom: "1px solid var(--color-border)", display: "flex", gap: "var(--spacing-sm)" }}>{line("52px")}{line("68px")}</div>
+        <div style={{ padding: "var(--spacing-sm) var(--spacing-md-sm)", borderBottom: "1px solid var(--color-border)" }}>{line("100%", "32px")}</div>
+        <div style={{ padding: "var(--spacing-md-sm)", display: "flex", flexDirection: "column", gap: "var(--spacing-md-sm)" }}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} style={{ display: "flex", gap: "var(--spacing-md-sm)", alignItems: "center" }}>
+              {line("32px", "32px")}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "var(--spacing-sm)" }}>{line("70%")}{line("90%")}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ flex: 1, borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "var(--spacing-md-sm) var(--spacing-md)", borderBottom: "1px solid var(--color-border)", display: "flex", gap: "var(--spacing-md-sm)", alignItems: "center" }}>{line("32px", "32px")}{line("180px")}</div>
+        <div style={{ padding: "var(--spacing-md)", borderBottom: "1px solid var(--color-border)" }}>{line("100%", "52px")}</div>
+        <div style={{ flex: 1, padding: "var(--spacing-md)", display: "flex", flexDirection: "column", gap: "var(--spacing-md-sm)" }}>{line("55%", "36px")}{line("68%", "36px")}{line("45%", "36px")}</div>
+      </div>
+      <div style={{ width: 280, flexShrink: 0, padding: "var(--spacing-md)", display: "flex", flexDirection: "column", gap: "var(--spacing-lg)" }}>{line("80px")}{line("140px")}{line("120px")}{line("160px")}</div>
+    </div>
+  );
 }
 
 // ─── Loader ──────────────────────────────────────────────────────────────────
@@ -122,7 +226,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const countBase: Prisma.ConversationWhereInput = { shopDomain: shop };
 
-  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg] =
+  const [conversations, totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount, merchant, ratingAgg, selected, currencyResult] =
     await Promise.all([
       prisma.conversation.findMany({
         where,
@@ -166,23 +270,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: countBase,
         _sum: { merchantThumbsUp: true, merchantThumbsDown: true },
       }),
+      selectedId
+        ? prisma.conversation.findFirst({ where: { id: selectedId, shopDomain: shop } })
+        : Promise.resolve(null),
+      adminGraphql<{ shop: { currencyCode: string } }>(
+        session.shop,
+        session.accessToken ?? "",
+        `{ shop { currencyCode } }`,
+      ).catch(() => null),
     ]);
 
-  let selected = null;
-  if (selectedId) {
-    const raw = await prisma.conversation.findUnique({ where: { id: selectedId } });
-    if (raw && raw.shopDomain === shop) selected = raw;
-  }
-
-  let currencyCode = "USD";
-  try {
-    const shopData = await adminGraphql<{ shop: { currencyCode: string } }>(
-      session.shop,
-      session.accessToken ?? "",
-      `{ shop { currencyCode } }`,
-    );
-    currencyCode = shopData.shop?.currencyCode ?? "USD";
-  } catch { /* fall back to USD */ }
+  const currencyCode = currencyResult?.shop?.currencyCode ?? "USD";
 
   const storeHandle = shop.replace(".myshopify.com", "");
 
@@ -331,7 +429,7 @@ export default function InboxFull() {
   const shopify = useAppBridge();
   const {
     conversations,
-    totalCount, purchasedCount, inCartCount, escalatedCount, liveCount, pendingCount, resolvedCount,
+    totalCount, purchasedCount, inCartCount, escalatedCount, liveCount,
     page, hasMore,
     search, dateRange, statusTab, channel,
     currencyCode, storeHandle,
@@ -404,6 +502,7 @@ export default function InboxFull() {
   const isAiPaused = pauseFetcher.formData
     ? pauseFetcher.formData.get("pause") === "true"
     : selected?.aiPaused ?? false;
+  const selectedStatus = selected ? getConversationStatus(selected, isAiPaused) : null;
 
   useEffect(() => {
     const params = new URLSearchParams({ since: lastSeen });
@@ -486,6 +585,7 @@ export default function InboxFull() {
   }, [search]);
 
   const isSubmitting = navigation.state === "submitting";
+  const isRouteLoading = navigation.state === "loading";
 
   function setFilter(key: string, value: string) {
     const next = new URLSearchParams(searchParams);
@@ -545,6 +645,9 @@ export default function InboxFull() {
       {/* ui-title-bar registers the heading in the app window chrome */}
       <ui-title-bar title="Inbox" />
 
+      {isRouteLoading ? (
+        <ThreePanelSkeleton />
+      ) : (
       <div style={{ display: "flex", height: "100vh" }}>
 
         {/* ── Left Panel ───────────────────────────────────────────────────── */}
@@ -554,8 +657,8 @@ export default function InboxFull() {
           <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
             <span>{totalCount} total</span>
             {purchasedCount > 0 && <span style={{ color: "var(--color-success)" }}>● {purchasedCount} purchased</span>}
-            {inCartCount > 0 && <span style={{ color: "var(--color-primary)" }}>● {inCartCount} in cart</span>}
-            {escalatedCount > 0 && <span style={{ color: "var(--color-critical)" }}>● {escalatedCount} escalated</span>}
+            {inCartCount > 0 && <span style={{ color: "var(--color-cart)" }}>● {inCartCount} in cart</span>}
+            {escalatedCount > 0 && <span style={{ color: "var(--color-warning)" }}>● {escalatedCount} needs reply</span>}
             {liveCount > 0 && <s-badge tone="success">{liveCount} live</s-badge>}
             {thumbsUp + thumbsDown > 0 && (
               <span title={`${thumbsUp} rated helpful, ${thumbsDown} rated not helpful`}>
@@ -582,27 +685,22 @@ export default function InboxFull() {
           {/* Status tabs */}
           <div style={{ display: "flex", borderBottom: "2px solid var(--color-border)" }}>
             {([
-              { key: "open", label: "Open", count: escalatedCount, activeColor: "var(--color-warning)", activeBg: "var(--color-warning-subdued)" },
-              { key: "pending", label: "Pending", count: pendingCount, activeColor: "var(--color-primary)", activeBg: "var(--color-primary-subdued)" },
-              { key: "resolved", label: "Resolved", count: resolvedCount, activeColor: "var(--color-neutral)", activeBg: "var(--color-neutral-subdued)" },
+              { key: "open", label: "Needs reply", activeColor: "var(--color-warning)" },
+              { key: "pending", label: "AI handling", activeColor: "var(--color-neutral)" },
+              { key: "resolved", label: "Resolved", activeColor: "var(--color-success)" },
             ] as const).map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => { setActiveTab(tab.key); setFilter("statusTab", tab.key); }}
                 style={{
-                  flex: 1, padding: "8px 4px", border: "none", background: "none", cursor: "pointer",
-                  fontSize: 12, fontWeight: activeTab === tab.key ? 600 : 400,
+                  flex: 1, padding: "var(--spacing-sm) var(--spacing-xs)", border: "none", background: "none", cursor: "pointer",
+                  fontSize: "var(--type-metadata)", fontWeight: activeTab === tab.key ? 600 : 400,
                   color: activeTab === tab.key ? tab.activeColor : "var(--color-neutral)",
                   borderBottom: activeTab === tab.key ? `2px solid ${tab.activeColor}` : "2px solid transparent",
-                  marginBottom: -2, display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                  marginBottom: -2, display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--spacing-xs)",
                 }}
               >
                 {tab.label}
-                {tab.count > 0 && (
-                  <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: "var(--radius-pill)", background: activeTab === tab.key ? tab.activeBg : "var(--color-neutral-subdued)", color: activeTab === tab.key ? tab.activeColor : "var(--color-neutral)" }}>
-                    {tab.count}
-                  </span>
-                )}
               </button>
             ))}
           </div>
@@ -616,19 +714,25 @@ export default function InboxFull() {
           {/* Conversation rows */}
           <div ref={listRef} style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
             {allConversations.length === 0 ? (
-              <div style={{ padding: "24px 16px", textAlign: "center" }}>
-                <s-text tone="neutral">No conversations match these filters.</s-text>
+              <div style={{ padding: "var(--spacing-lg) var(--spacing-md)" }}>
+                <EmptyState
+                  heading={search || channel !== "all" || dateRange !== "all" ? "No matching conversations" : "No conversations yet"}
+                  subtext={search || channel !== "all" || dateRange !== "all" ? "Try a different search, channel, or date filter." : "Customer conversations will appear here when NeonPing receives them."}
+                />
               </div>
             ) : (
               <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
                 {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                   const conv = allConversations[virtualRow.index];
                   const isWA = conv.channel === "whatsapp";
+                  const rowStatus = getConversationStatus(conv);
                   const convMsgs = Array.isArray(conv.messages) ? (conv.messages as Array<{ role: string }>) : [];
                   const lastRole = convMsgs.length > 0 ? convMsgs[convMsgs.length - 1]?.role : null;
-                  const isUnread = conv.escalated && !conv.resolved && lastRole === "user";
+                  const isUnread = rowStatus === "needsReply" && lastRole === "user";
                   const customerDisplay = (conv as typeof conv & { customerName?: string | null }).customerName
                     ?? (isWA ? formatPhone(conv.sessionId) : "Visitor");
+                  const isSelected = conv.id === localSelectedId;
+                  const hasRevenue = conv.orderRevenueCents != null && conv.orderRevenueCents > 0;
                   return (
                     <div
                       key={conv.id}
@@ -649,49 +753,35 @@ export default function InboxFull() {
                         onClick={() => selectConversation(conv.id)}
                         onKeyDown={(e) => e.key === "Enter" && selectConversation(conv.id)}
                         style={{
-                          padding: "12px 12px",
-                          borderBottom: "1px solid var(--color-border)",
+                          padding: "var(--spacing-md-sm) var(--spacing-md)",
                           cursor: "pointer",
-                          background: selected?.id === conv.id ? "var(--color-primary-subdued)" : "var(--color-surface-default)",
-                          borderLeft: selected?.id === conv.id
-                            ? "3px solid var(--color-primary)"
-                            : conv.escalated && !conv.resolved
-                            ? "3px solid var(--color-warning)"
-                            : conv.resolved
-                            ? "3px solid var(--color-neutral-border)"
-                            : "3px solid transparent",
+                          background: "var(--color-surface-default)",
+                          borderBottom: "1px solid var(--color-border)",
+                          borderLeft: isSelected ? "3px solid var(--color-selection)" : "3px solid transparent",
                           display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                          minHeight: 64,
+                          alignItems: "flex-start",
+                          gap: "var(--spacing-md-sm)",
+                          minHeight: 72,
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          {isUnread
-                            ? <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />
-                            : <span style={{ width: 8, flexShrink: 0 }} />}
-                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: isWA ? "var(--color-channel-whatsapp)" : "var(--color-channel-web)", flexShrink: 0, display: "inline-block" }} />
-                          <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: isWA ? "var(--color-channel-whatsapp)" : "var(--color-channel-web)" }}>{isWA ? "WA" : "Web"}</span>
-                          <span style={{ fontWeight: 600, fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--color-text)" }}>
-                            {customerDisplay}
-                          </span>
-                          <span style={{ fontSize: 12, color: "var(--color-neutral)", opacity: 0.65, flexShrink: 0 }}>
-                            {relTime(conv.lastMessageAt)}
-                          </span>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 14 }}>
-                          <span style={{ fontSize: 12, color: "var(--color-neutral)", opacity: 0.75, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {conv.firstUserMessage?.slice(0, 60) ?? "No message"}
-                          </span>
-                          <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                            {conv.resolved && !conv.escalated && (
-                              <s-badge tone="success">AI</s-badge>
-                            )}
-                            {conv.escalated && !conv.resolved && (
-                              <s-badge tone="warning">Needs reply</s-badge>
-                            )}
-                            {conv.orderRevenueCents != null && (
-                              <s-badge tone="success">${Math.round(conv.orderRevenueCents / 100)}</s-badge>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: isUnread ? "var(--color-warning)" : "transparent", marginTop: "var(--spacing-md-sm)", flexShrink: 0 }} />
+                        <ChannelIndicator channel={conv.channel} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)", marginBottom: "var(--spacing-xs)" }}>
+                            <span style={{ fontWeight: 600, fontSize: "var(--type-row)", color: "var(--color-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {customerDisplay}
+                            </span>
+                            <span style={{ fontSize: "var(--type-metadata)", color: "var(--color-neutral)", flexShrink: 0, opacity: 0.8 }}>
+                              {relTime(conv.lastMessageAt)}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}>
+                            <span style={{ fontSize: "var(--type-metadata)", color: "var(--color-neutral)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.85 }}>
+                              {(conv.firstUserMessage ?? "").slice(0, 60) || "No messages yet"}
+                            </span>
+                            <s-badge tone={statusTone(rowStatus)}>{statusLabel(rowStatus)}</s-badge>
+                            {hasRevenue && (
+                              <s-badge tone="success">${((conv.orderRevenueCents ?? 0) / 100).toFixed(0)}</s-badge>
                             )}
                           </div>
                         </div>
@@ -715,49 +805,38 @@ export default function InboxFull() {
         {/* ── Center Panel: Transcript ──────────────────────────────────────── */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
           {!selected ? (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 24px", background: "var(--color-surface)" }}>
-              <div style={{ maxWidth: 360, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 56, height: 56, borderRadius: "var(--radius-base)", background: "var(--color-primary-subdued)", border: "1px solid var(--color-primary-border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-primary)" }}>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-                    <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v5A3.5 3.5 0 0 1 15.5 15H11l-4.5 4v-4A3.5 3.5 0 0 1 5 11.5v-5Z" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M9 8h6M9 11h4" strokeLinecap="round" />
-                  </svg>
-                </div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--color-text)" }}>Select a conversation</div>
-                <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--color-neutral)" }}>
-                  Choose a conversation from the list to view the transcript and reply.
-                </div>
-              </div>
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--spacing-xl) var(--spacing-lg)", background: "var(--color-surface)" }}>
+              <EmptyState heading="Select a conversation" subtext="Choose a conversation from the list to view the transcript and reply." />
             </div>
           ) : (
             <>
               {/* Conversation header */}
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", gap: 12, background: "var(--color-surface-default)", flexShrink: 0 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: selected.channel === "whatsapp" ? "var(--color-channel-whatsapp)" : "var(--color-channel-web)", flexShrink: 0, display: "inline-block" }} />
-                <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: selected.channel === "whatsapp" ? "var(--color-channel-whatsapp)" : "var(--color-channel-web)", flexShrink: 0 }}>{selected.channel === "whatsapp" ? "WA" : "Web"}</span>
-                <span style={{ fontWeight: 600, fontSize: 14, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ padding: "var(--spacing-md-sm) var(--spacing-md)", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", gap: "var(--spacing-md-sm)", background: "var(--color-surface-default)", flexShrink: 0 }}>
+                <ChannelIndicator channel={selected.channel} />
+                <span style={{ fontWeight: 600, fontSize: "var(--type-panel-title)", flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {(selected as typeof selected & { customerName?: string | null }).customerName
                     ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
                 </span>
-                {selected.resolved ? (
-                  <s-badge tone="success">Resolved</s-badge>
-                ) : selected.escalated ? (
-                  <s-badge tone="warning">Needs reply</s-badge>
-                ) : isAiPaused ? (
-                  <s-badge tone="warning">AI paused</s-badge>
-                ) : (
-                  <s-badge tone="info">Pending</s-badge>
-                )}
-                {!selected.resolved && (
-                  <pauseFetcher.Form method="POST" style={{ display: "inline" }}>
-                    <input type="hidden" name="intent" value="pause-ai" />
-                    <input type="hidden" name="conversationId" value={selected.id} />
-                    <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
-                    <button type="submit" style={{ fontSize: 12, padding: "4px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer", color: isAiPaused ? "var(--color-warning)" : "var(--color-neutral)" }}>
-                      {isAiPaused ? "▶ Resume" : "⏸ Pause AI"}
-                    </button>
-                  </pauseFetcher.Form>
-                )}
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)", flexShrink: 0 }}>
+                  {selectedStatus && <s-badge tone={statusTone(selectedStatus)}>{statusLabel(selectedStatus)}</s-badge>}
+                  {!selected.resolved && (
+                    <Form method="post" style={{ display: "inline" }}>
+                      <input type="hidden" name="intent" value="resolve" />
+                      <input type="hidden" name="conversationId" value={selected.id} />
+                      <button type="submit" style={{ fontSize: "var(--type-metadata)", padding: "var(--spacing-xs) var(--spacing-md-sm)", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer" }}>Resolve</button>
+                    </Form>
+                  )}
+                  {!selected.resolved && (
+                    <pauseFetcher.Form method="POST" style={{ display: "inline" }}>
+                      <input type="hidden" name="intent" value="pause-ai" />
+                      <input type="hidden" name="conversationId" value={selected.id} />
+                      <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
+                      <button type="submit" style={{ fontSize: "var(--type-metadata)", padding: "var(--spacing-xs) var(--spacing-md-sm)", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer", color: isAiPaused ? "var(--color-warning)" : "var(--color-neutral)" }}>
+                        {isAiPaused ? "Resume AI" : "Pause AI"}
+                      </button>
+                    </pauseFetcher.Form>
+                  )}
+                </div>
               </div>
 
               {/* Collision banner */}
@@ -797,7 +876,7 @@ export default function InboxFull() {
               {/* Escalation note */}
               {selected.escalated && !selected.resolved && (
                 <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
-                  <s-banner tone="critical">Merchant reply enabled — use the box below to respond directly.</s-banner>
+                  <s-banner tone="warning">Merchant reply enabled — use the box below to respond directly.</s-banner>
                 </div>
               )}
 
@@ -813,7 +892,7 @@ export default function InboxFull() {
               {/* Messages */}
               <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: "4px" }}>
                 {msgs.length === 0 ? (
-                  <span style={{ color: "var(--color-neutral-light)", fontSize: "13px" }}>No messages recorded.</span>
+                  <EmptyState heading="No messages yet" subtext="Transcript messages will appear here as the conversation progresses." />
                 ) : msgs.map((msg, i) => {
                   if (msg.role === "note") {
                     return (
@@ -854,7 +933,7 @@ export default function InboxFull() {
                     <button
                       type="button"
                       onClick={() => setReplyMode("reply")}
-                      style={{ padding: "8px 16px", border: "none", background: "none", cursor: "pointer", fontSize: "13px", fontWeight: replyMode === "reply" ? 600 : 400, color: replyMode === "reply" ? "var(--color-primary)" : "var(--color-neutral)", borderBottom: replyMode === "reply" ? "2px solid var(--color-primary)" : "2px solid transparent" }}
+                      style={{ padding: "var(--spacing-sm) var(--spacing-md)", border: "none", background: "none", cursor: "pointer", fontSize: "var(--type-body)", fontWeight: replyMode === "reply" ? 600 : 400, color: replyMode === "reply" ? "var(--color-text)" : "var(--color-neutral)", borderBottom: replyMode === "reply" ? "2px solid var(--color-selection)" : "2px solid transparent" }}
                     >
                       Reply
                     </button>
@@ -933,7 +1012,7 @@ export default function InboxFull() {
                           disabled={isSubmitting}
                           style={{
                             padding: "8px 16px",
-                            background: isSubmitting ? "var(--color-neutral)" : replyMode === "note" ? "var(--color-warning)" : "var(--color-primary)",
+                            background: isSubmitting ? "var(--color-neutral)" : replyMode === "note" ? "var(--color-warning)" : "var(--color-selection)",
                             color: "var(--color-text-inverse)", border: "none",
                             borderRadius: "var(--radius-sm)",
                             cursor: isSubmitting ? "wait" : "pointer",
@@ -960,19 +1039,10 @@ export default function InboxFull() {
         </div>
 
         {/* ── Right Panel: Customer Sidebar ─────────────────────────────────── */}
-        <div style={{ width: 280, flexShrink: 0, overflowY: "auto", padding: "16px", borderLeft: "1px solid var(--color-border)" }}>
+        <div style={{ width: 280, flexShrink: 0, overflowY: "auto", padding: "var(--spacing-md)", borderLeft: "1px solid var(--color-border)" }}>
           {!selected ? (
-            <div style={{ minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "24px 12px" }}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 40, height: 40, borderRadius: "var(--radius-base)", background: "var(--color-neutral-subdued)", border: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-neutral)" }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-                    <path d="M7 8h10M7 12h6" strokeLinecap="round" />
-                    <path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--color-text)" }}>No conversation selected</div>
-                <div style={{ fontSize: 12, lineHeight: 1.5, color: "var(--color-neutral)" }}>Customer details appear here after you select a conversation.</div>
-              </div>
+            <div style={{ minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--spacing-lg) var(--spacing-md-sm)" }}>
+              <EmptyState heading="No conversation selected" subtext="Customer details appear here after you select a conversation." />
             </div>
           ) : (
             <s-stack direction="block" gap="base">
@@ -985,15 +1055,18 @@ export default function InboxFull() {
 
               <div>
                 <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Customer</div>
-                {selected.customerId ? (
-                  <s-link
-                    href={`https://admin.shopify.com/store/${storeHandle}/customers/${selected.customerId.replace("gid://shopify/Customer/", "")}`}
-                    target="_blank"
-                  >
-                    View in Shopify →
-                  </s-link>
-                ) : (
-                  <span style={{ fontSize: "13px", color: "var(--color-neutral)" }}>Anonymous</span>
+                <div style={{ fontSize: "var(--type-row)", fontWeight: 600, color: "var(--color-text)" }}>
+                  {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
+                </div>
+                {selected.customerId && (
+                  <div style={{ marginTop: "var(--spacing-xs)" }}>
+                    <s-link
+                      href={`https://admin.shopify.com/store/${storeHandle}/customers/${selected.customerId.replace("gid://shopify/Customer/", "")}`}
+                      target="_blank"
+                    >
+                      View in Shopify →
+                    </s-link>
+                  </div>
                 )}
               </div>
 
@@ -1001,7 +1074,7 @@ export default function InboxFull() {
                 <div>
                   <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Phone</div>
                   <span style={{ fontSize: "13px", color: "var(--color-text)" }}>
-                    {"****" + selected.sessionId.replace("whatsapp_", "").slice(-4)}
+                    {formatPhone(selected.sessionId)}
                   </span>
                 </div>
               )}
@@ -1009,7 +1082,7 @@ export default function InboxFull() {
               {selected.cartValue != null && (
                 <div>
                   <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Cart Value</div>
-                  <span style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-primary)" }}>
+                  <span style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-cart)" }}>
                     {fmtMoney(selected.cartValue)}
                   </span>
                 </div>
@@ -1028,7 +1101,7 @@ export default function InboxFull() {
                     <a
                       href={`https://${storeHandle}.myshopify.com/admin/orders/${selected.orderId.replace("gid://shopify/Order/", "")}`}
                       target="_top"
-                      style={{ fontSize: 12, color: "var(--color-primary)", textDecoration: "none", fontWeight: 500 }}
+                      style={{ fontSize: "var(--type-metadata)", color: "var(--color-text)", textDecoration: "none", fontWeight: 500 }}
                     >
                       View →
                     </a>
@@ -1066,12 +1139,7 @@ export default function InboxFull() {
                   <span>{selected.messageCount}</span>
                   <span style={{ color: "var(--color-neutral)" }}>Status</span>
                   <span>
-                    {selected.escalated && !selected.resolved
-                      ? <s-badge tone="critical">Escalated</s-badge>
-                      : selected.resolved
-                        ? <s-badge tone="info">Resolved</s-badge>
-                        : <s-badge tone="success">Open</s-badge>
-                    }
+                    {selectedStatus && <s-badge tone={statusTone(selectedStatus)}>{statusLabel(selectedStatus)}</s-badge>}
                   </span>
                   {selected.qualityScore != null && (
                     <>
@@ -1079,7 +1147,7 @@ export default function InboxFull() {
                       <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                         <span style={{
                           fontWeight: 600, fontSize: "13px",
-                          color: selected.qualityScore >= 4 ? "var(--color-channel-whatsapp)" : selected.qualityScore >= 3 ? "var(--color-warning)" : "var(--color-critical)",
+                          color: selected.qualityScore >= 4 ? "var(--color-success)" : selected.qualityScore >= 3 ? "var(--color-warning)" : "var(--color-critical)",
                         }}>
                           {selected.qualityScore.toFixed(1)}/5
                         </span>
@@ -1122,14 +1190,7 @@ export default function InboxFull() {
                 </div>
               )}
 
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--color-border)", paddingTop: "16px" }}>
-                {!selected.resolved && (
-                  <Form method="post">
-                    <input type="hidden" name="intent" value="resolve" />
-                    <input type="hidden" name="conversationId" value={selected.id} />
-                    <div style={{ width: "100%" }}><s-button type="submit" variant="secondary">Mark as Resolved</s-button></div>
-                  </Form>
-                )}
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-sm)", borderTop: "1px solid var(--color-border)", paddingTop: "var(--spacing-md)" }}>
                 {!selected.escalated && !selected.resolved && (
                   <Form method="post">
                     <input type="hidden" name="intent" value="escalate" />
@@ -1143,6 +1204,7 @@ export default function InboxFull() {
         </div>
 
       </div>
+      )}
     </>
   );
 }

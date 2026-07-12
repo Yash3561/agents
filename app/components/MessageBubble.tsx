@@ -1,7 +1,7 @@
 function ThumbIcon({ direction, filled }: { direction: "up" | "down"; filled: boolean }) {
   return (
     <svg
-      width="12" height="12" viewBox="0 0 20 20"
+      width="14" height="14" viewBox="0 0 20 20"
       fill={filled ? "currentColor" : "none"}
       stroke="currentColor"
       strokeWidth="1.5"
@@ -37,52 +37,52 @@ export function MessageBubble({ role, content, timestamp, merchantRating, onRate
   const label = isMerchant ? "You (Merchant)" : "NeonPing AI";
   const showRating = !isUser && !isMerchant && !!onRate;
   const bubbleBackground = isUser
-    ? "var(--color-primary-subdued)"
+    ? "var(--color-neutral-subdued)"
     : isMerchant
     ? "var(--color-success-subdued)"
     : "var(--color-surface-default)";
   const bubbleBorder = isUser
-    ? "var(--color-primary-border)"
+    ? "var(--color-border)"
     : isMerchant
     ? "var(--color-success-border)"
     : "var(--color-border)";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start", marginBottom: 4 }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start", marginBottom: "var(--spacing-xs)" }}>
       {!isUser && (
-        <span style={{ fontSize: 12, fontWeight: 500, letterSpacing: "0.04em", color: "var(--color-neutral-border)", marginBottom: 4, marginLeft: 4 }}>
+        <span style={{ fontSize: "var(--type-metadata)", fontWeight: 500, color: "var(--color-neutral-border)", marginBottom: "var(--spacing-xs)", marginLeft: "var(--spacing-xs)" }}>
           {label}
         </span>
       )}
       <div style={{
         background: bubbleBackground,
         border: `1px solid ${bubbleBorder}`,
-        padding: "8px 12px",
+        padding: "var(--spacing-sm) var(--spacing-md-sm)",
         borderRadius: isUser ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
         maxWidth: "75%",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
-        fontSize: 13,
-        lineHeight: 1.5,
+        fontSize: "var(--type-body)",
+        lineHeight: "var(--line-body)",
         color: "var(--color-text)",
       }}>
         {displayContent}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4, paddingLeft: isUser ? 0 : 4, paddingRight: isUser ? 4 : 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)", marginTop: "var(--spacing-xs)", paddingLeft: isUser ? 0 : "var(--spacing-xs)", paddingRight: isUser ? "var(--spacing-xs)" : 0 }}>
         {timestamp && (
-          <span style={{ fontSize: 12, color: "var(--color-neutral-border)" }}>
+          <span style={{ fontSize: "var(--type-metadata)", color: "var(--color-neutral-border)" }}>
             {new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}
         {showRating && (
-          <span style={{ display: "flex", gap: 4 }}>
+          <span style={{ display: "flex", gap: "var(--spacing-xs)" }}>
             <button
               type="button"
               aria-label="Mark this AI reply as helpful"
               aria-pressed={merchantRating === "up"}
               onClick={() => onRate!(merchantRating === "up" ? undefined : "up")}
               style={{
-                display: "flex", background: "none", border: "none", cursor: "pointer", padding: "2px",
+                display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "1px solid transparent", borderRadius: "var(--radius-sm)", cursor: "pointer", padding: "var(--spacing-xs)",
                 color: merchantRating === "up" ? "var(--color-success)" : "var(--color-border)",
               }}
             >
@@ -94,7 +94,7 @@ export function MessageBubble({ role, content, timestamp, merchantRating, onRate
               aria-pressed={merchantRating === "down"}
               onClick={() => onRate!(merchantRating === "down" ? undefined : "down")}
               style={{
-                display: "flex", background: "none", border: "none", cursor: "pointer", padding: "2px",
+                display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "1px solid transparent", borderRadius: "var(--radius-sm)", cursor: "pointer", padding: "var(--spacing-xs)",
                 color: merchantRating === "down" ? "var(--color-critical)" : "var(--color-border)",
               }}
             >

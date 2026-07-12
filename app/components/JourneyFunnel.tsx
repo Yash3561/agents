@@ -20,8 +20,7 @@ export function JourneyFunnel({
   const fmtMoney = (val: number) =>
     new Intl.NumberFormat("en", { style: "currency", currency }).format(val);
 
-  const size = compact ? 24 : 28;
-  const fontSize = compact ? "11px" : "12px";
+  const size = compact ? 28 : 32;
 
   const steps = [
     { label: "Started", done: true, detail: undefined as string | undefined },
@@ -31,18 +30,18 @@ export function JourneyFunnel({
   ];
 
   return (
-    <div style={{ display: "flex", alignItems: "center" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)" }}>
       {steps.map((step, i) => (
         <div
           key={step.label}
-          style={{ display: "flex", alignItems: "center", flex: i < steps.length - 1 ? 1 : "none" }}
+          style={{ display: "flex", alignItems: "center", flex: i < steps.length - 1 ? 1 : "none", minWidth: 0 }}
         >
           <div
             style={{
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              minWidth: `${size + 32}px`,
+              minWidth: compact ? "64px" : "76px",
             }}
           >
             <div
@@ -50,29 +49,37 @@ export function JourneyFunnel({
                 width: `${size}px`,
                 height: `${size}px`,
                 borderRadius: "50%",
-                background: step.done ? "var(--color-success)" : "var(--color-border)",
+                background: step.done ? "var(--color-success)" : "var(--color-surface-default)",
+                border: `1px solid ${step.done ? "var(--color-success)" : "var(--color-border)"}`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: step.done ? "#fff" : "var(--color-neutral)",
-                fontSize: fontSize,
-                fontWeight: 700,
+                color: step.done ? "var(--color-text-inverse)" : "var(--color-neutral)",
               }}
             >
-              {step.done ? "✓" : "○"}
+              {step.done ? (
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M3.5 8.5 6.5 11.5 12.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                  <circle cx="8" cy="8" r="4.5" />
+                </svg>
+              )}
             </div>
             <div
               style={{
-                fontSize: fontSize,
+                fontSize: "var(--type-row)",
                 fontWeight: 600,
-                marginTop: "2px",
+                marginTop: "var(--spacing-xs)",
                 color: step.done ? "var(--color-success)" : "var(--color-neutral)",
+                textAlign: "center",
               }}
             >
               {step.label}
             </div>
             {step.detail && (
-              <div style={{ fontSize: "10px", color: "var(--color-success)" }}>{step.detail}</div>
+              <div style={{ fontSize: "var(--type-metadata)", color: "var(--color-success)", marginTop: "var(--spacing-xs)" }}>{step.detail}</div>
             )}
           </div>
           {i < steps.length - 1 && (
@@ -81,8 +88,8 @@ export function JourneyFunnel({
                 flex: 1,
                 height: "2px",
                 background: step.done ? "var(--color-success)" : "var(--color-border)",
-                margin: "0 2px",
-                marginBottom: "16px",
+                margin: "0 var(--spacing-sm)",
+                marginBottom: "var(--spacing-lg)",
               }}
             />
           )}

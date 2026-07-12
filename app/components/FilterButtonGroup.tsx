@@ -11,7 +11,7 @@ interface FilterButtonGroupProps {
 
 export function FilterButtonGroup({ options, value, onChange }: FilterButtonGroupProps) {
   return (
-    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: "var(--spacing-xs)", flexWrap: "wrap" }}>
       {options.map((opt) => {
         const isActive = opt.value === value;
         return (
@@ -19,14 +19,14 @@ export function FilterButtonGroup({ options, value, onChange }: FilterButtonGrou
             key={opt.value}
             onClick={() => onChange(opt.value)}
             style={{
-              padding: "5px 12px",
+              padding: "var(--spacing-xs) var(--spacing-md-sm)",
               borderRadius: "var(--radius-sm)",
-              border: isActive ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
-              background: isActive ? "var(--color-primary)" : "transparent",
-              color: isActive ? "#fff" : "var(--color-text)",
+              border: isActive ? "1px solid var(--color-selection)" : "1px solid var(--color-border)",
+              background: isActive ? "var(--color-surface-selected)" : "transparent",
+              color: "var(--color-text)",
               cursor: "pointer",
               fontWeight: isActive ? 600 : 400,
-              fontSize: "12px",
+              fontSize: "var(--type-metadata)",
               transition: "all 0.1s ease",
             }}
           >
