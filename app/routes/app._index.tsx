@@ -30,20 +30,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const rawDays = parseInt(url.searchParams.get("days") ?? "30", 10);
   const daysNum = Number.isFinite(rawDays) ? Math.min(365, Math.max(1, rawDays)) : 30;
   const days = String(daysNum);
-  const channel = url.searchParams.get("channel") || "all";
+  const requestedChannel = url.searchParams.get("channel");
+  const channel = requestedChannel === "web" || requestedChannel === "whatsapp" ? requestedChannel : "all";
   const since = new Date(Date.now() - daysNum * 86400000);
 
-  const channelFilter =
+  const channelFilter: Prisma.ConversationWhereInput =
     channel === "whatsapp" ? { channel: "whatsapp" }
-    : channel === "web" ? { NOT: { channel: "whatsapp" } }
+    : channel === "web" ? { OR: [{ channel: null }, { NOT: { channel: "whatsapp" } }] }
     : {};
 
   const channelSql =
     channel === "whatsapp" ? Prisma.sql`AND "channel" = 'whatsapp'`
-    : channel === "web" ? Prisma.sql`AND "channel" != 'whatsapp'`
+    : channel === "web" ? Prisma.sql`AND ("channel" IS NULL OR "channel" != 'whatsapp')`
     : Prisma.sql``;
 
-  const baseWhere = { shopDomain: shop, startedAt: { gte: since }, ...channelFilter };
+  const baseWhere: Prisma.ConversationWhereInput = { shopDomain: shop, startedAt: { gte: since }, ...channelFilter };
 
   // All of these are independent — none depend on another's result, only on shop/since/
   // channelSql/session, all already known. Previously the 4 raw SQL queries, the Admin
@@ -178,14 +179,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Fetch cached AI insights + revenue narrative; auto-refresh if stale (non-blocking)
   const insightsRaw = merchantData?.insightsJson as { generatedAt?: string; topics?: unknown[] } | null;
-  const insightsAge = insightsRaw?.generatedAt ? Date.now() - new Date(insightsRaw.generatedAt).getTime() : Infinity;
+  const insightsGeneratedAtMs = insightsRaw?.generatedAt ? new Date(insightsRaw.generatedAt).getTime() : NaN;
+  const insightsAge = Number.isFinite(insightsGeneratedAtMs) ? Date.now() - insightsGeneratedAtMs : Infinity;
   if (insightsAge > 24 * 3600 * 1000) {
     void runInsightsAnalysis(shop).catch(() => null);
   }
 
   const narrativeRaw = merchantData?.revenueNarrative as { month?: string; generatedAt?: string } | null;
-  const narrativeMonth = narrativeRaw?.month ? new Date(narrativeRaw.month).getMonth() : -1;
-  if (narrativeMonth !== new Date().getMonth()) {
+  const narrativeMonthStart = narrativeRaw?.month ? new Date(narrativeRaw.month) : null;
+  const now = new Date();
+  const narrativeIsCurrentMonth =
+    narrativeMonthStart &&
+    Number.isFinite(narrativeMonthStart.getTime()) &&
+    narrativeMonthStart.getFullYear() === now.getFullYear() &&
+    narrativeMonthStart.getMonth() === now.getMonth();
+  if (!narrativeIsCurrentMonth) {
     void runRevenueNarrator(shop).catch(() => null);
   }
 
@@ -592,12 +600,11 @@ export default function Index() {
     orderConfirm: "Order confirmations",
     shipped: "Shipping updates",
   };
-  // ponytail: fixed threshold/min-sample constants, not merchant-configurable — revisit if requested
   const WA_FAILURE_THRESHOLD_PCT = 10;
   const WA_MIN_SAMPLE = 5;
   const waTroubledTypes = (Object.keys(waStats) as Array<keyof typeof waStats>).filter((t) => {
     const s = waStats[t];
-    return s.total >= WA_MIN_SAMPLE && s.deliveredPct !== null && 100 - s.deliveredPct > WA_FAILURE_THRESHOLD_PCT;
+    return s.total >= WA_MIN_SAMPLE && (s.failed / s.total) * 100 > WA_FAILURE_THRESHOLD_PCT;
   });
 
   type InsightsTopic = { label: string; count: number; sample: string; suggestion: string };

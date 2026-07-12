@@ -22,6 +22,11 @@ vi.mock("~/lib/auth.server", () => ({
   getStorefrontAccessToken: vi.fn().mockResolvedValue("fake-token"),
 }));
 
+vi.mock("~/lib/rate-limit.server", () => ({
+  checkChatRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
+  getClientIp: vi.fn().mockReturnValue("127.0.0.1"),
+}));
+
 vi.mock("~/shopify.server", () => ({
   authenticate: {
     admin: vi.fn().mockRejectedValue(new Error("not admin")),
