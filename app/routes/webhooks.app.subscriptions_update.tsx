@@ -99,6 +99,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (subscription.status === "ACTIVE") {
       updateData.conversationCount = 0;
       updateData.conversationResetAt = now;
+      // Mark the trial as used the first time a subscription goes active, whether
+      // or not this activation itself was trialing — prevents cancel/resubscribe
+      // loops from getting a fresh trialDays every time (app.billing.tsx / app.onboarding.tsx
+      // check this before setting trialDays on a new appSubscriptionCreate).
+      const merchant = await db.merchant.findUnique({ where: { shopDomain: shop }, select: { trialUsedAt: true } });
+      if (!merchant?.trialUsedAt) {
+        updateData.trialUsedAt = now;
+      }
       // Also clear the Redis fast-path counter so it stays in sync with Prisma.
       await redis.set(`usage:${shop}`, "0").catch(() => null);
     }

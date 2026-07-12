@@ -169,6 +169,12 @@ export async function persistConversationTurn(opts: {
       ...(checkoutToken ? { checkoutToken } : {}),
       ...(discountCode ? { discountCode } : {}),
       ...(escalateToHuman ? { escalated: true } : {}),
+      // Every call here is a genuine new customer turn — if a merchant had
+      // marked this conversation resolved, a follow-up message reopens it so
+      // it reappears in the inbox instead of staying invisible forever (#Inbox
+      // audit finding: resolved conversations never resurfaced on new activity).
+      resolved: false,
+      resolvedAt: null,
       agentTrace,
       routeReason: routeReason ?? undefined,
     },

@@ -604,6 +604,8 @@ export async function action({ request }: ActionFunctionArgs) {
           channel: "whatsapp",
           lastMessageAt: new Date(),
           ...(customerEmailG ? { customerEmail: customerEmailG } : {}),
+          resolved: false,
+          resolvedAt: null,
         },
         create: {
           shopDomain,
@@ -821,6 +823,10 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(result.cart_value_cents != null ? { cartValue: result.cart_value_cents / 100 } : {}),
         ...(waCheckoutToken ? { checkoutToken: waCheckoutToken } : {}),
         ...(escalated ? { escalated: true } : {}),
+        // New inbound message reopens a previously-resolved conversation so it
+        // resurfaces in the inbox (matches persistConversationTurn's fix).
+        resolved: false,
+        resolvedAt: null,
       },
       create: {
         shopDomain,

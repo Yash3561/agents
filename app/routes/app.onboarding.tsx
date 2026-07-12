@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { redirect, useFetcher, useLoaderData, useRouteError } from "react-router";
+import { redirect, useFetcher, useLoaderData, useRevalidator, useRouteError } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -119,6 +119,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const config = PLAN_CONFIG[plan as OnboardingPlanKey];
     const isTest = process.env.BILLING_TEST_MODE === "true";
+    const merchantTrial = await prisma.merchant.findUnique({
+      where: { shopDomain: session.shop },
+      select: { trialUsedAt: true },
+    });
+    const trialDays = merchantTrial?.trialUsedAt ? 0 : config.trialDays;
     const shopHandle = session.shop.replace(".myshopify.com", "");
     // Return merchant to onboarding after Shopify billing confirmation.
     const returnUrl = `https://admin.shopify.com/store/${shopHandle}/apps/${process.env.SHOPIFY_API_KEY}`;
@@ -147,7 +152,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             name: config.name,
             returnUrl,
             test: isTest,
-            trialDays: config.trialDays,
+            trialDays,
             price: String(config.amount),
           },
         },
@@ -432,6 +437,7 @@ export default function Onboarding() {
   const { shop, merchant, hasShopifySub, appUrl } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
+  const revalidator = useRevalidator();
 
   const [step, setStep] = useState(Math.min(3, Math.max(1, merchant.onboardingStep || 1)));
   const [botName, setBotName] = useState(merchant.botName || "");
@@ -445,6 +451,16 @@ export default function Onboarding() {
   const [billingError, setBillingError] = useState<string | null>(null);
 
   const isActivePlan = VALID_PLANS_ONBOARDING.includes(merchant.plan as OnboardingPlanKey);
+  const verifyingSubscription = step === 3 && hasShopifySub && !isActivePlan;
+
+  // ponytail: fixed poll interval, not exponential backoff — this is a rare
+  // webhook-lag window (usually seconds), and the manual "Check now" button
+  // below is the real escape hatch. Upgrade if webhook delays ever grow long.
+  useEffect(() => {
+    if (!verifyingSubscription) return;
+    const id = setInterval(() => revalidator.revalidate(), 4000);
+    return () => clearInterval(id);
+  }, [verifyingSubscription, revalidator]);
 
   // Handle fetcher responses
   useEffect(() => {
@@ -664,17 +680,27 @@ export default function Onboarding() {
                 </s-button>
               </s-stack>
             </div>
-          ) : hasShopifySub ? (
+          ) : verifyingSubscription ? (
             /* Real Shopify subscription exists but the webhook hasn't written the plan yet.
-               Checked against Shopify directly — a skipped plan step no longer traps the
-               merchant in this state (#199). */
+               Auto-polls via revalidator every 4s, plus a manual check + a skip escape
+               hatch so a delayed/failed webhook never traps a paying merchant here (#199). */
             <div style={{ textAlign: "center", padding: "48px 24px" }}>
               <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
               <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 8 }}>Verifying your subscription…</p>
-              <p style={{ color: "#6d7175", fontSize: 14 }}>
+              <p style={{ color: "#6d7175", fontSize: 14, marginBottom: 20 }}>
                 Your Shopify subscription is being confirmed. This usually takes a few seconds.
-                Refresh the page if this message persists.
               </p>
+              <s-stack direction="inline" gap="base" alignItems="center">
+                <s-button
+                  onClick={() => revalidator.revalidate()}
+                  {...(revalidator.state !== "idle" ? { loading: true } : {})}
+                >
+                  Check now
+                </s-button>
+                <s-button onClick={finish} variant="tertiary">
+                  Continue anyway
+                </s-button>
+              </s-stack>
             </div>
           ) : (
             /* Show plan selection cards */
