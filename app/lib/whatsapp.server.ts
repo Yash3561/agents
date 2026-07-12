@@ -40,6 +40,7 @@ export function verifyWebhookSignature(
   xHubSignature: string,
   appSecret: string,
 ): boolean {
+  if (!appSecret) return false; // an empty secret must never validate a signature
   const expected = crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex");
   const expectedBuf = Buffer.from("sha256=" + expected, "utf8");
   const receivedBuf = Buffer.from(xHubSignature, "utf8");

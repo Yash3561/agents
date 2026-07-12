@@ -9,6 +9,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "~/db.server";
+import { checkChatRateLimit, getClientIp } from "~/lib/rate-limit.server";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -54,6 +55,15 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!session_id || !shop || !email) {
     return new Response(JSON.stringify({ error: "missing_fields" }), {
       status: 400,
+      headers: CORS_HEADERS,
+    });
+  }
+
+  // Public, unauthenticated endpoint — bound abuse the same way api.chat/api.greeting do.
+  const rateLimit = await checkChatRateLimit(shop, getClientIp(request));
+  if (!rateLimit.allowed) {
+    return new Response(JSON.stringify({ error: "rate_limited" }), {
+      status: 429,
       headers: CORS_HEADERS,
     });
   }

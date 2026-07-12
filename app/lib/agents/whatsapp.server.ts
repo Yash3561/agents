@@ -129,10 +129,12 @@ function buildWhatsAppPrompt(
   const botName = (merchant as unknown as Record<string, unknown>).botName as string | undefined ?? "NeonPing";
   const storeName = merchant.shopDomain.replace(".myshopify.com", "").replace(/-/g, " ");
   const brandVoice = (merchant as unknown as Record<string, unknown>).brandVoice as string | undefined;
-  const customFaqs = (merchant as unknown as Record<string, unknown>).customFaqs as string | undefined;
+  const customFaqs = (merchant as unknown as Record<string, unknown>).customFaqs as
+    | Array<{ question?: string; answer?: string }>
+    | undefined;
 
-  const faqSection = customFaqs
-    ? `\n## STORE FAQS\n${customFaqs}`
+  const faqSection = customFaqs?.length
+    ? `\n## STORE FAQS\n${customFaqs.map((f) => `Q: ${f.question}\nA: ${f.answer}`).join("\n\n")}`
     : "";
 
   const memorySection = [

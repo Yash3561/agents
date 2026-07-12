@@ -6,7 +6,8 @@ import { Prisma } from "@prisma/client";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { sendTestMessage } from "../lib/test-chat";
+import { runWhatsAppAgent } from "../lib/agents/whatsapp.server";
+import type { ConversationSession } from "../lib/session.server";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,6 +26,31 @@ interface ChatMessage {
 const MAX_FAQS = 20;
 const MAX_FAQ_QUESTION_LENGTH = 300;
 const MAX_FAQ_ANSWER_LENGTH = 2000;
+const MAX_QUICK_REPLIES = 5;
+const MAX_QUICK_REPLY_LENGTH = 80;
+const MAX_TEST_MESSAGE_LENGTH = 2000;
+
+function normalizeFaqs(value: unknown): Faq[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as Record<string, unknown>;
+      const question = String(record.question ?? "").trim().slice(0, MAX_FAQ_QUESTION_LENGTH);
+      const answer = String(record.answer ?? "").trim().slice(0, MAX_FAQ_ANSWER_LENGTH);
+      return question && answer ? { question, answer } : null;
+    })
+    .filter((entry): entry is Faq => entry !== null)
+    .slice(0, MAX_FAQS);
+}
+
+function normalizeQuickReplies(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((reply) => String(reply ?? "").trim().slice(0, MAX_QUICK_REPLY_LENGTH))
+    .filter(Boolean)
+    .slice(0, MAX_QUICK_REPLIES);
+}
 
 // ---------------------------------------------------------------------------
 // Loader
@@ -37,10 +63,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     update: {},
     create: { shopDomain: session.shop },
   });
-  const customFaqs = Array.isArray(merchant.customFaqs)
-    ? (merchant.customFaqs as unknown as Faq[])
-    : [];
-  const quickReplies: string[] = merchant.quickReplies ?? [];
+  const customFaqs = normalizeFaqs(merchant.customFaqs);
+  const quickReplies = normalizeQuickReplies(merchant.quickReplies);
   return { merchant: { ...merchant, customFaqs, quickReplies }, shop: session.shop };
 };
 
@@ -61,16 +85,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (!Array.isArray(parsed)) {
         return { error: "Invalid FAQ data" };
       }
-      faqs = parsed
-        .map((entry) => {
-          if (!entry || typeof entry !== "object") return null;
-          const record = entry as Record<string, unknown>;
-          const question = String(record.question ?? "").trim().slice(0, MAX_FAQ_QUESTION_LENGTH);
-          const answer = String(record.answer ?? "").trim().slice(0, MAX_FAQ_ANSWER_LENGTH);
-          return question && answer ? { question, answer } : null;
-        })
-        .filter((entry): entry is Faq => entry !== null)
-        .slice(0, MAX_FAQS);
+      const droppedEntries = parsed.length > MAX_FAQS || parsed.some((entry) => {
+        if (!entry || typeof entry !== "object") return true;
+        const record = entry as Record<string, unknown>;
+        return !String(record.question ?? "").trim() || !String(record.answer ?? "").trim();
+      });
+      if (droppedEntries) {
+        return { error: "Each FAQ needs a question and answer. Remove empty rows before saving." };
+      }
+      faqs = normalizeFaqs(parsed);
     } catch {
       return { error: "Invalid FAQ data" };
     }
@@ -82,8 +105,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "save-quick-replies") {
-    const replies = [0, 1, 2, 3, 4]
+    const replies = Array.from({ length: MAX_QUICK_REPLIES }, (_, i) => i)
       .map((i) => String(formData.get(`quickReply${i}`) ?? "").trim())
+      .map((reply) => reply.slice(0, MAX_QUICK_REPLY_LENGTH))
       .filter(Boolean);
     await prisma.merchant.update({
       where: { shopDomain: session.shop },
@@ -93,12 +117,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "test-chat") {
-    const apiBase = process.env.SHOPIFY_APP_URL ?? "";
-    if (!apiBase) {
-      return { error: "Test chat is unavailable: SHOPIFY_APP_URL is not configured. Contact support." };
+    const message = String(formData.get("testMessage") || "").trim().slice(0, MAX_TEST_MESSAGE_LENGTH);
+    if (!message) {
+      return { error: "Enter a test message first." };
     }
-    const message = String(formData.get("testMessage") || "Hello");
-    const result = await sendTestMessage(session.shop, message, apiBase);
+    if (!session.accessToken) {
+      return { error: "Test chat is unavailable: missing Shopify access token." };
+    }
+    const merchant = await prisma.merchant.upsert({
+      where: { shopDomain: session.shop },
+      update: {},
+      create: { shopDomain: session.shop },
+    });
+    const testSession: ConversationSession = {
+      conversation_history: [],
+      discount_negotiation: { offered_codes: [], level: 0 },
+    };
+    const result = await runWhatsAppAgent({
+      shopDomain: session.shop,
+      sessionId: `admin-test-${Date.now()}`,
+      customerPhone: "admin-test",
+      agentMessage: message,
+      session: testSession,
+      merchant,
+      accessToken: session.accessToken,
+    });
     return { testResponse: result.text };
   }
 
@@ -184,7 +227,7 @@ export default function AiConfig() {
   }, [searchParams, setSearchParams, shopify]);
 
   const addFaq = () => {
-    if (faqs.length >= 20) return;
+    if (faqs.length >= MAX_FAQS) return;
     setFaqs([...faqs, { question: "", answer: "" }]);
   };
 
@@ -197,6 +240,7 @@ export default function AiConfig() {
   };
 
   const submitFaqs = () => {
+    const trimmedFaqs = normalizeFaqs(faqs);
     const hasEmpty = faqs.some((f) => !f.question.trim() || !f.answer.trim());
     if (hasEmpty) {
       shopify.toast.show("Please fill in all FAQ questions and answers", { isError: true });
@@ -204,7 +248,7 @@ export default function AiConfig() {
     }
     const fd = new FormData();
     fd.set("intent", "save-faqs");
-    fd.set("customFaqs", JSON.stringify(faqs));
+    fd.set("customFaqs", JSON.stringify(trimmedFaqs));
     faqFetcher.submit(fd, { method: "POST" });
   };
 
@@ -229,7 +273,7 @@ export default function AiConfig() {
   const isTestLoading = testFetcher.state !== "idle";
 
   const submitTestMessage = (message: string) => {
-    const trimmedMessage = message.trim();
+    const trimmedMessage = message.trim().slice(0, MAX_TEST_MESSAGE_LENGTH);
     if (!trimmedMessage || isTestLoading) return;
     const fd = new FormData();
     fd.set("intent", "test-chat");
@@ -245,13 +289,13 @@ export default function AiConfig() {
 
   // --- Conversation starters state ---
   const [quickReplies, setQuickReplies] = useState<string[]>(
-    Array.from({ length: 5 }, (_, i) => merchant.quickReplies[i] ?? ""),
+    Array.from({ length: MAX_QUICK_REPLIES }, (_, i) => merchant.quickReplies[i] ?? ""),
   );
 
   const submitQuickReplies = () => {
     const fd = new FormData();
     fd.set("intent", "save-quick-replies");
-    quickReplies.forEach((r, i) => fd.set(`quickReply${i}`, r));
+    quickReplies.forEach((r, i) => fd.set(`quickReply${i}`, r.trim().slice(0, MAX_QUICK_REPLY_LENGTH)));
     quickFetcher.submit(fd, { method: "POST" });
   };
 
@@ -271,11 +315,14 @@ export default function AiConfig() {
             <div style={{ marginTop: "16px" }}>
               <s-button onClick={addFaq} variant="primary">Add your first FAQ</s-button>
             </div>
+            <div style={{ marginTop: "12px" }}>
+              <s-button variant="secondary" onClick={submitFaqs}>Save empty knowledge base</s-button>
+            </div>
           </div>
         ) : (
           <>
             {faqs.map((faq, idx) => (
-              <s-box key={faq.question || `faq-${idx}`} padding="base" background="subdued" borderRadius="base">
+              <s-box key={`faq-${idx}`} padding="base" background="subdued" borderRadius="base">
                 <s-stack direction="block" gap="base">
                   <s-text-field
                     label={`Question ${idx + 1}`}
@@ -323,7 +370,7 @@ export default function AiConfig() {
               <s-button
                 variant="secondary"
                 onClick={addFaq}
-                {...(faqs.length >= 20 ? { disabled: true } : {})}
+                {...(faqs.length >= MAX_FAQS ? { disabled: true } : {})}
               >
                 Add FAQ
               </s-button>
@@ -350,7 +397,7 @@ export default function AiConfig() {
             placeholder={QUICK_REPLY_PLACEHOLDERS[i]}
             onInput={(e: Event) => {
               const next = [...quickReplies];
-              next[i] = (e.target as HTMLInputElement).value;
+              next[i] = (e.target as HTMLInputElement).value.slice(0, MAX_QUICK_REPLY_LENGTH);
               setQuickReplies(next);
             }}
           ></s-text-field>

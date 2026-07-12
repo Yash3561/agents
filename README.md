@@ -1,6 +1,6 @@
 # NeonPing
 
-AI-powered shopping assistant for Shopify. Engages customers on the web storefront via an embedded chat widget and on WhatsApp, helping them find products, manage their cart, and complete purchases.
+AI-powered shopping assistant for Shopify that operates through WhatsApp. Customers message the merchant's WhatsApp Business number to find products, manage their cart, check order status, receive discount codes, and get human help when needed.
 
 Live on Azure Container Apps. Merchant portal is embedded in Shopify Admin.
 
@@ -8,24 +8,17 @@ Live on Azure Container Apps. Merchant portal is embedded in Shopify Admin.
 
 ## Features
 
-### Web Chat Widget
-
-- Sub-10KB bundle, injected as a Theme App Extension
-- Proactive engagement: exit-intent (desktop) + 30-second time-on-page trigger (mobile)
-- Real-time catalog search via Shopify UCP (Storefront MCP) — no stale synced data
-- Interactive product cards (up to 3 per query) with add-to-cart buttons
-- Discount and gift-card code application
-- Abandoned-cart recovery: restores cart and personalised greeting
-- Customer memory via Shopify metafields (`neonping_chat` namespace)
-- Language auto-detect: replies in the customer's detected language
-
-### WhatsApp Channel
+### WhatsApp AI Assistant
 
 - Inbound chat handled via Meta Webhooks (`/api/whatsapp/webhook`)
+- Real-time catalog search via Shopify UCP (Storefront MCP) — no stale synced data
 - Rich carousel replies for product searches (Meta Interactive Templates)
 - Interactive cart view: itemised list with checkout CTA button
+- Discount and gift-card code application
+- Order status help via Shopify order data
+- Customer memory via Shopify metafields (`neonping_chat` namespace)
 - Human handoff button when AI can't resolve the issue
-- Language auto-detect
+- Language auto-detect: replies in the customer's detected language
 
 **Proactive outbound flows:**
 
@@ -50,10 +43,10 @@ Live on Azure Container Apps. Merchant portal is embedded in Shopify Admin.
 ### Merchant Portal
 
 - 4-step onboarding wizard
-- Widget customisation: greeting, color, position, bot name, brand voice — with live preview
+- WhatsApp assistant configuration: greeting, bot name, brand voice, discount rules, and knowledge base
 - Dashboard: AOV, cart-recovery rate, conversation volume
 - Conversation history with search and transcript drill-down
-- AI Config: custom FAQ/knowledge base, quick replies, chat playground
+- AI Config: custom FAQ/knowledge base, quick replies, assistant playground
 - Usage metering and plan limits
 
 ---
@@ -128,7 +121,6 @@ Production URL: `https://neonping.politeocean-a6f0ef16.southcentralus.azureconta
 
 | Path | Purpose |
 |------|---------|
-| `app/routes/api.chat.tsx` | Web chat entry point, rate-limit check, revenue tracking |
 | `app/routes/api.whatsapp.webhook.tsx` | WhatsApp inbound webhook handler |
 | `app/routes/webhooks.orders.*.tsx` | Proactive outbound order notification flows |
 | `app/lib/agents/whatsapp.server.ts` | WhatsApp agent (tools + guardrails) |
@@ -136,8 +128,8 @@ Production URL: `https://neonping.politeocean-a6f0ef16.southcentralus.azureconta
 | `app/lib/agents/memory.server.ts` | Customer memory via Shopify metafields |
 | `app/lib/billing.server.ts` | Usage metering + plan limit enforcement |
 | `app/lib/whatsapp.server.ts` | Meta API client (send messages, carousel templates) |
-| `extensions/chat-widget/assets/neonping-widget.js` | Storefront widget (minified, verify size after changes) |
-| `app/routes/app.settings.tsx` | Merchant widget config UI + live preview |
+| `extensions/chat-widget/blocks/chat.liquid` | Disabled legacy storefront chat extension gate (`np_enabled = false`) |
+| `app/routes/app.settings.tsx` | Merchant assistant settings UI |
 | `shopify.app.toml` | App config, webhook subscriptions |
 
 ---

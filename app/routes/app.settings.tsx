@@ -615,7 +615,7 @@ export default function Settings() {
                 <s-switch
                   label="Email me when AI escalates to human support"
                   name="escalationEmailEnabled"
-                  help-text="Sends an email to your support address when the bot can't resolve a customer issue."
+                  help-text="Sends an email to your support address when a WhatsApp conversation needs a human. Escalated conversations also appear in Inbox."
                   checked={escalationEmailEnabled}
                   onChange={(e: Event) => setEscalationEmailEnabled((e.target as HTMLInputElement).checked)}
                 ></s-switch>
@@ -628,14 +628,14 @@ export default function Settings() {
                 name="supportEmail"
                 value={supportEmail}
                 onInput={(e: Event) => setSupportEmail((e.target as HTMLInputElement).value)}
-                help-text="Where escalated conversations and support alerts are sent."
+                help-text="Where merchant alerts for escalated WhatsApp conversations are sent."
               ></s-email-field>
               <s-text-field
                 label="Human handoff number"
                 name="whatsappNumber"
                 value={whatsappNumber}
                 onInput={(e: Event) => setWhatsappNumber((e.target as HTMLInputElement).value)}
-                help-text="When AI escalates, customers are told to contact this number directly. Include country code, e.g. +1234567890"
+                help-text="Internal reference number for your support team. WhatsApp customers stay in the same conversation and escalations appear in Inbox."
               ></s-text-field>
             </s-stack>
           </s-section>
