@@ -332,16 +332,7 @@ function PlanCard({ plan, isCurrent, currentPlanRank, hasActivePlan }: PlanCardP
         <span style={{ color: "var(--color-neutral)" }}> / month</span>
       </div>
       <s-text tone="neutral">{plan.conversations}</s-text>
-      {hasActivePlan ? (
-        <div style={{ display: "grid", gap: "6px" }}>
-          <s-text>
-            <strong>Conversation cap:</strong> {plan.conversations}
-          </s-text>
-          <s-text>
-            <strong>Monthly price:</strong> {plan.price}
-          </s-text>
-        </div>
-      ) : (
+      {hasActivePlan ? null : (
         <ul style={{ margin: "0", paddingLeft: "20px", color: "var(--color-text)" }}>
           {ALL_FEATURES.map((f) => (
             <li key={f} style={{ marginBottom: "4px" }}>
