@@ -1,0 +1,4 @@
+{
+  "name": "admin-customer-conversation-block",
+  "welcome": "Bienvenue dans l'extension {{target}}!"
+}
