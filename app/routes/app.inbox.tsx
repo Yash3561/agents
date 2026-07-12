@@ -660,7 +660,18 @@ export default function Inbox() {
   }, [search]);
 
   const isSubmitting = navigation.state === "submitting";
-  const isRouteLoading = navigation.state === "loading";
+  // Selecting a conversation only changes the `id` param — the list itself doesn't need to
+  // reload, so we scope the loading state to the transcript/sidebar instead of blanking the
+  // whole three-panel layout on every click (that read as a full page refresh to merchants).
+  const isConversationSwitchOnly = (() => {
+    if (navigation.state !== "loading" || !navigation.location) return false;
+    const nextParams = new URLSearchParams(navigation.location.search);
+    const stableKeys = ["channel", "dateRange", "statusTab", "search", "page"];
+    const filtersUnchanged = stableKeys.every((k) => (nextParams.get(k) ?? "") === (searchParams.get(k) ?? ""));
+    const idChanged = (nextParams.get("id") ?? "") !== (searchParams.get("id") ?? "");
+    return filtersUnchanged && idChanged;
+  })();
+  const isRouteLoading = navigation.state === "loading" && !isConversationSwitchOnly;
 
   function setFilter(key: string, value: string) {
     const next = new URLSearchParams(searchParams);
@@ -722,6 +733,7 @@ export default function Inbox() {
   const aiActions = agentTraceArr
     .map((step) => (step in TOOL_LABELS ? TOOL_LABELS[step] : null))
     .filter((a): a is string => a !== null);
+  const isSelectedFlagged = Boolean((selected?.qaMeta as { flagged?: boolean } | null)?.flagged);
 
   return (
     <s-page heading="Inbox">
@@ -744,19 +756,18 @@ export default function Inbox() {
           )}
 
           {/* Summary bar */}
-          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--color-border)", fontSize: "12px", color: "var(--color-neutral)", display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
             <span>{totalCount} total</span>
-            {purchasedCount > 0 && <span style={{ color: "var(--color-success)" }}>● {purchasedCount} purchased</span>}
-            {inCartCount > 0 && <span style={{ color: "var(--color-cart)" }}>● {inCartCount} in cart</span>}
-            {escalatedCount > 0 && <span style={{ color: "var(--color-warning)" }}>● {escalatedCount} needs reply</span>}
-            {liveCount > 0 && <s-badge tone="success">{liveCount} live</s-badge>}
+            {purchasedCount > 0 && <span>{purchasedCount} purchased</span>}
+            {inCartCount > 0 && <span>{inCartCount} in cart</span>}
+            {escalatedCount > 0 && <span>{escalatedCount} needs reply</span>}
+            {liveCount > 0 && <span>{liveCount} live</span>}
             {thumbsUp + thumbsDown > 0 && (
               <span title={`${thumbsUp} rated helpful, ${thumbsDown} rated not helpful`}>
-                {Math.round((thumbsUp / (thumbsUp + thumbsDown)) * 100)}% rated helpful ({thumbsUp} helpful, {thumbsDown} not helpful)
+                {Math.round((thumbsUp / (thumbsUp + thumbsDown)) * 100)}% helpful
               </span>
             )}
             <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
-              <s-badge tone="success">Live</s-badge>
               <button
                 onClick={() => (document.getElementById("inbox-win") as unknown as { show(): void })?.show()}
                 style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, padding: "4px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer" }}
@@ -784,9 +795,9 @@ export default function Inbox() {
           {/* Status tabs */}
           <div style={{ display: "flex", borderBottom: "2px solid var(--color-border)" }}>
             {([
-              { key: "open", label: "Needs reply", activeColor: "var(--color-warning)" },
-              { key: "pending", label: "AI handling", activeColor: "var(--color-neutral)" },
-              { key: "resolved", label: "Resolved", activeColor: "var(--color-success)" },
+              { key: "open", label: "Needs reply" },
+              { key: "pending", label: "AI handling" },
+              { key: "resolved", label: "Resolved" },
             ] as const).map((tab) => (
               <button
                 key={tab.key}
@@ -794,8 +805,8 @@ export default function Inbox() {
                 style={{
                   flex: 1, padding: "var(--spacing-sm) var(--spacing-xs)", border: "none", background: "none", cursor: "pointer",
                   fontSize: "var(--type-metadata)", fontWeight: activeTab === tab.key ? 600 : 400,
-                  color: activeTab === tab.key ? tab.activeColor : "var(--color-neutral)",
-                  borderBottom: activeTab === tab.key ? `2px solid ${tab.activeColor}` : "2px solid transparent",
+                  color: activeTab === tab.key ? "var(--color-text)" : "var(--color-neutral)",
+                  borderBottom: activeTab === tab.key ? "2px solid var(--color-selection)" : "2px solid transparent",
                   marginBottom: -2, display: "flex", alignItems: "center", justifyContent: "center", gap: "var(--spacing-xs)",
                 }}
               >
@@ -858,12 +869,12 @@ export default function Inbox() {
                           borderLeft: isSelected ? "3px solid var(--color-selection)" : "3px solid transparent",
                           display: "flex",
                           alignItems: "flex-start",
-                          gap: "var(--spacing-md-sm)",
+                          gap: "var(--spacing-sm)",
                           minHeight: 72,
                         }}
                       >
-                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: isUnread ? "var(--color-warning)" : "transparent", marginTop: "var(--spacing-md-sm)", flexShrink: 0 }} />
-                        <ChannelIndicator channel={conv.channel} />
+                        <div style={{ width: 6, height: 6, borderRadius: "50%", background: isUnread ? "var(--color-warning)" : "transparent", marginTop: "var(--spacing-md-sm)", flexShrink: 0 }} />
+                        <ChannelIndicator channel={conv.channel} size={24} />
 
                         {/* Content */}
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -881,7 +892,9 @@ export default function Inbox() {
                             <span style={{ fontSize: "var(--type-metadata)", color: "var(--color-neutral)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.85 }}>
                               {(conv.firstUserMessage ?? "").slice(0, 60) || "No messages yet"}
                             </span>
-                            <s-badge tone={statusTone(rowStatus)}>{statusLabel(rowStatus)}</s-badge>
+                            <span style={{ fontSize: 11, lineHeight: 1.4, padding: "1px 6px", borderRadius: "var(--radius-pill)", border: "1px solid var(--color-border)", color: "var(--color-neutral)", background: "var(--color-surface)" }}>
+                              {statusLabel(rowStatus)}
+                            </span>
                             {hasRevenue && (
                               <s-badge tone="success">${((conv.orderRevenueCents ?? 0) / 100).toFixed(0)}</s-badge>
                             )}
@@ -905,38 +918,38 @@ export default function Inbox() {
         </div>
 
         {/* ── Center Panel: Transcript ──────────────────────────────────────── */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--color-border)", opacity: isConversationSwitchOnly ? 0.5 : 1, transition: "opacity 120ms ease", pointerEvents: isConversationSwitchOnly ? "none" : undefined }}>
           {!selected ? (
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--spacing-xl) var(--spacing-lg)", background: "var(--color-surface)" }}>
               <EmptyState heading="Select a conversation" subtext="Choose a conversation from the list to view the transcript and reply." />
             </div>
           ) : (
             <>
-              <div style={{ padding: "var(--spacing-md-sm) var(--spacing-md)", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", gap: "var(--spacing-md-sm)", background: "var(--color-surface-default)", flexShrink: 0 }}>
-                <ChannelIndicator channel={selected.channel} />
-                <span style={{ fontWeight: 600, fontSize: "var(--type-panel-title)", flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
-                </span>
-                <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)", flexShrink: 0 }}>
+              <div style={{ padding: "var(--spacing-md-sm) var(--spacing-md)", borderBottom: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: "var(--spacing-sm)", background: "var(--color-surface-default)", flexShrink: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-md-sm)", minWidth: 0 }}>
+                  <ChannelIndicator channel={selected.channel} size={28} />
+                  <span style={{ fontWeight: 600, fontSize: "var(--type-panel-title)", flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
+                  </span>
                   {selectedStatus && <s-badge tone={statusTone(selectedStatus)}>{statusLabel(selectedStatus)}</s-badge>}
-                  {!selected.resolved && (
-                    <Form method="post" style={{ display: "inline" }}>
-                      <input type="hidden" name="intent" value="resolve" />
-                      <input type="hidden" name="conversationId" value={selected.id} />
-                      <button type="submit" style={{ fontSize: "var(--type-metadata)", padding: "var(--spacing-xs) var(--spacing-md-sm)", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer" }}>Resolve</button>
-                    </Form>
-                  )}
-                  {!selected.resolved && (
-                    <pauseFetcher.Form method="POST" style={{ display: "inline" }}>
-                      <input type="hidden" name="intent" value="pause-ai" />
-                      <input type="hidden" name="conversationId" value={selected.id} />
-                      <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
-                      <button type="submit" style={{ fontSize: "var(--type-metadata)", padding: "var(--spacing-xs) var(--spacing-md-sm)", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer", color: isAiPaused ? "var(--color-warning)" : "var(--color-neutral)" }}>
-                        {isAiPaused ? "Resume AI" : "Pause AI"}
-                      </button>
-                    </pauseFetcher.Form>
-                  )}
                 </div>
+                {!selected.resolved && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "var(--spacing-sm)", flexShrink: 0 }}>
+                  <Form method="post" style={{ display: "inline" }}>
+                    <input type="hidden" name="intent" value="resolve" />
+                    <input type="hidden" name="conversationId" value={selected.id} />
+                    <button type="submit" style={{ fontSize: "var(--type-metadata)", padding: "var(--spacing-xs) var(--spacing-md-sm)", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer" }}>Resolve</button>
+                  </Form>
+                  <pauseFetcher.Form method="POST" style={{ display: "inline" }}>
+                    <input type="hidden" name="intent" value="pause-ai" />
+                    <input type="hidden" name="conversationId" value={selected.id} />
+                    <input type="hidden" name="pause" value={isAiPaused ? "false" : "true"} />
+                    <button type="submit" style={{ fontSize: "var(--type-metadata)", padding: "var(--spacing-xs) var(--spacing-md-sm)", borderRadius: "var(--radius-sm)", border: "1px solid var(--color-border)", background: "var(--color-surface-default)", cursor: "pointer", color: isAiPaused ? "var(--color-warning)" : "var(--color-neutral)" }}>
+                      {isAiPaused ? "Resume AI" : "Pause AI"}
+                    </button>
+                  </pauseFetcher.Form>
+                </div>
+                )}
               </div>
 
               {/* Collision banner — another browser tab or team member has this convo open */}
@@ -973,31 +986,28 @@ export default function Inbox() {
                 />
               </div>
 
-              {/* Escalation note */}
-              {selected.escalated && !selected.resolved && (
-                <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
-                  <s-banner tone="warning">Merchant reply enabled — use the box below to respond directly.</s-banner>
-                </div>
-              )}
-
-              {/* AI paused banner */}
-              {isAiPaused && (
+              {/* Handling notice */}
+              {(selected.escalated && !selected.resolved) || isAiPaused ? (
                 <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--color-border)" }}>
                   <s-banner tone="warning">
-                    AI is paused — you&apos;re handling this conversation. Replies you send are from you, not the AI.
+                    {selected.escalated && !selected.resolved && isAiPaused
+                      ? "Merchant reply enabled and AI is paused — replies you send are from you, not the AI."
+                      : selected.escalated && !selected.resolved
+                      ? "Merchant reply enabled — use the box below to respond directly."
+                      : "AI is paused — you're handling this conversation."}
                   </s-banner>
                 </div>
-              )}
+              ) : null}
 
               {/* Messages */}
-              <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: "4px" }}>
+              <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px", display: "flex", flexDirection: "column", gap: "8px" }}>
                 {msgs.length === 0 ? (
                   <EmptyState heading="No messages yet" subtext="Transcript messages will appear here as the conversation progresses." />
                 ) : msgs.map((msg, i) => {
                   if (msg.role === "note") {
                     return (
-                      <div key={i} style={{ margin: "8px 0", padding: "8px 12px", background: "var(--color-warning-surface)", border: "1px solid var(--color-warning-border)", borderRadius: "var(--radius-base)", borderLeft: "3px solid var(--color-warning)" }}>
-                        <div style={{ fontSize: "12px", color: "var(--color-warning)", fontWeight: 600, marginBottom: "4px" }}>Internal note</div>
+                      <div key={i} style={{ margin: "4px 0", padding: "8px 12px", background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "var(--radius-base)", borderLeft: isSelectedFlagged ? "3px solid var(--color-warning)" : "1px solid var(--color-border)" }}>
+                        <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, marginBottom: "4px" }}>Internal note</div>
                         <div style={{ fontSize: "13px", color: "var(--color-text)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{msg.content}</div>
                         {msg.timestamp && (
                           <div style={{ fontSize: "12px", color: "var(--color-neutral-light)", marginTop: "4px" }}>
@@ -1140,7 +1150,7 @@ export default function Inbox() {
         </div>
 
         {/* ── Right Panel: Customer Sidebar ─────────────────────────────────── */}
-        <div style={{ width: 280, flexShrink: 0, overflowY: "auto", padding: "var(--spacing-md)", borderLeft: "1px solid var(--color-border)" }}>
+        <div style={{ width: 280, flexShrink: 0, overflowY: "auto", padding: "var(--spacing-md)", borderLeft: "1px solid var(--color-border)", opacity: isConversationSwitchOnly ? 0.5 : 1, transition: "opacity 120ms ease", pointerEvents: isConversationSwitchOnly ? "none" : undefined }}>
           {!selected ? (
             <div style={{ minHeight: 240, display: "flex", alignItems: "center", justifyContent: "center", padding: "var(--spacing-lg) var(--spacing-md-sm)" }}>
               <EmptyState heading="No conversation selected" subtext="Customer details appear here after you select a conversation." />
@@ -1152,6 +1162,9 @@ export default function Inbox() {
                 <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Customer</div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
                   {selected.customerName ?? (selected.channel === "whatsapp" ? formatPhone(selected.sessionId) : "Visitor")}
+                </div>
+                <div style={{ fontSize: "12px", color: "var(--color-neutral)", marginTop: "4px" }}>
+                  {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
                 </div>
                 {selected.customerId && (
                   <div style={{ marginTop: 4 }}>
@@ -1226,21 +1239,6 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* AI tool trace — collapsed by default */}
-              {aiActions.length > 0 && (
-                <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
-                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--color-neutral)", textTransform: "uppercase", letterSpacing: "0.06em", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <span>Tool calls · {aiActions.length}</span>
-                    <span style={{ fontSize: 12, fontWeight: 500, letterSpacing: 0, textTransform: "none", color: "var(--color-neutral-light)" }}>Click to view ›</span>
-                  </summary>
-                  <div style={{ padding: "4px 12px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
-                    {aiActions.map((a, i) => (
-                      <div key={i} style={{ fontSize: 12, color: "var(--color-neutral)" }}>{a}</div>
-                    ))}
-                  </div>
-                </details>
-              )}
-
               {/* Details */}
               <div>
                 <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Details</div>
@@ -1249,10 +1247,6 @@ export default function Inbox() {
                   <span>{new Date(selected.startedAt as unknown as string).toLocaleDateString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
                   <span style={{ color: "var(--color-neutral)" }}>Messages</span>
                   <span>{selected.messageCount}</span>
-                  <span style={{ color: "var(--color-neutral)" }}>Status</span>
-                  <span>
-                    {selectedStatus && <s-badge tone={statusTone(selectedStatus)}>{statusLabel(selectedStatus)}</s-badge>}
-                  </span>
                   {selected.qualityScore != null && (
                     <>
                       <span style={{ color: "var(--color-neutral)" }}>AI Quality</span>
@@ -1271,6 +1265,20 @@ export default function Inbox() {
                   )}
                 </div>
               </div>
+
+              {/* AI tool trace — collapsed by default */}
+              {aiActions.length > 0 && (
+                <details style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-sm)" }}>
+                  <summary style={{ padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--color-neutral)", listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span>AI activity · {aiActions.length} actions</span>
+                  </summary>
+                  <div style={{ padding: "4px 12px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+                    {aiActions.map((a, i) => (
+                      <div key={i} style={{ fontSize: 12, color: "var(--color-neutral)" }}>{a}</div>
+                    ))}
+                  </div>
+                </details>
+              )}
 
               {/* Train from this — visible on flagged conversations */}
               {(selected.qaMeta as { flagged?: boolean } | null)?.flagged && (
@@ -1303,13 +1311,6 @@ export default function Inbox() {
                 </div>
               )}
 
-              {/* Channel */}
-              <div>
-                <div style={{ fontSize: "12px", color: "var(--color-neutral)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Channel</div>
-                <s-badge tone={selected.channel === "whatsapp" ? "success" : "info"}>
-                  {selected.channel === "whatsapp" ? "WhatsApp" : "Web Widget"}
-                </s-badge>
-              </div>
             </s-stack>
           )}
         </div>
