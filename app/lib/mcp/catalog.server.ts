@@ -44,6 +44,10 @@ export interface CatalogProduct {
   url?: string;         // relative URL e.g. "/products/handle"
   rating?: number;      // star rating from metafields (0-5)
   rating_count?: number; // review count
+  /** get_product_details only — the real option names/values this product comes in
+   *  (e.g. Color: Purple/Pink/Blue/Gray/Set), so the agent can answer "do you have
+   *  it in orange?" from real data instead of guessing from variant titles. */
+  options?: Array<{ name: string; values: string[] }>;
 }
 
 export interface CatalogSearchResult {
@@ -115,6 +119,44 @@ function mapProduct(p: Record<string, unknown>): CatalogProduct {
         image_url: vMedia[0]?.url as string | undefined,
       };
     }),
+  };
+}
+
+/**
+ * Map a get_product_details response. This is a DIFFERENT shape than search_catalog's
+ * (confirmed via live call): { product_id, options: [{name, values}], total_variants,
+ * price_range: {min, max, currency} (plain strings, not {amount, currency}),
+ * selectedOrFirstAvailableVariant: {variant_id, title, price, ...} }.
+ * No top-level "variants" array and no "id" field — reusing mapProduct() here silently
+ * produced id: undefined, variants: [], and price_min: undefined on every call.
+ */
+function mapProductDetails(p: Record<string, unknown>): CatalogProduct {
+  const priceRange = p.price_range as Record<string, unknown> | undefined;
+  const images = (p.images as Array<Record<string, unknown>> | undefined) ?? [];
+  const description = p.description as string | undefined;
+  const selected = p.selectedOrFirstAvailableVariant as Record<string, unknown> | undefined;
+
+  return {
+    id: p.product_id as string,
+    title: p.title as string,
+    description: description ? stripHtml(description) : undefined,
+    image_url: (images[0]?.url as string | undefined) ?? (p.image_url as string | undefined),
+    price_min: priceRange?.min as string | undefined,
+    currency: priceRange?.currency as string | undefined,
+    url: p.url as string | undefined,
+    options: p.options as Array<{ name: string; values: string[] }> | undefined,
+    variants: selected
+      ? [
+          {
+            id: selected.variant_id as string,
+            title: selected.title as string,
+            price: (selected.price as string) ?? "0",
+            currency: selected.currency as string | undefined,
+            available: (selected.available as boolean | undefined) ?? true,
+            image_url: selected.image_url as string | undefined,
+          },
+        ]
+      : [],
   };
 }
 
@@ -230,5 +272,5 @@ export async function getProduct(
   const raw = result.structuredContent;
   // Response may be { product: {...} } or the product directly
   const p = (raw.product as Record<string, unknown> | undefined) ?? raw;
-  return mapProduct(p);
+  return mapProductDetails(p);
 }

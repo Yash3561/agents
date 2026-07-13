@@ -426,13 +426,15 @@ export async function runUnifiedAgent(opts: {
       String(lastErr).toLowerCase().includes("rate") ||
       (lastErr as { statusCode?: number })?.statusCode === 429;
     // A tool call earlier in this same turn (cart created, discount applied) can succeed
-    // before a later step fails — don't show a blind "sorry" when there's real state to see;
-    // the customer should notice the checkout link/discount chip the UI still renders below.
+    // before a later step fails — don't show a blind "sorry"/"busy" when there's real state
+    // to see; the customer should notice the checkout link/discount chip the UI still renders
+    // below. This must outrank the is429 branch — a discount already persisted into
+    // discount_negotiation must never be silently withheld from the reply.
     const hasCartOrDiscount = !!(state.checkoutUrl || discountCode);
-    text = is429
-      ? "Our assistant is briefly busy — please send your message again in a moment."
-      : hasCartOrDiscount
-        ? "Sorry, I had trouble finishing that reply — but here's what I've got so far, see below."
+    text = hasCartOrDiscount
+      ? "Sorry, I had trouble finishing that reply — but here's what I've got so far, see below."
+      : is429
+        ? "Our assistant is briefly busy — please send your message again in a moment."
         : "I'm having trouble with that right now. Please try again in a moment.";
     onToken?.(text); // emit error text so caller doesn't receive silence
   }

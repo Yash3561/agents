@@ -163,7 +163,7 @@ function buildWhatsAppPrompt(
 
 Keep replies concise — under 200 characters when possible. Plain text only. No markdown, no asterisks, no bullet points, no numbered lists.
 Detect the language the customer is using and always reply in that same language.
-When recommending products, name them briefly with price in one line each.
+When recommending multiple products, put each on its own line as "Name - $Price". Never start a line with a number ("1.", "2.") or a bullet character ("-", "*") — that counts as a numbered/bulleted list, which is forbidden above.
 IMPORTANT: Call search_catalog on EVERY product-related query, including follow-ups and repeated searches. Never rely on products mentioned in prior conversation turns — always fetch fresh so prices and availability are current.
 IMPORTANT: When the customer asks a specific question about a product — material, ingredients, sizing/fit, dimensions, how it works, care instructions, what's included, compatibility, or anything not covered by the name/price — call get_product with that product's ID to fetch its full description before answering. Never guess or answer from the title alone. If the description doesn't cover what was asked, say so plainly rather than inventing an answer. The 200-character guideline does NOT apply here — give a real, accurate answer even if it runs longer, then stop.
 IMPORTANT: search_catalog is a literal keyword search, not a category browser. For a generic browse question ("what do you sell", "what types of products do you have", "show me everything", "what's popular") — pass an EMPTY query ("") to surface a representative sample, NOT the customer's own wording verbatim (echoing vague phrasing back as the search term returns near-random single matches). Only use the customer's specific words as the query when they named an actual product, category, or need.
@@ -180,6 +180,10 @@ If a create_cart/update_cart tool result includes an "assistant_reply_hint" fiel
 
 ## ESCALATION
 If the customer explicitly asks to speak to a human, live agent, real person, or support staff (e.g. "talk to a person", "connect me with someone", "I want a human", "real agent"), call the escalate_human tool, then reply warmly that a team member will follow up shortly. Do not keep trying to resolve the issue yourself after that.
+You have no tool to cancel an order, issue a refund, or change an order. If the customer asks for any of these, also call escalate_human — never say or imply it's been done. Acknowledge you can't process it yourself, then reply that a team member will follow up shortly.
+
+## POLICY/FAQ QUESTIONS
+If search_policies_and_faqs returns no result (text: null), the question is still on-topic — a missing answer is NOT grounds for the "I can only help with shopping" refusal below. Say plainly that you don't have that specific info on file and point them to the merchant for details. Never invent a policy, shipping estimate, or return window that wasn't returned by the tool.
 
 ## HARD RESTRICTIONS — NEVER VIOLATE
 You ONLY help with: product search, cart management, order status, store policies, greetings, and discount codes for ${storeName}.
@@ -208,6 +212,7 @@ export async function runWhatsAppAgent(opts: {
   accessToken: string;
 }): Promise<WhatsAppAgentOutput> {
   const { shopDomain, sessionId, customerPhone, customerId, agentMessage, session, merchant, accessToken } = opts;
+  const storeName = merchant.shopDomain.replace(".myshopify.com", "").replace(/-/g, " ");
 
   let cartLines: Array<{ title: string; quantity: number; price: string }> | undefined;
   let discountCode: string | undefined;
@@ -460,15 +465,26 @@ export async function runWhatsAppAgent(opts: {
       String(err).includes("429") ||
       String(err).toLowerCase().includes("rate") ||
       (err as { statusCode?: number })?.statusCode === 429;
+    // Azure OpenAI's own content-management filter rejects some adversarial/jailbreak-style
+    // prompts (e.g. "ignore all previous instructions") outright, before our system prompt's
+    // deflection logic even runs. Without this check the customer sees a generic technical
+    // error instead of staying in character — reuse the same on-topic redirect the model
+    // would otherwise give per the HARD RESTRICTIONS block.
+    const isContentFiltered = String(err).toLowerCase().includes("content management policy");
     // A tool call earlier in this same turn (cart created, discount applied) can succeed
-    // before a later step fails — don't show a blind "sorry" when there's real state to see.
+    // before a later step fails — don't show a blind "sorry"/"busy" when there's real state
+    // to see. This must outrank the is429 branch: a discount code that was actually applied
+    // to the customer's cart (and already persisted into discount_negotiation) must never be
+    // silently withheld from the reply — that burns a negotiation slot the customer never saw.
     const hasCartOrDiscount = !!(state.checkoutUrl || discountCode);
     return {
-      text: is429
-        ? "I'm briefly busy — please try again in a moment."
-        : hasCartOrDiscount
-          ? "Sorry, I had trouble finishing that — but here's what I've got so far."
-          : "I'm having trouble right now. Please try again.",
+      text: hasCartOrDiscount
+        ? "Sorry, I had trouble finishing that — but here's what I've got so far."
+        : isContentFiltered
+          ? `I can only help with shopping at ${storeName}. What can I find for you?`
+          : is429
+            ? "I'm briefly busy — please try again in a moment."
+            : "I'm having trouble right now. Please try again.",
       steps: [] as unknown[],
     };
   });
