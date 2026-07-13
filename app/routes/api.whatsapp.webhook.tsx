@@ -762,18 +762,25 @@ export async function action({ request }: ActionFunctionArgs) {
         return { imageUrl: p.image_url, body: ratingLine + cardBody, variantId };
       });
 
-      await sendCarousel(phoneNumberId, accessToken, from, cards, introText).catch(async (e: unknown) => {
-        console.error("[wa-webhook] carousel failed, falling back to text:", (e as Error).message);
+      // Meta rejects the entire carousel request if any card is missing an
+      // image/video header — a product with no photo isn't an edge case a
+      // customer should ever see fail silently. Skip straight to the text
+      // fallback instead of sending a doomed carousel request first; the
+      // customer gets the real answer immediately instead of nothing (or a
+      // stray follow-up prompt) while the carousel call fails in the background.
+      if (cards.every((c) => c.imageUrl)) {
+        await sendCarousel(phoneNumberId, accessToken, from, cards, introText).catch(async (e: unknown) => {
+          console.error("[wa-webhook] carousel failed, falling back to text:", (e as Error).message);
+          await sendTextMessage(phoneNumberId, accessToken, from, formatted?.fallbackText ?? filteredReply).catch(() => null);
+        });
+      } else {
         await sendTextMessage(phoneNumberId, accessToken, from, formatted?.fallbackText ?? filteredReply).catch(() => null);
-      });
-      await sendReplyButtons(phoneNumberId, accessToken, from,
-        "Want to narrow it down?",
-        [
-          { id: "filter_price", title: "💰 Filter by Price" },
-          { id: "refine_search", title: "🔄 Refine Search" },
-          { id: "greeting_question", title: "💬 Get Help" },
-        ],
-      ).catch(() => null);
+      }
+      // No forced "want to narrow it down?" follow-up here — search_catalog is
+      // capped at 3 results by design, so there's rarely anything meaningful to
+      // narrow, and tacking a generic prompt onto an already-relevant answer
+      // reads as noise disconnected from what the customer actually asked.
+      // The reply itself already invites a follow-up question.
     } else if (products && products.length === 1) {
       await sendTextMessage(phoneNumberId, accessToken, from, filteredReply);
       const p = products[0];
