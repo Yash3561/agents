@@ -52,8 +52,6 @@ jobs:
         run: sleep 30
 
       - name: Smoke tests on staging
-        env:
-          SMOKE_TEST_SECRET: ${{ secrets.SMOKE_TEST_SECRET }}
         run: |
           STAGING_URL="https://neonping-staging.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io"
           bash scripts/smoke-tests.sh $STAGING_URL
@@ -105,8 +103,6 @@ jobs:
         run: sleep 30
 
       - name: Smoke tests on production
-        env:
-          SMOKE_TEST_SECRET: ${{ secrets.SMOKE_TEST_SECRET }}
         run: |
           bash scripts/smoke-tests.sh \
             https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io

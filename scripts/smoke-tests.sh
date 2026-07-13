@@ -6,18 +6,18 @@
 #   ./scripts/smoke-tests.sh [BASE_URL]
 #
 # If BASE_URL is omitted, defaults to the production Azure URL.
+#
+# ponytail: the storefront-widget-specific tests (widget-config, /api/chat,
+# /api/greeting) were removed — the widget is permanently disabled
+# (extensions/chat-widget/blocks/chat.liquid gates it behind np_enabled =
+# false), and every deploy run of the old tests was writing real
+# Conversation rows into the live neonping-dev shop under fixed session IDs
+# (smoke-anon-1/2/3), accumulating indefinitely across every staging +
+# production deploy. If the widget ever comes back, restore those tests
+# against a dedicated smoke-test shop, not the real dev store.
 
 BASE_URL="${1:-https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io}"
-SHOP="neonping-dev-a509ojgs.myshopify.com"
 TIMEOUT=30
-
-# Smoke-test bypass header — CI sets SMOKE_TEST_SECRET via GitHub Actions secret.
-# When set, /api/chat skips billing checks so the test shop (which has no paid plan
-# in the staging DB) can still exercise the SSE streaming path.
-SMOKE_HEADER=""
-if [ -n "${SMOKE_TEST_SECRET:-}" ]; then
-  SMOKE_HEADER="X-Smoke-Test: ${SMOKE_TEST_SECRET}"
-fi
 
 # ── colour helpers ────────────────────────────────────────────────────────────
 GREEN="\033[0;32m"
@@ -44,21 +44,6 @@ http_body() {
   curl -s --max-time "$TIMEOUT" "$@" "$url"
 }
 
-# sse_output URL body_json — returns the SSE text captured within TIMEOUT seconds
-sse_output() {
-  local url="$1"
-  local body="$2"
-  local extra_header_args=()
-  if [ -n "$SMOKE_HEADER" ]; then
-    extra_header_args=(-H "$SMOKE_HEADER")
-  fi
-  curl -s --no-buffer --max-time "$TIMEOUT" \
-    -X POST "$url" \
-    -H "Content-Type: application/json" \
-    "${extra_header_args[@]}" \
-    -d "$body" 2>/dev/null || true
-}
-
 echo ""
 echo "NeonPing smoke tests — ${BASE_URL}"
 echo "──────────────────────────────────────────────────────────────────"
@@ -73,63 +58,13 @@ else
   fail "$T (HTTP $STATUS, body: $BODY)"
 fi
 
-# ── Test 2: GET /api/widget-config → 200 ─────────────────────────────────────
-T="GET /api/widget-config?shop=${SHOP} → 200"
-STATUS=$(http_status "${BASE_URL}/api/widget-config?shop=${SHOP}")
-if [ "$STATUS" = "200" ]; then
+# ── Test 2: GET /api/whatsapp/webhook (verification handshake) → 403 ─────────
+T="GET /api/whatsapp/webhook (no verify token) → 403 (endpoint reachable, correctly rejects)"
+STATUS=$(http_status "${BASE_URL}/api/whatsapp/webhook")
+if [ "$STATUS" = "403" ]; then
   pass "$T"
 else
-  fail "$T (HTTP $STATUS)"
-fi
-
-# ── Test 3: POST /api/chat hello → 200 + SSE data: ───────────────────────────
-T="POST /api/chat hello → 200 SSE stream with data:"
-OUTPUT=$(sse_output "${BASE_URL}/api/chat" \
-  '{"session_id":"smoke-anon-1","shop":"'"${SHOP}"'","message":"Hello"}')
-if echo "$OUTPUT" | grep -q "data:"; then
-  pass "$T"
-else
-  fail "$T (no 'data:' in output)"
-fi
-
-# ── Test 4: POST /api/chat product search → non-empty response ───────────────
-T="POST /api/chat 'show me resistance bands' → non-empty SSE response"
-OUTPUT=$(sse_output "${BASE_URL}/api/chat" \
-  '{"session_id":"smoke-anon-2","shop":"'"${SHOP}"'","message":"show me resistance bands"}')
-if [ -n "$OUTPUT" ] && echo "$OUTPUT" | grep -q "data:"; then
-  pass "$T"
-else
-  fail "$T (empty or no data: lines)"
-fi
-
-# ── Test 5: POST /api/chat emoji query → non-empty (emoji strip working) ──────
-T="POST /api/chat emoji query '💪 show me bands 🏋️' → non-empty SSE response"
-OUTPUT=$(sse_output "${BASE_URL}/api/chat" \
-  '{"session_id":"smoke-anon-3","shop":"'"${SHOP}"'","message":"💪 show me bands 🏋️"}')
-if [ -n "$OUTPUT" ] && echo "$OUTPUT" | grep -q "data:"; then
-  pass "$T"
-else
-  fail "$T (empty or no data: lines — emoji strip may be broken)"
-fi
-
-# ── Test 6: GET /api/greeting anonymous → 200 + greeting key ─────────────────
-T="GET /api/greeting (no customer_id) → 200 + {\"greeting\":...}"
-STATUS=$(http_status "${BASE_URL}/api/greeting?shop=${SHOP}")
-BODY=$(http_body "${BASE_URL}/api/greeting?shop=${SHOP}")
-if [ "$STATUS" = "200" ] && echo "$BODY" | grep -q '"greeting"'; then
-  pass "$T"
-else
-  fail "$T (HTTP $STATUS, body: $BODY)"
-fi
-
-# ── Test 7: GET /api/greeting invalid customer → 200 (graceful failure) ───────
-T="GET /api/greeting invalid customer_id → 200 graceful failure"
-STATUS=$(http_status "${BASE_URL}/api/greeting?shop=${SHOP}&customer_id=invalid")
-BODY=$(http_body "${BASE_URL}/api/greeting?shop=${SHOP}&customer_id=invalid")
-if [ "$STATUS" = "200" ]; then
-  pass "$T"
-else
-  fail "$T (HTTP $STATUS, body: $BODY)"
+  fail "$T (HTTP $STATUS — expected 403)"
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
