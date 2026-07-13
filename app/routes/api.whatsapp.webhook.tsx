@@ -452,7 +452,7 @@ export async function action({ request }: ActionFunctionArgs) {
         await sendReplyButtons(
           phoneNumberId, accessToken, from,
           "Would you like to speak with someone from the store?",
-          [{ id: `support|${shopDomain}`, title: "Get Help 💬" }],
+          [{ id: `support|${shopDomain}`, title: "💬 Get Help" }],
         ).catch(() => null);
       } else if (buttonReplyPayload.startsWith("support|")) {
         const domain = buttonReplyPayload.slice("support|".length);
@@ -770,7 +770,7 @@ export async function action({ request }: ActionFunctionArgs) {
         "Want to narrow it down?",
         [
           { id: "filter_price", title: "💰 Filter by Price" },
-          { id: "refine_search", title: "🔄 Try Different" },
+          { id: "refine_search", title: "🔄 Refine Search" },
           { id: "greeting_question", title: "💬 Get Help" },
         ],
       ).catch(() => null);

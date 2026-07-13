@@ -37,7 +37,7 @@ vi.mock("~/lib/agents/memory.server", () => ({
   fetchCustomerMemory: vi.fn().mockResolvedValue({}),
   updateCustomerMemory: vi.fn(),
   fetchWhatsAppMemory: vi.fn().mockResolvedValue({}),
-  updateWhatsAppMemory: vi.fn(),
+  updateWhatsAppMemory: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("~/lib/session.server", () => ({ setSession: vi.fn().mockResolvedValue(undefined) }));
 
