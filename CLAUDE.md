@@ -33,7 +33,7 @@
 - **Rate limiting**: Plan-based (free/trial/starter 500/mo, growth 2000/mo, pro unlimited), Redis fast-path + Prisma backup, fails open
 - **Widget Settings UI**: Merchant can customize greeting/color/position, **live preview added** (#51, tsc-clean)
 - **Merchant Dashboard**: AOV + cart-recovery-rate KPIs computed and displayed
-- **Onboarding wizard**: 4-step setup flow
+- **Onboarding wizard**: 3-step setup flow (brand identity → WhatsApp connect → plan)
 - **GDPR webhooks**: `customers/data_request`, `customers/redact`, `shop/redact` — compliance_topics TOML field used correctly (bug fixed in e087e1a)
 - **Webhook failure rate fixed**: Was 97.7% failure. Root causes fixed in 6deb7e6: wrong topic string in `subscriptions_update` handler (checked "app/subscriptions/update" but Shopify lib normalizes to "APP_SUBSCRIPTIONS_UPDATE"), invalid api_version "2026-07" in TOML (changed to "2026-04"), missing try/catch in 4 handlers. All 7 endpoints now return 200 OK.
 - **Privacy/ToS pages**: Draft content with legal disclaimer, contactable via kaushik@neonping.com

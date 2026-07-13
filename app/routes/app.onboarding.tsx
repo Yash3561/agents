@@ -208,7 +208,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { ok: true, skippedPlan: true };
   }
 
-  // Final submit — validate widget config fields
+  // Final submit — validate widget config fields.
+  // ponytail: the step-2 "Continue" button only disables client-side on
+  // merchant.waConnectedAt; nothing stops a raw POST straight to this final
+  // action (e.g. by skipping the UI). Re-check server-side so onboarding
+  // can't complete without a connected WhatsApp number.
+  const merchantForFinish = await prisma.merchant.findUnique({
+    where: { shopDomain: session.shop },
+    select: { waConnectedAt: true },
+  });
+  if (!merchantForFinish?.waConnectedAt) {
+    return { error: "Please connect WhatsApp Business before finishing setup." };
+  }
+
   const rawColor = String(formData.get("widgetColor") ?? "").trim();
   const widgetColor = HEX_RE_ONBOARDING.test(rawColor) ? rawColor : "#1a1a1a";
 
