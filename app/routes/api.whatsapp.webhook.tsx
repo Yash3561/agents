@@ -469,8 +469,12 @@ export async function action({ request }: ActionFunctionArgs) {
       const mixedCurrencyNotice = comparisonRequest && currencies.size > 1
         ? "Prices are shown in different currencies, so I’m not ranking them by cost. "
         : "";
+      const configuredCarouselCount = Number.parseInt(process.env.WA_MEDIA_CAROUSEL_CARD_COUNT ?? "5", 10);
+      const carouselCardCount = Number.isInteger(configuredCarouselCount) && configuredCarouselCount >= 2 && configuredCarouselCount <= 10
+        ? configuredCarouselCount
+        : 5;
       const carouselEligible = !!process.env.WA_MEDIA_CAROUSEL_TEMPLATE_NAME &&
-        productsToDisplay.length >= 2 &&
+        productsToDisplay.length === carouselCardCount &&
         productsToDisplay.every((product) => !!product.image_url);
       const sentReply = productsToDisplay.length
         ? comparisonRequest
