@@ -1,151 +1,277 @@
-# NeonPing
+# NeonPing Global Concierge
 
-AI-powered shopping assistant for Shopify that operates through WhatsApp. Customers message the merchant's WhatsApp Business number to find products, manage their cart, check order status, receive discount codes, and get human help when needed.
+### A WhatsApp-native shopping agent for discovering the right product across Shopify stores
 
-Live on Azure Container Apps. Merchant portal is embedded in Shopify Admin.
+NeonPing turns a natural shopping conversation into a confident purchase decision. A customer can say what they need in ordinary language, refine the request over multiple turns, ask for comparisons or recent reviews, and open the correct seller checkout without leaving WhatsApp until they are ready.
 
----
+This is a Global Concierge: it is not limited to one merchant’s inventory. It searches Shopify’s live Global Catalog, enriches decisions with current web research when useful, and makes seller ownership explicit at the moment of purchase.
 
-## Features
+## Why this matters
 
-### WhatsApp AI Assistant
+Product discovery is fragmented. Customers describe an intent such as “I need wireless headphones under $100 for commuting,” but most shopping assistants either search one store, return a stale list, or make the customer restart the conversation when their preferences change.
 
-- Inbound chat handled via Meta Webhooks (`/api/whatsapp/webhook`)
-- Real-time catalog search via Shopify UCP (Storefront MCP) — no stale synced data
-- Rich carousel replies for product searches (Meta Interactive Templates)
-- Interactive cart view: itemised list with checkout CTA button
-- Discount and gift-card code application
-- Order status help via Shopify order data
-- Customer memory via Shopify metafields (`neonping_chat` namespace)
-- Human handoff button when AI can't resolve the issue
-- Language auto-detect: replies in the customer's detected language
+NeonPing solves that in the place where the customer is already talking:
 
-**Proactive outbound flows:**
+1. The customer starts with an incomplete or conversational request.
+2. The agent asks one focused question only when it genuinely needs more context.
+3. It searches live, buyable Shopify listings across sellers.
+4. It uses Exa for freshness, reviews, buying guidance, and comparisons when the request calls for research.
+5. It remembers the customer’s budget, use case, constraints, and visible results.
+6. It presents an adaptive WhatsApp experience and sends the customer to the selected seller’s checkout.
 
-| Trigger | Flow |
-|---------|------|
-| `checkouts/create` | Abandoned cart recovery message |
-| `orders/fulfilled` | Order shipped with tracking URL |
-| `orders/create` | Order confirmation + COD prepaid nudge (India) |
+The result is a shorter path from “I’m looking” to “I know which one to buy.”
 
-**Guardrails:**
+## The product experience
 
-| Guardrail | Implementation |
-|-----------|---------------|
-| Message dedup | Redis `wamsg:{id}`, 24hr TTL |
-| Opt-out (STOP/START) | Redis `wa:optout:{phone}` |
-| Per-phone rate limit | 20 msg/hr via Redis `wa:rl:{shop}:{phone}` |
-| Billing gate | `checkAndIncrementUsage()` before every reply |
-| Input sanitisation | Strip non-printable chars, 500-char cap |
-| Jailbreak blocklist | 8 regex patterns + output safety filter + PII scrub |
-| PII-free logging | SHA-256 phone hash, emails/phones redacted |
+| Customer says | Concierge behavior |
+|---|---|
+| “Hi” | Warm welcome and an invitation to describe the need |
+| “I need a gift for a music lover” | Asks one useful clarification instead of guessing |
+| “Over-ear, black, under $100” | Saves the brief, searches live listings, and confirms the constraints |
+| “Compare the first two using recent reviews” | Combines catalog evidence with fresh Exa research |
+| “Which one is cheapest?” | Resolves the selection from conversation memory and returns the matching seller card |
+| “Show me more options” | Expands the current discovery set without losing the prior brief |
 
-### Merchant Portal
+The interface is adaptive rather than repetitive:
 
-- 4-step onboarding wizard
-- WhatsApp assistant configuration: greeting, bot name, brand voice, discount rules, and knowledge base
-- Dashboard: AOV, cart-recovery rate, conversation volume
-- Conversation history with search and transcript drill-down
-- AI Config: custom FAQ/knowledge base, quick replies, assistant playground
-- Usage metering and plan limits
+- One result becomes a single seller CTA.
+- Two or more eligible results become a runtime-generated, swipeable WhatsApp media carousel.
+- Missing media, unsupported payloads, or an unavailable interactive surface fall back to sequential seller cards.
+- Follow-up buttons appear only when they advance the decision: more options, compare, or refine.
+- Every purchase action says who the seller is and opens that seller’s checkout.
 
----
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph client ["Customer and Merchant Channels"]
+    customer["Customer on WhatsApp"]
+    admin["Merchant Shopify Admin"]
+  end
+
+  subgraph gateway ["Public HTTP Gateway"]
+    webhook["Webhook and App Routes"]
+  end
+
+  subgraph service ["NeonPing Application"]
+    appServer["Node.js Agent Server"]
+  end
+
+  subgraph datastore ["State and Memory"]
+    redis["Redis Session and Guardrails"]
+    postgres["PostgreSQL Conversations"]
+  end
+
+  subgraph external ["Connected Platforms"]
+    meta["Meta WhatsApp Cloud API"]
+    azure["Azure AI Foundry"]
+    catalog["Shopify Global Catalog"]
+    exa["Exa Web Research"]
+    shopify["Shopify Store APIs"]
+  end
+
+  customer -->|"Messages"| webhook
+  admin -->|"Configure Assistant"| webhook
+  webhook -->|"Routes inbound events"| appServer
+  appServer -->|"Reads and writes state"| redis
+  appServer -->|"Persists transcripts"| postgres
+  appServer -.->|"Meta: Sends replies"| meta
+  appServer -.->|"Azure: Reasons and plans"| azure
+  appServer -.->|"Shopify: Searches live products"| catalog
+  appServer -.->|"Exa: Researches reviews and trends"| exa
+  appServer -.->|"Shopify: Merchant operations"| shopify
+```
+
+### Request flow
+
+1. Meta delivers an inbound WhatsApp event to `/api/whatsapp/webhook`.
+2. The webhook validates the signature, deduplicates the message, applies consent/rate/usage guardrails, and identifies the Global Concierge mode.
+3. The agent loads short-term session context and durable phone-keyed memory.
+4. Azure AI decides whether to clarify, search, compare, or refine. Tool calls are bounded within one agent turn.
+5. `search_global_catalog` retrieves live Shopify listings. `web_search` is added for reviews, buying guides, freshness, and trend questions.
+6. The final result is filtered for explicit budgets, duplicate seller listings, valid seller ownership, and checkout URLs.
+7. WhatsApp receives the concise decision guidance plus adaptive product cards.
+8. A seller-owned checkout link completes the handoff; NeonPing does not pretend to own a cross-seller cart or fulfillment process.
+
+## What makes it agentic
+
+The agent is more than a catalog search box:
+
+- It distinguishes discovery from decision support.
+- It asks for missing context only when the request is genuinely underspecified.
+- It preserves a compact shopping brief: budget, currency, use case, constraints, and explicit preferences.
+- It remembers the visible result set so “the second one” and “cheapest” remain meaningful.
+- It uses Exa selectively instead of adding research noise to every search.
+- It performs a final correctness pass after semantic catalog ranking, including budget and currency-aware filtering.
+- It explains seller ownership and routes each card to the correct checkout.
+- It refuses prompt-injection attempts and acknowledges unsupported media instead of silently failing.
+
+## Hackathon demo script
+
+Use a real WhatsApp conversation with the configured test number:
+
+```text
+Hi
+I need a gift for someone who loves music
+Over-ear, black, under $100
+Compare the first two using recent reviews
+Which one is cheapest?
+Show me more options
+```
+
+What judges should see:
+
+1. Clarification before product dumping.
+2. A visible confirmation of the customer’s preferences.
+3. Live seller listings with images, prices, ratings, and seller names.
+4. A swipeable carousel when multiple eligible results are available.
+5. Exa-backed comparison guidance without losing buyable catalog cards.
+6. Contextual selection from memory rather than a fresh, disconnected search.
+7. A direct handoff to the seller’s checkout.
+
+Alternative one-minute demo:
+
+```text
+Find wireless headphones under $100 for commuting
+I prefer black and over-ear
+Compare the top two
+Show me more options
+```
+
+## Current capabilities
+
+### Global Concierge
+
+- Live Shopify Global Catalog discovery across independent sellers
+- Exa research for recent reviews, buying guides, trends, and comparisons
+- Clarification, refinement, explicit preference capture, and budget enforcement
+- Currency-aware filtering and mixed-currency comparison warnings
+- Runtime-generated WhatsApp media carousels with per-card seller checkout CTAs
+- Sequential CTA fallback for ineligible or rejected carousel sends
+- Redis session memory plus durable PostgreSQL transcript recovery
+- Dynamic result counts: one, two, three, or more based on the request
+- Dynamic follow-up actions rather than buttons on every message
+
+### Merchant assistant
+
+The existing per-merchant mode remains available for Shopify stores that want store-specific support:
+
+- Store catalog search and product detail questions
+- Cart creation, checkout, discounts, and gift cards
+- Order and policy assistance where the store credentials support it
+- Abandoned-cart, fulfillment, order-confirmation, and human-escalation flows
+- Merchant settings, conversation history, usage metering, and onboarding
+
+## Business model and value
+
+NeonPing creates a shared discovery layer for Shopify commerce while preserving seller ownership:
+
+- Customers get a conversational shopping concierge instead of a fragmented store-by-store search.
+- Merchants receive higher-intent traffic and qualified product discovery without building their own AI stack.
+- Sellers keep control of pricing, inventory, payment, shipping, returns, and fulfillment.
+- NeonPing can measure search-to-click intent without claiming responsibility for transactions it does not own.
+
+This separation is deliberate: the prototype is trustworthy because it does not invent a unified cart, cross-seller order state, or fulfillment promise that the underlying systems cannot support.
 
 ## Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | React Router v7 + Polaris Web Components |
-| Backend | Node.js / TypeScript |
-| AI | Azure AI Foundry — `gpt-4o-mini` via `@ai-sdk/openai-compatible` |
-| Database | Neon PostgreSQL (Prisma ORM) |
-| Cache / rate-limit | Upstash Redis (`rediss://`) |
-| Hosting | Azure Container Apps (consumption plan) |
-| Storefront data | Shopify UCP / Storefront MCP (live, never stale) |
+|---|---|
+| Customer channel | WhatsApp Business Platform via Meta Cloud API |
+| Application | Node.js, TypeScript, React Router v7 |
+| Agent runtime | Vercel AI SDK with a bounded single-agent tool loop |
+| Reasoning | Azure AI Foundry through an OpenAI-compatible interface |
+| Product discovery | Shopify Global Catalog and Storefront MCP |
+| Research | Exa neural web search |
+| Durable state | PostgreSQL with Prisma |
+| Fast state | Redis for sessions, memory, deduplication, and guardrails |
+| Merchant experience | Embedded Shopify Admin portal with Polaris components |
 
----
+## Local development
 
-## Local Development
-
-```bash
-npm run dev -- --store neonping-dev-a509ojgs.myshopify.com
-```
-
-The tunnel URL changes on each restart. Use the `(p) Open app preview` shortcut from the dev terminal rather than navigating via the Shopify admin Apps list.
-
----
-
-## Deployment
-
-Azure Container Apps. Always build for `linux/amd64` (Mac M-series produces `arm64` by default).
+Install dependencies and prepare the database:
 
 ```bash
-# Increment the tag each deploy — Azure ignores :latest if the digest hasn't changed
-docker build --platform linux/amd64 -t caab3198e06dacr.azurecr.io/neonping:v<N> .
-az acr login --name caab3198e06dacr
-docker push caab3198e06dacr.azurecr.io/neonping:v<N>
-az containerapp update \
-  --name neonping \
-  --resource-group neonping-rg \
-  --image caab3198e06dacr.azurecr.io/neonping:v<N>
+npm install
+npm run setup
 ```
 
-Verify with `az containerapp revision list --name neonping --resource-group neonping-rg`.
+Populate the demo merchant with WhatsApp credentials stored in `.env`:
 
-Production URL: `https://neonping.politeocean-a6f0ef16.southcentralus.azurecontainerapps.io`
+```bash
+npm run demo:seed-whatsapp
+```
 
----
+Build and run the application:
 
-## Environment Variables
+```bash
+npm run build
+npm run start
+```
 
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | Neon PostgreSQL connection string |
-| `REDIS_URL` | Upstash Redis (`rediss://`) |
-| `SHOPIFY_API_KEY` | App client ID |
-| `SHOPIFY_API_SECRET` | App client secret |
-| `SHOPIFY_APP_URL` | Public URL of this app (Azure URL in prod) |
-| `ENCRYPTION_KEY` | 32-byte hex key for encrypting stored tokens |
-| `WHATSAPP_VERIFY_TOKEN` | Meta webhook verify token |
-| `WHATSAPP_APP_SECRET` | Meta app secret for HMAC signature verification |
-| `AZURE_FOUNDRY_BASE_URL` | Azure AI Foundry `/openai/v1` base URL |
-| `AZURE_OPENAI_API_KEY` | Azure AI Foundry API key |
-| `AZURE_OPENAI_RESOURCE_NAME` | Azure AI Foundry resource name |
-| `AZURE_ORCHESTRATOR_MODEL` | Model deployment name used for routing |
-| `AZURE_SPECIALIST_MODEL` | Model deployment name used for shopping/support/etc. (e.g. `gpt-4o-mini`) |
-| `RESEND_API_KEY` | Resend API key — escalation and usage-alert emails no-op without it |
+The application must be reachable at a public HTTPS URL for Meta webhook delivery and for Shopify’s hosted UCP agent profile to be fetched. Configure Meta’s callback URL as:
 
----
+```text
+https://<public-app-url>/api/whatsapp/webhook
+```
 
-## Key Files
+For the Global Concierge product path, the critical runtime values are:
 
-| Path | Purpose |
-|------|---------|
-| `app/routes/api.whatsapp.webhook.tsx` | WhatsApp inbound webhook handler |
-| `app/routes/webhooks.orders.*.tsx` | Proactive outbound order notification flows |
-| `app/lib/agents/whatsapp.server.ts` | WhatsApp agent (tools + guardrails) |
-| `app/lib/agents/whatsapp-formatter.server.ts` | Carousel copy formatter (Zod schema, char limits) |
-| `app/lib/agents/memory.server.ts` | Customer memory via Shopify metafields |
-| `app/lib/billing.server.ts` | Usage metering + plan limit enforcement |
-| `app/lib/whatsapp.server.ts` | Meta API client (send messages, carousel templates) |
-| `extensions/chat-widget/blocks/chat.liquid` | Disabled legacy storefront chat extension gate (`np_enabled = false`) |
-| `app/routes/app.settings.tsx` | Merchant assistant settings UI |
-| `shopify.app.toml` | App config, webhook subscriptions |
+```env
+DATABASE_URL=...
+REDIS_URL=...
+ENCRYPTION_KEY=...
+AZURE_FOUNDRY_BASE_URL=...
+AZURE_OPENAI_API_KEY=...
+AZURE_ORCHESTRATOR_MODEL=...
+AZURE_SPECIALIST_MODEL=...
+EXA_API_KEY=...
+SHOPIFY_APP_URL=https://<public-app-url>
+WHATSAPP_APP_SECRET=...
+WHATSAPP_VERIFY_TOKEN=...
+```
 
----
+The demo WhatsApp number is seeded from `WA_TEST_PHONE_NUMBER_ID`, `WA_TEST_ACCESS_TOKEN`, `WA_TEST_PHONE_DISPLAY`, and `WA_TEST_SHOP_DOMAIN`. Keep all credentials in `.env`; never commit them or paste them into chat.
 
-## Notes
+## Verification commands
 
-- Storefront MCP tier does not support Order MCP — order lookup requires Customer Account API credentials (not yet wired).
-- WhatsApp carousel templates are blocked for US +1 numbers during Meta's marketing template pause; tracked in issue [#152](https://github.com/NeonPing/agentic-commerce/issues/152).
+Run the fast regression suite:
 
----
+```bash
+npm run typecheck
+npm run test:unit
+npm run build
+git diff --check
+```
+
+Run the full Global Concierge rehearsal. It uses real catalog, research, database, and memory integrations while intercepting only outbound Meta sends:
+
+```bash
+npm run demo:concierge-journey
+```
+
+The harness covers clarification, budget filtering, preference refinement, comparison research, deterministic selection, session-expiry recovery, freshness requests, and dynamic follow-up actions.
+
+## Honest MVP boundaries
+
+- Vision is not implemented yet. Images, voice notes, and other unsupported inbound media receive an honest capability response.
+- There is no unified cross-seller cart or cross-seller checkout. Each card hands off to the independent seller.
+- Cross-seller order tracking, fulfillment, returns, and refunds are not centralized.
+- Currency conversion is not implemented; mixed-currency comparisons are labeled rather than ranked by raw numbers.
+- A seller’s availability, checkout behavior, shipping, and returns policy remain authoritative.
+- The demo path depends on reachable PostgreSQL, Redis, Azure AI, Exa, Shopify Global Catalog, and Meta credentials.
 
 ## Documentation map
 
-- **This file** — public-facing overview: features, stack, deploy steps, key files.
-- **[CLAUDE.md](./CLAUDE.md)** — the maintained source of truth for session continuity, current build state, and operational runbooks. Read this first in any new working session.
-- **[SECURITY.md](./SECURITY.md)** — vulnerability disclosure policy.
-- **GitHub Project board** — https://github.com/orgs/NeonPing/projects/1 — source of truth for what's open/closed/blocked.
+- **This README** — product story, architecture, business use case, demo, and setup.
+- **[CLAUDE.md](./CLAUDE.md)** — detailed handoff document: verified behavior, bug history, architecture decisions, operational runbook, and remaining gaps.
+- **[SECURITY.md](./SECURITY.md)** — vulnerability disclosure and security expectations.
 
-There is intentionally no separate architecture/implementation-plan document: the codebase (`app/lib/prompt.server.ts` for agent prompts, `app/lib/agents/` for agent logic, `prisma/schema.prisma` for data model) is the source of truth for how the system actually works, and CLAUDE.md is the single maintained doc for everything else. A prior set of architecture docs (`AGENT_ARCHITECTURE.md`, `ARCHITECTURE.md`, `IMPLEMENTATION_PLAN.md`, `SESSION_STARTER.md`) described an early design (a 5-agent orchestrator pipeline, since replaced by the single unified agent in `unified.server.ts`) and had drifted into contradicting the real code — including wrong Shopify OAuth scopes and a nonexistent file path. They were removed rather than fixed in place to avoid re-accumulating the same drift.
+The code is the source of truth for implementation. Start with `app/routes/api.whatsapp.webhook.tsx` for channel behavior, `app/lib/agents/global-concierge.server.ts` for the agent, `app/lib/mcp/global-catalog.server.ts` for live product discovery, and `prisma/schema.prisma` for durable data structures.
+
+## References
+
+- [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog/global-catalog)
+- [Shopify Universal Commerce Protocol](https://shopify.dev/docs/agents)
+- [Meta WhatsApp Business Platform](https://developers.facebook.com/docs/whatsapp/cloud-api/overview)
+- [Exa search](https://docs.exa.ai/)
