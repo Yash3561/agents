@@ -6,6 +6,20 @@ NeonPing turns a natural shopping conversation into a confident purchase decisio
 
 This is a Global Concierge: it is not limited to one merchant’s inventory. It searches Shopify’s live Global Catalog, enriches decisions with current web research when useful, and makes seller ownership explicit at the moment of purchase.
 
+| Channel | Discovery | Intelligence | Handoff |
+|---|---|---|---|
+| WhatsApp | Shopify Global Catalog | Conversational agent plus Exa research | Seller-owned checkout |
+
+> **Sponsor integration note:** OpenRouter is included as an optional, provider-agnostic model gateway path for the hackathon. The current demo keeps its existing OpenAI-compatible provider configuration; OpenRouter is not presented as an already-enabled runtime dependency.
+
+## Hackathon fit
+
+**Challenge:** Make an agent meaningfully more useful in a place where people already talk, work, or live.
+
+**Our answer:** WhatsApp becomes the shopping interface. Customers do not open a marketplace, learn filters, or restart a search when their preferences evolve. They simply describe the outcome they want, and the concierge turns that intent into live, explainable, buyable options.
+
+**Why the environment matters:** WhatsApp carries the customer’s natural-language intent, follow-up questions, preferences, and decision context in one continuous thread. The channel is not a notification layer around the product; it is the product experience.
+
 ## Why this matters
 
 Product discovery is fragmented. Customers describe an intent such as “I need wireless headphones under $100 for commuting,” but most shopping assistants either search one store, return a stale list, or make the customer restart the conversation when their preferences change.
@@ -64,7 +78,7 @@ flowchart LR
 
   subgraph external ["Connected Platforms"]
     meta["Meta WhatsApp Cloud API"]
-    azure["Azure AI Foundry"]
+    openrouter["OpenRouter Sponsor Path (Optional)"]
     catalog["Shopify Global Catalog"]
     exa["Exa Web Research"]
     shopify["Shopify Store APIs"]
@@ -76,7 +90,7 @@ flowchart LR
   appServer -->|"Reads and writes state"| redis
   appServer -->|"Persists transcripts"| postgres
   appServer -.->|"Meta: Sends replies"| meta
-  appServer -.->|"Azure: Reasons and plans"| azure
+  appServer -.->|"Optional: Model routing"| openrouter
   appServer -.->|"Shopify: Searches live products"| catalog
   appServer -.->|"Exa: Researches reviews and trends"| exa
   appServer -.->|"Shopify: Merchant operations"| shopify
@@ -87,7 +101,7 @@ flowchart LR
 1. Meta delivers an inbound WhatsApp event to `/api/whatsapp/webhook`.
 2. The webhook validates the signature, deduplicates the message, applies consent/rate/usage guardrails, and identifies the Global Concierge mode.
 3. The agent loads short-term session context and durable phone-keyed memory.
-4. Azure AI decides whether to clarify, search, compare, or refine. Tool calls are bounded within one agent turn.
+4. The model gateway decides whether to clarify, search, compare, or refine. Tool calls are bounded within one agent turn.
 5. `search_global_catalog` retrieves live Shopify listings. `web_search` is added for reviews, buying guides, freshness, and trend questions.
 6. The final result is filtered for explicit budgets, duplicate seller listings, valid seller ownership, and checkout URLs.
 7. WhatsApp receives the concise decision guidance plus adaptive product cards.
@@ -180,7 +194,7 @@ This separation is deliberate: the prototype is trustworthy because it does not 
 | Customer channel | WhatsApp Business Platform via Meta Cloud API |
 | Application | Node.js, TypeScript, React Router v7 |
 | Agent runtime | Vercel AI SDK with a bounded single-agent tool loop |
-| Reasoning | Azure AI Foundry through an OpenAI-compatible interface |
+| Model gateway | OpenAI-compatible adapter; OpenRouter sponsor path is optional and not enabled in the current demo |
 | Product discovery | Shopify Global Catalog and Storefront MCP |
 | Research | Exa neural web search |
 | Durable state | PostgreSQL with Prisma |
@@ -221,14 +235,16 @@ For the Global Concierge product path, the critical runtime values are:
 DATABASE_URL=...
 REDIS_URL=...
 ENCRYPTION_KEY=...
-AZURE_FOUNDRY_BASE_URL=...
-AZURE_OPENAI_API_KEY=...
-AZURE_ORCHESTRATOR_MODEL=...
-AZURE_SPECIALIST_MODEL=...
 EXA_API_KEY=...
 SHOPIFY_APP_URL=https://<public-app-url>
 WHATSAPP_APP_SECRET=...
 WHATSAPP_VERIFY_TOKEN=...
+```
+
+Optional sponsor configuration for a future provider switch:
+
+```env
+OPENROUTER_API_KEY=...
 ```
 
 The demo WhatsApp number is seeded from `WA_TEST_PHONE_NUMBER_ID`, `WA_TEST_ACCESS_TOKEN`, `WA_TEST_PHONE_DISPLAY`, and `WA_TEST_SHOP_DOMAIN`. Keep all credentials in `.env`; never commit them or paste them into chat.
@@ -259,7 +275,7 @@ The harness covers clarification, budget filtering, preference refinement, compa
 - Cross-seller order tracking, fulfillment, returns, and refunds are not centralized.
 - Currency conversion is not implemented; mixed-currency comparisons are labeled rather than ranked by raw numbers.
 - A seller’s availability, checkout behavior, shipping, and returns policy remain authoritative.
-- The demo path depends on reachable PostgreSQL, Redis, Azure AI, Exa, Shopify Global Catalog, and Meta credentials.
+- The demo path depends on reachable PostgreSQL, Redis, an OpenAI-compatible model provider, Exa, Shopify Global Catalog, and Meta credentials.
 
 ## Documentation map
 
@@ -274,4 +290,5 @@ The code is the source of truth for implementation. Start with `app/routes/api.w
 - [Shopify Global Catalog](https://shopify.dev/docs/agents/catalog/global-catalog)
 - [Shopify Universal Commerce Protocol](https://shopify.dev/docs/agents)
 - [Meta WhatsApp Business Platform](https://developers.facebook.com/docs/whatsapp/cloud-api/overview)
+- [OpenRouter](https://openrouter.ai/)
 - [Exa search](https://docs.exa.ai/)
