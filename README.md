@@ -10,7 +10,7 @@ This is a Global Concierge: it is not limited to one merchant’s inventory. It 
 |---|---|---|---|
 | WhatsApp | Shopify Global Catalog | Conversational agent plus Exa research | Seller-owned checkout |
 
-> **Sponsor integration note:** OpenRouter is included as an optional, provider-agnostic model gateway path for the hackathon. The current demo keeps its existing OpenAI-compatible provider configuration; OpenRouter is not presented as an already-enabled runtime dependency.
+> **Provider note:** The application uses an OpenAI-compatible model interface. OpenRouter can be added as an alternative gateway without changing the agent contract; it is not enabled in the current demo.
 
 ## Hackathon fit
 
@@ -78,7 +78,7 @@ flowchart LR
 
   subgraph external ["Connected Platforms"]
     meta["Meta WhatsApp Cloud API"]
-    openrouter["OpenRouter Sponsor Path (Optional)"]
+    openrouter["OpenRouter Optional Provider Path"]
     catalog["Shopify Global Catalog"]
     exa["Exa Web Research"]
     shopify["Shopify Store APIs"]
@@ -194,7 +194,7 @@ This separation is deliberate: the prototype is trustworthy because it does not 
 | Customer channel | WhatsApp Business Platform via Meta Cloud API |
 | Application | Node.js, TypeScript, React Router v7 |
 | Agent runtime | Vercel AI SDK with a bounded single-agent tool loop |
-| Model gateway | OpenAI-compatible adapter; OpenRouter sponsor path is optional and not enabled in the current demo |
+| Model gateway | OpenAI-compatible adapter; OpenRouter is an optional provider path and is not enabled in the current demo |
 | Product discovery | Shopify Global Catalog and Storefront MCP |
 | Research | Exa neural web search |
 | Durable state | PostgreSQL with Prisma |
@@ -241,7 +241,7 @@ WHATSAPP_APP_SECRET=...
 WHATSAPP_VERIFY_TOKEN=...
 ```
 
-Optional sponsor configuration for a future provider switch:
+Optional OpenRouter configuration for a future provider switch:
 
 ```env
 OPENROUTER_API_KEY=...
