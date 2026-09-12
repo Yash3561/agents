@@ -142,7 +142,11 @@ async function main() {
     });
     await deleteSession(SHOP_DOMAIN, SESSION_ID);
     await redis.del(`wamem:${SHOP_DOMAIN}:${CUSTOMER_PHONE}`, `wa:rl:${SHOP_DOMAIN}:${CUSTOMER_PHONE}`);
-    await prisma.conversation.deleteMany({ where: { shopDomain: SHOP_DOMAIN, sessionId: CUSTOMER_PHONE } });
+    await prisma.conversation.deleteMany({ where: { shopDomain: SHOP_DOMAIN, sessionId: SESSION_ID } });
+
+    const clarification = await sendTurn(prisma, "I need a gift", "vague request clarification");
+    assertThat(clarification.messages.some((message) => message.startsWith("text:")), "underspecified shopping requests should ask one focused question");
+    assertThat(!clarification.messages.some((message) => message.includes("cta_url") || message.includes("template:")), "clarification should not send arbitrary product cards");
 
     const first = await sendTurn(prisma, "Find wireless headphones under $100", "budget search");
     assertThat(first.memory.last_results?.length, "the first search should remember real result cards");
@@ -150,6 +154,11 @@ async function main() {
 
     const preference = await sendTurn(prisma, "I prefer over-ear and black", "preference refinement");
     assertThat((preference.memory.preferences?.length ?? 0) > 0, "explicit preferences should be remembered");
+    assertThat(preference.memory.last_results?.every((product) => Number.parseFloat(product.price) <= 100), "carried budget must still filter refined results");
+
+    const comparison = await sendTurn(prisma, "Compare these by price, rating, and best use case based on recent reviews", "comparison with research");
+    assertThat(comparison.messages.some((message) => message.includes("cta_url") || message.includes("template")), "comparison should keep real seller handoffs attached");
+    assertThat(comparison.memory.last_results?.every((product) => Number.parseFloat(product.price) <= 100), "comparison results must respect the active budget");
 
     const cheapest = await sendTurn(prisma, "Which one is cheapest?", "contextual selection");
     assertThat(cheapest.messages.some((message) => message.includes("cta_url") || message.includes("template")), "contextual selection should retain a seller handoff");

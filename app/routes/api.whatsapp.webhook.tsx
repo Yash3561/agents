@@ -189,6 +189,27 @@ export function chooseGlobalProductsForDisplay(
   return products.slice(0, 3);
 }
 
+function isComparisonMessage(message: string): boolean {
+  return /\b(?:compare|comparison|versus|vs\.?|difference|better|which one should I choose|pros and cons|trade[- ]?off)\b/i.test(message);
+}
+
+function formatBriefConfirmation(
+  message: string,
+  brief: NonNullable<Awaited<ReturnType<typeof runGlobalConciergeAgent>>["shopping_brief"]> | undefined,
+): string {
+  if (!brief || !/\b(?:I\s+(?:like|love|prefer)|avoid|without|must\s+have|needs?\s+to\s+be)\b/i.test(message)) return "";
+  const latestConstraint = brief.constraints?.at(-1)
+    ?.replace(/^I\s+(?:like|love|prefer)\s+/i, "")
+    ?.replace(/^(?:avoid|without)\s+/i, "")
+    ?.replace(/\.$/, "");
+  const details = [
+    latestConstraint,
+    brief.useCase ? `for ${brief.useCase}` : "",
+    brief.budgetMax != null ? `under ${brief.budgetCurrency ?? "the listed currency"} ${brief.budgetMax}` : "",
+  ].filter(Boolean);
+  return details.length ? `Got it — ${details.join(", ")}. ` : "";
+}
+
 async function getShopCurrency(shopDomain: string): Promise<{ code: string; sym: string }> {
   const { redis } = await import("~/redis.server");
   const cached = await redis.get(`wa:currency:${shopDomain}`).catch(() => null);
@@ -442,15 +463,25 @@ export async function action({ request }: ActionFunctionArgs) {
       const resultCount = productsToDisplay.length;
       const resultNoun = resultCount === 1 ? "option" : "options";
       const includedResearch = result.agent_trace?.includes("web_search");
+      const comparisonRequest = isComparisonMessage(validatedText);
+      const briefConfirmation = formatBriefConfirmation(validatedText, result.shopping_brief);
+      const currencies = new Set(productsToDisplay.map((product) => product.currency.toUpperCase()));
+      const mixedCurrencyNotice = comparisonRequest && currencies.size > 1
+        ? "Prices are shown in different currencies, so I’m not ranking them by cost. "
+        : "";
       const carouselEligible = !!process.env.WA_MEDIA_CAROUSEL_TEMPLATE_NAME &&
         productsToDisplay.length >= 2 &&
         productsToDisplay.every((product) => !!product.image_url);
       const sentReply = productsToDisplay.length
-        ? includedResearch
-          ? /(?:not sure how to help|could(?:n't| not) find|having trouble right now|please try again)/i.test(filteredReply)
+        ? comparisonRequest
+          ? `${briefConfirmation}${mixedCurrencyNotice}${/(?:not sure how to help|could(?:n't| not) find|having trouble right now|please try again)/i.test(filteredReply)
+            ? "I compared the available options by their stated ratings and fit for your request."
+            : filteredReply}`
+        : includedResearch
+          ? `${briefConfirmation}${/(?:not sure how to help|could(?:n't| not) find|having trouble right now|please try again)/i.test(filteredReply)
             ? `I used recent web research to guide the search. The cards below are real Shopify listings with the seller and price shown.`
-            : filteredReply
-          : `I found ${resultCount} ${resultNoun}. Tap a card below to view and buy directly from that seller.`
+            : filteredReply}`
+          : `${briefConfirmation}I found ${resultCount} ${resultNoun}. Tap a card below to view and buy directly from that seller.`
         : filteredReply;
 
       if (productsToDisplay.length) {

@@ -18,12 +18,14 @@ import { searchGlobalCatalog } from "~/lib/mcp/global-catalog.server";
 import type { GlobalCatalogResult } from "~/lib/mcp/global-catalog.server";
 import { webSearch } from "~/lib/exa.server";
 import { fetchWhatsAppMemory, updateWhatsAppMemory } from "~/lib/agents/memory.server";
+import type { CustomerMemory } from "~/lib/agents/memory.server";
 import type { ConversationSession } from "~/lib/session.server";
 
 export interface ConciergeAgentOutput {
   text: string;
   products?: GlobalCatalogResult[];
   last_search_query?: string;
+  shopping_brief?: CustomerMemory["shopping_brief"];
   agent_trace: string[];
 }
 
@@ -35,12 +37,15 @@ You are a shopping concierge on WhatsApp. Unlike a typical store bot, you don't 
 Keep replies concise — under 200 characters when possible. Plain text only: no markdown, no asterisks, no bullet points, no numbered lists.
 Detect the language the customer is using and always reply in that same language.
 When recommending multiple products, put each on its own line as "Name — $Price (from SellerName)". Never start a line with a number or bullet character.
+For comparison requests, focus on the decision: say which option is best for the stated use case and the main tradeoff. The WhatsApp cards already show product names, prices, sellers, and ratings, so do not repeat a full product list in prose.
 </response_style>
 
 <tool_usage>
 - search_global_catalog: your primary and default tool for ANY product request. Call it for every shopping query, including vague or generic ones ("what's good for hiking", "show me something for my mom") — pass the customer's real need as the query, not just literal keywords.
 - web_search: for research the catalog itself can't answer — comparisons, reviews, buying guides, sizing advice, what's trending. If it surfaces a relevant category, also call search_global_catalog for it in the same turn so you can name a real, buyable match alongside the research.
 - Freshness requests ("newest", "latest", "recent", "just launched", "trending") include a live Exa research brief in your context. Use it to improve the catalog query and explain what is current, but never turn an Exa URL into a product recommendation or checkout link.
+- If a request is genuinely underspecified (for example, "I need a gift" or "show me something nice") and there is no active shopping brief, ask one focused clarification question before searching. Do not interrogate the customer with a long form.
+- If the customer answers a previous clarification with a concrete new product or category, treat the new request as authoritative and ignore the stale ambiguity from the earlier turn.
 - Greetings/small talk: respond directly, no tool needed.
 </tool_usage>
 
@@ -51,6 +56,7 @@ Carry forward the active budget and other constraints from the last search unles
 
 <research_responses>
 When you use web_search, summarize the useful research takeaway in 1-2 concise sentences. If catalog products are also returned, do not repeat their names, prices, or sellers in that prose because the WhatsApp cards will show those details separately.
+For price comparisons, compare raw amounts only when all displayed products use the same currency. If currencies differ, explicitly say that the listed prices are in different currencies and avoid declaring a cheapest option based on the raw numbers.
 </research_responses>
 
 <transparency>
@@ -80,6 +86,8 @@ export async function runGlobalConciergeAgent(opts: {
 
   const memory = await fetchWhatsAppMemory(shopDomain, customerPhone);
   const explicitPreferences = extractExplicitPreferences(agentMessage);
+  const priceBoundsInMessage = extractPriceBounds(agentMessage);
+  const shoppingBrief = mergeShoppingBrief(memory.shopping_brief, priceBoundsInMessage, explicitPreferences, agentMessage);
   const lastResults = session.last_global_results?.length ? session.last_global_results : memory.last_results;
   const lastResultContext = lastResults?.length
     ? `Last products shown:\n${lastResults.map((p, i) => `${i + 1}. ${p.title} — ${p.price} ${p.currency} (from ${p.sellerName})${p.rating ? `, rated ${p.rating}` : ""}`).join("\n")}`
@@ -98,8 +106,17 @@ export async function runGlobalConciergeAgent(opts: {
     memory.preferences?.length
       ? `Explicit saved preferences: ${memory.preferences.join("; ")}`
       : "",
+    formatShoppingBrief(shoppingBrief),
     lastResultContext,
   ].filter(Boolean).join("\n");
+
+  const clarification = buildClarificationQuestion(agentMessage, memory.last_search, lastResults);
+  if (clarification) {
+    return {
+      text: clarification,
+      agent_trace: ["concierge", "clarify_intent"],
+    };
+  }
 
   const contextualProduct = lastResults?.length
     ? selectContextProduct(agentMessage, lastResults)
@@ -145,9 +162,17 @@ export async function runGlobalConciergeAgent(opts: {
     inputSchema: z.object({ query: z.string() }),
     execute: async (input) => {
       toolsCalled.push("search_global_catalog");
-      const query = mergeWithActiveSearch(input.query, memory.last_search);
+      const query = mergeWithActiveSearch(input.query, memory.last_search, agentMessage);
       lastSearchQuery = query;
-      const priceBounds = extractPriceBounds(query) ?? extractPriceBounds(agentMessage);
+      const priceBounds = extractPriceBounds(query) ?? extractPriceBounds(agentMessage) ?? (
+        shoppingBrief.budgetMin != null || shoppingBrief.budgetMax != null
+          ? {
+              ...(shoppingBrief.budgetMin != null ? { min: shoppingBrief.budgetMin } : {}),
+              ...(shoppingBrief.budgetMax != null ? { max: shoppingBrief.budgetMax } : {}),
+              ...(shoppingBrief.budgetCurrency ? { currency: shoppingBrief.budgetCurrency } : {}),
+            }
+          : undefined
+      );
       const rawResults = await searchGlobalCatalog(query, { maxResults: 5 }).catch(() => [] as GlobalCatalogResult[]);
       // Global Catalog ranking is semantic and may include a related item over
       // the requested budget. Enforce an explicit ceiling locally as a final
@@ -156,7 +181,9 @@ export async function runGlobalConciergeAgent(opts: {
         ? rawResults
         : rawResults.filter((product) => {
             const price = Number.parseFloat(product.price);
-            return (priceBounds.min == null || price >= priceBounds.min) &&
+            const currencyMatches = !priceBounds.currency || product.currency.toUpperCase() === priceBounds.currency;
+            return currencyMatches &&
+              (priceBounds.min == null || price >= priceBounds.min) &&
               (priceBounds.max == null || price <= priceBounds.max);
           });
       // Accumulate across multiple calls in the same turn, same pattern as
@@ -218,6 +245,13 @@ export async function runGlobalConciergeAgent(opts: {
 
   void recordLlmUsage(shopDomain, "whatsapp", result.usage).catch(() => {});
 
+  // A comparison of the cards already on screen can be answered with Exa
+  // research alone. Reattach those real listings if the model did not repeat
+  // the catalog call, so the customer still gets actionable seller CTAs.
+  if ((!products || products.length === 0) && isComparisonRequest(agentMessage) && lastResults?.length) {
+    products = lastResults.map(toGlobalCatalogResult);
+  }
+
   // A contextual follow-up such as "which one is cheapest?" may not need a
   // catalog call. Still return the real previously shown listing so the
   // webhook can attach its seller checkout CTA instead of leaving the user at
@@ -228,10 +262,11 @@ export async function runGlobalConciergeAgent(opts: {
       ...(lastSearchQuery ? { last_search: lastSearchQuery } : {}),
       ...(lastSearchQuery ? { recent_searches: [lastSearchQuery] } : {}),
       ...(explicitPreferences.length > 0 ? { preferences: explicitPreferences } : {}),
+      ...(Object.keys(shoppingBrief).length > 0 ? { shopping_brief: shoppingBrief } : {}),
       ...(productTitles.length > 0 ? { recent_products: productTitles } : {}),
       ...((products ?? []).length > 0
         ? {
-            last_results: (products ?? []).slice(0, 3).map((p) => ({
+            last_results: (products ?? []).slice(0, 5).map((p) => ({
               title: p.title,
               sellerName: p.seller_name,
               price: p.price,
@@ -249,6 +284,7 @@ export async function runGlobalConciergeAgent(opts: {
     text: result.text,
     products,
     last_search_query: lastSearchQuery,
+    shopping_brief: shoppingBrief,
     agent_trace: ["concierge", ...toolsCalled],
   };
 }
@@ -271,32 +307,118 @@ function extractExplicitPreferences(message: string): string[] {
   )];
 }
 
-function mergeWithActiveSearch(query: string, lastSearch?: string): string {
+function mergeWithActiveSearch(query: string, lastSearch?: string, customerMessage?: string): string {
   if (!lastSearch) return query;
   // A new explicit budget replaces the old one; otherwise retain the prior
-  // category and price constraint when the customer only adds a preference.
-  const hasBudget = /\b(?:under|below|less\s+than|up\s+to|between|over|above|no\s+more\s+than|maximum\s+of)\b\s*[$€£₹]?\s*\d/i.test(query);
-  return hasBudget ? query : `${query}; keep the previous shopping intent and constraints: ${lastSearch}`;
+  // intent when the customer only adds a preference. A new explicit product
+  // request replaces the old category but keeps its budget constraint.
+  const hasBudget = /\b(?:under|below|less\s+than|up\s+to|between|over|above|no\s+more\s+than|maximum\s+of)\b\s*[$€£₹]?\s*\d/i.test(query) ||
+    !!extractPriceBounds(customerMessage ?? "");
+  if (hasBudget) return query;
+  const newSearch = /^(?:find|search|look\s+(?:for|up)|show|recommend|i\s+need|i\s+want|can\s+you\s+find)\b/i.test(customerMessage ?? "") &&
+    !/\b(?:more|similar|these|those|same|another)\b/i.test(customerMessage ?? "");
+  if (!newSearch) return `${query}; keep the previous shopping intent and constraints: ${lastSearch}`;
+
+  const previousBudget = extractPriceBounds(lastSearch);
+  if (!previousBudget) return query;
+  const budgetText = [
+    previousBudget.min != null ? `at least ${previousBudget.min}` : "",
+    previousBudget.max != null ? `under ${previousBudget.max}` : "",
+  ].filter(Boolean).join(" and ");
+  return `${query}; keep the active budget ${previousBudget.currency ?? "in the same currency"} ${budgetText}`;
 }
 
-function extractPriceBounds(text: string): { min?: number; max?: number } | undefined {
-  const between = text.match(/\bbetween\s+[$€£₹]?\s*(\d+(?:[.,]\d{1,2})?)\s+and\s+[$€£₹]?\s*(\d+(?:[.,]\d{1,2})?)/i);
+type PriceBounds = { min?: number; max?: number; currency?: string };
+
+function extractPriceBounds(text: string): PriceBounds | undefined {
+  const between = text.match(/\bbetween\s+([$€£₹])?\s*(\d+(?:[.,]\d{1,2})?)\s+and\s+([$€£₹])?\s*(\d+(?:[.,]\d{1,2})?)/i);
   if (between) {
     return {
-      min: Number.parseFloat(between[1].replace(",", "")),
-      max: Number.parseFloat(between[2].replace(",", "")),
+      min: Number.parseFloat(between[2].replace(",", "")),
+      max: Number.parseFloat(between[4].replace(",", "")),
+      ...(currencyFromSymbol(between[1] ?? between[3]) ? { currency: currencyFromSymbol(between[1] ?? between[3]) } : {}),
     };
   }
 
-  const ceiling = text.match(/\b(?:under|below|less\s+than|up\s+to|no\s+more\s+than|maximum\s+of)\s*[$€£₹]?\s*(\d+(?:[.,]\d{1,2})?)/i);
-  if (ceiling) return { max: Number.parseFloat(ceiling[1].replace(",", "")) };
+  const ceiling = text.match(/\b(?:under|below|less\s+than|up\s+to|no\s+more\s+than|maximum\s+of)\s*([$€£₹])?\s*(\d+(?:[.,]\d{1,2})?)/i);
+  if (ceiling) {
+    return {
+      max: Number.parseFloat(ceiling[2].replace(",", "")),
+      ...(currencyFromSymbol(ceiling[1]) ? { currency: currencyFromSymbol(ceiling[1]) } : {}),
+    };
+  }
 
-  const floor = text.match(/\b(?:over|above|more\s+than|at\s+least|minimum\s+of)\s*[$€£₹]?\s*(\d+(?:[.,]\d{1,2})?)/i);
-  return floor ? { min: Number.parseFloat(floor[1].replace(",", "")) } : undefined;
+  const floor = text.match(/\b(?:over|above|more\s+than|at\s+least|minimum\s+of)\s*([$€£₹])?\s*(\d+(?:[.,]\d{1,2})?)/i);
+  return floor
+    ? {
+        min: Number.parseFloat(floor[2].replace(",", "")),
+        ...(currencyFromSymbol(floor[1]) ? { currency: currencyFromSymbol(floor[1]) } : {}),
+      }
+    : undefined;
+}
+
+function currencyFromSymbol(symbol?: string): string | undefined {
+  return symbol === "$" ? "USD" : symbol === "€" ? "EUR" : symbol === "£" ? "GBP" : symbol === "₹" ? "INR" : undefined;
+}
+
+function mergeShoppingBrief(
+  existing: CustomerMemory["shopping_brief"] | undefined,
+  priceBounds: PriceBounds | undefined,
+  preferences: string[],
+  message: string,
+): NonNullable<CustomerMemory["shopping_brief"]> {
+  const useCase = extractUseCase(message);
+  return {
+    ...(existing ?? {}),
+    ...(priceBounds?.min != null ? { budgetMin: priceBounds.min } : {}),
+    ...(priceBounds?.max != null ? { budgetMax: priceBounds.max } : {}),
+    ...(priceBounds?.currency ? { budgetCurrency: priceBounds.currency } : {}),
+    ...(useCase ? { useCase } : {}),
+    ...(preferences.length
+      ? { constraints: [...new Set([...(existing?.constraints ?? []), ...preferences])].slice(-8) }
+      : {}),
+  };
+}
+
+function formatShoppingBrief(
+  brief: NonNullable<CustomerMemory["shopping_brief"]>,
+): string {
+  const parts = [
+    brief.useCase ? `use case: ${brief.useCase}` : "",
+    brief.budgetMax != null ? `max budget: ${brief.budgetCurrency ?? "local currency"} ${brief.budgetMax}` : "",
+    brief.budgetMin != null ? `min budget: ${brief.budgetCurrency ?? "local currency"} ${brief.budgetMin}` : "",
+    brief.constraints?.length ? `active constraints: ${brief.constraints.join("; ")}` : "",
+  ].filter(Boolean);
+  return parts.length ? `Active shopping brief: ${parts.join(", ")}` : "";
+}
+
+function extractUseCase(message: string): string | undefined {
+  const match = message.match(/\bfor\s+(?:a|an|the)\s+([^,.!?]{2,60})/i) ?? message.match(/\bfor\s+([^,.!?]{2,60})/i);
+  return match?.[1]?.replace(/\s+/g, " ").trim().slice(0, 60);
+}
+
+function buildClarificationQuestion(
+  message: string,
+  lastSearch?: string,
+  lastResults?: unknown[],
+): string | undefined {
+  if (lastSearch || lastResults?.length) return undefined;
+  const normalized = message.toLowerCase();
+  if (/\b(?:gift|present)\b/.test(normalized)) {
+    return "What kind of gift should I look for—tech, fashion, beauty, home, or something else?";
+  }
+  if (/\b(?:something nice|anything good|surprise me|help me shop|show me something)\b/.test(normalized)) {
+    return "What product or category should I look for? Add a budget or use case if you have one.";
+  }
+  return undefined;
 }
 
 function isFreshnessQuery(message: string): boolean {
   return /\b(?:newest|latest|recent(?:ly)?|just\s+launched|new\s+release|released|trending|current|this\s+year|202[5-9])\b/i.test(message);
+}
+
+function isComparisonRequest(message: string): boolean {
+  return /\b(?:compare|comparison|versus|vs\.?|difference|better|which one should I choose|pros and cons|trade[- ]?off)\b/i.test(message);
 }
 
 async function loadFreshnessContext(
@@ -365,6 +487,12 @@ function selectContextProduct(
 
   const selected = index >= 0 ? results[index] : undefined;
   if (!selected) return undefined;
+  return toGlobalCatalogResult(selected);
+}
+
+function toGlobalCatalogResult(
+  selected: NonNullable<ConversationSession["last_global_results"]>[number],
+): GlobalCatalogResult {
   return {
     title: selected.title,
     price: selected.price,

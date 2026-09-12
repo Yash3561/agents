@@ -16,6 +16,13 @@ export interface CustomerMemory {
   last_search?: string;
   recent_searches?: string[];    // recent shopping intents, newest first, capped
   preferences?: string[];        // explicit likes, dislikes, and constraints only
+  shopping_brief?: {
+    budgetMin?: number;
+    budgetMax?: number;
+    budgetCurrency?: string;
+    useCase?: string;
+    constraints?: string[];
+  };
   last_results?: Array<{
     title: string;
     sellerName: string;
@@ -76,6 +83,7 @@ export async function fetchCustomerMemory(
         else if (node.key === "last_search") memory.last_search = parsed;
         else if (node.key === "recent_searches") memory.recent_searches = parsed;
         else if (node.key === "preferences") memory.preferences = parsed;
+        else if (node.key === "shopping_brief") memory.shopping_brief = parsed;
         else if (node.key === "summary") memory.summary = parsed;
         else if (node.key === "abandoned_cart") memory.abandoned_cart = parsed;
       } catch {
@@ -278,6 +286,7 @@ async function writeMemory(
   add("last_search", memory.last_search);
   add("recent_searches", memory.recent_searches);
   add("preferences", memory.preferences);
+  add("shopping_brief", memory.shopping_brief);
   add("summary", memory.summary);
   add("abandoned_cart", memory.abandoned_cart);
 
@@ -396,6 +405,22 @@ export async function updateWhatsAppMemory(
     }
     if (updates.last_results) {
       merged.last_results = updates.last_results.slice(0, 5);
+    }
+    if (updates.shopping_brief) {
+      merged.shopping_brief = {
+        ...(existing.shopping_brief ?? {}),
+        ...updates.shopping_brief,
+        ...(updates.shopping_brief.constraints
+          ? {
+              constraints: [
+                ...new Set([
+                  ...updates.shopping_brief.constraints,
+                  ...(existing.shopping_brief?.constraints ?? []),
+                ]),
+              ].slice(0, 8),
+            }
+          : {}),
+      };
     }
     await redis.setex(`wamem:${shopDomain}:${phone}`, WA_MEM_TTL, JSON.stringify(merged));
   } catch {
