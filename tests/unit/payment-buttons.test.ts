@@ -14,7 +14,7 @@ vi.mock("~/lib/whatsapp.server", () => ({
   verifyWebhookSignature: vi.fn(), decryptToken: vi.fn(), sendTextMessage: vi.fn(),
   sendReplyButtons: vi.fn(), sendCarousel: vi.fn(), sendVariantList: vi.fn(),
   sendCheckoutMessage: vi.fn(), sendListMessage: vi.fn(),
-  sendCrossStoreOffer: vi.fn(), sendGlobalCatalogCarouselTemplate: vi.fn(),
+  sendCrossStoreOffer: vi.fn(), sendGlobalCatalogCarousel: vi.fn(),
 }));
 vi.mock("~/lib/session.server", () => ({ getSession: vi.fn(), setSession: vi.fn(), appendMessage: vi.fn(), deleteSession: vi.fn() }));
 vi.mock("~/lib/agents/whatsapp.server", () => ({ runWhatsAppAgent: vi.fn() }));

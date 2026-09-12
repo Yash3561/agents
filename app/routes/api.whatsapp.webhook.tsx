@@ -18,7 +18,7 @@ import {
   sendCheckoutMessage,
   sendListMessage,
   sendCrossStoreOffer,
-  sendGlobalCatalogCarouselTemplate,
+  sendGlobalCatalogCarousel,
 } from "~/lib/whatsapp.server";
 import { getSession, setSession, appendMessage, deleteSession } from "~/lib/session.server";
 import type { ConversationSession } from "~/lib/session.server";
@@ -469,13 +469,12 @@ export async function action({ request }: ActionFunctionArgs) {
       const mixedCurrencyNotice = comparisonRequest && currencies.size > 1
         ? "Prices are shown in different currencies, so I’m not ranking them by cost. "
         : "";
-      const configuredCarouselCount = Number.parseInt(process.env.WA_MEDIA_CAROUSEL_CARD_COUNT ?? "5", 10);
-      const carouselCardCount = Number.isInteger(configuredCarouselCount) && configuredCarouselCount >= 2 && configuredCarouselCount <= 10
-        ? configuredCarouselCount
-        : 5;
-      const carouselEligible = !!process.env.WA_MEDIA_CAROUSEL_TEMPLATE_NAME &&
-        productsToDisplay.length === carouselCardCount &&
-        productsToDisplay.every((product) => !!product.image_url);
+      // Free-form carousels are generated from the current request. They do
+      // not need a pre-approved template, but Meta requires 2–10 cards with
+      // the same button shape; a failed send falls back to one CTA per seller.
+      const carouselEligible = productsToDisplay.length >= 2 &&
+        productsToDisplay.length <= 10 &&
+        productsToDisplay.every((product) => !!product.image_url && /^https:\/\//i.test(product.checkout_url));
       const sentReply = productsToDisplay.length
         ? comparisonRequest
           ? `${briefConfirmation}${mixedCurrencyNotice}${/(?:not sure how to help|could(?:n't| not) find|having trouble right now|please try again)/i.test(filteredReply)
@@ -491,12 +490,12 @@ export async function action({ request }: ActionFunctionArgs) {
       if (productsToDisplay.length) {
         let sentCarousel = false;
         if (carouselEligible) {
-          if (includedResearch) await sendTextMessage(phoneNumberId, accessToken, from, sentReply).catch(() => null);
           try {
-            await sendGlobalCatalogCarouselTemplate(
+            await sendGlobalCatalogCarousel(
               phoneNumberId,
               accessToken,
               from,
+              sentReply,
               productsToDisplay.map((p) => ({
                 title: p.title,
                 price: p.price,

@@ -172,9 +172,8 @@ export async function sendCheckoutMessage(
  * Shopify seller (not this bot's own store), so the copy and button are
  * deliberately different from sendCheckoutMessage's "Added to your cart!":
  * nothing has been added anywhere, and the URL hands off to that seller's
- * own checkout, not ours. The default in-session fallback is one CTA message
- * per product; an approved media-card carousel is available separately for
- * deployments that configure WA_MEDIA_CAROUSEL_TEMPLATE_NAME.
+ * own checkout, not ours. The default fallback is one CTA message per
+ * product; Global Concierge can combine eligible results into a template-free carousel.
  */
 export async function sendCrossStoreOffer(
   phoneNumberId: string,
@@ -215,28 +214,29 @@ export async function sendCrossStoreOffer(
 }
 
 /**
- * Send a Meta-approved media-card carousel for Global Catalog results.
- *
- * The approved template should contain:
- * - BODY: one text variable for the result count
- * - CAROUSEL: IMAGE header, one BODY text variable, and one dynamic URL button
- *   per card; the URL base should be https://<app-domain>/go/{{1}}
- *
- * A redirect token is used because Global Catalog checkout URLs belong to
- * different seller domains, while a template URL button has one approved base.
+ * Send a template-free Global Concierge carousel during an active WhatsApp
+ * conversation. Every card uses the same one-button CTA shape, but the card
+ * content and seller URL are generated from the current Global Catalog result.
+ * This is intentionally separate from sendCarousel(), whose quick replies
+ * point at a single merchant's local cart and variant flow.
  */
-export async function sendGlobalCatalogCarouselTemplate(
+export async function sendGlobalCatalogCarousel(
   phoneNumberId: string,
   accessToken: string,
   to: string,
-  products: Array<{ title: string; price: string; currency: string; sellerName: string; rating?: number; ratingCount?: number; imageUrl: string; checkoutUrl: string }>,
+  intro: string,
+  products: Array<{
+    title: string;
+    price: string;
+    currency: string;
+    sellerName: string;
+    rating?: number;
+    ratingCount?: number;
+    imageUrl: string;
+    checkoutUrl: string;
+  }>,
 ): Promise<void> {
-  const templateName = process.env.WA_MEDIA_CAROUSEL_TEMPLATE_NAME;
-  const templateLanguage = process.env.WA_MEDIA_CAROUSEL_TEMPLATE_LANGUAGE ?? "en_US";
-  if (!templateName) throw new Error("WA_MEDIA_CAROUSEL_TEMPLATE_NAME is not configured");
-
-  const cards = await Promise.all(products.slice(0, 10).map(async (product, index) => {
-    const token = await createGlobalCheckoutRedirectToken(product.checkoutUrl);
+  const cards = products.slice(0, 10).map((product, index) => {
     const rating = product.rating
       ? `\n⭐ ${product.rating.toFixed(1)}${product.ratingCount ? ` (${product.ratingCount.toLocaleString()} reviews)` : ""}`
       : "";
@@ -244,13 +244,17 @@ export async function sendGlobalCatalogCarouselTemplate(
 
     return {
       card_index: index,
-      components: [
-        { type: "header", parameters: [{ type: "image", image: { link: product.imageUrl } }] },
-        { type: "body", parameters: [{ type: "text", text: body }] },
-        { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: token }] },
-      ],
+      type: "cta_url",
+      header: { type: "image", image: { link: product.imageUrl } },
+      body: { text: body },
+      action: {
+        name: "cta_url",
+        parameters: { display_text: "View & Buy →", url: product.checkoutUrl },
+      },
     };
-  }));
+  });
+
+  if (cards.length < 2) throw new Error("Global Catalog carousel needs at least two cards");
 
   const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
     method: "POST",
@@ -262,36 +266,18 @@ export async function sendGlobalCatalogCarouselTemplate(
       messaging_product: "whatsapp",
       recipient_type: "individual",
       to,
-      type: "template",
-      template: {
-        name: templateName,
-        language: { code: templateLanguage },
-        components: [
-          { type: "body", parameters: [{ type: "text", text: `Found ${cards.length} matching options` }] },
-          { type: "carousel", cards },
-        ],
+      type: "interactive",
+      interactive: {
+        type: "carousel",
+        body: { text: intro.slice(0, 1024) },
+        action: { cards },
       },
     }),
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Meta sendGlobalCatalogCarouselTemplate failed: ${res.status} ${err}`);
+    throw new Error(`Meta sendGlobalCatalogCarousel failed: ${res.status} ${err}`);
   }
-}
-
-async function createGlobalCheckoutRedirectToken(checkoutUrl: string): Promise<string> {
-  let parsed: URL;
-  try {
-    parsed = new URL(checkoutUrl);
-  } catch {
-    throw new Error("Global Catalog checkout URL is malformed");
-  }
-  if (parsed.protocol !== "https:") throw new Error("Global Catalog checkout URL must use HTTPS");
-
-  const token = crypto.randomBytes(18).toString("base64url");
-  const { redis } = await import("~/redis.server");
-  await redis.set(`wa:global:checkout:${token}`, parsed.toString(), "EX", 7 * 24 * 60 * 60);
-  return token;
 }
 
 export async function sendVariantList(
