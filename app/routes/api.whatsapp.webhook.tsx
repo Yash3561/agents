@@ -18,8 +18,10 @@ import {
   sendCheckoutMessage,
   sendListMessage,
   sendCrossStoreOffer,
+  sendGlobalCatalogCarouselTemplate,
 } from "~/lib/whatsapp.server";
 import { getSession, setSession, appendMessage, deleteSession } from "~/lib/session.server";
+import type { ConversationSession } from "~/lib/session.server";
 import { runWhatsAppAgent } from "~/lib/agents/whatsapp.server";
 import { runGlobalConciergeAgent } from "~/lib/agents/global-concierge.server";
 import { formatCarousel } from "~/lib/agents/whatsapp-formatter.server";
@@ -30,6 +32,38 @@ import { fetchWhatsAppMemory, updateWhatsAppMemory } from "~/lib/agents/memory.s
 function logGuardrail(event: string, type: string, phone: string, shopDomain: string) {
   const h = createHash("sha256").update(phone).digest("hex").slice(0, 12);
   console.log(JSON.stringify({ event, type, phone_hash: h, shop: shopDomain, ts: Date.now() }));
+}
+
+/** Restore the last durable WhatsApp transcript when the short Redis session expired. */
+async function restoreGlobalSession(
+  shopDomain: string,
+  sessionId: string,
+): Promise<ConversationSession> {
+  const session = await getSession(shopDomain, sessionId);
+  if (session.conversation_history.length > 0) return session;
+
+  const persisted = await prisma.conversation.findUnique({
+    where: { shopDomain_sessionId: { shopDomain, sessionId } },
+    select: { messages: true },
+  }).catch(() => null);
+  const rawMessages = persisted?.messages;
+  if (!Array.isArray(rawMessages)) return session;
+
+  const candidates = rawMessages.filter(
+    (message) => !!message && typeof message === "object" && !Array.isArray(message),
+  ) as Array<Record<string, unknown>>;
+  const restored = candidates
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .filter((message) => typeof message.content === "string")
+    .slice(-20)
+    .map((message) => ({
+      role: message.role as "user" | "assistant",
+      content: message.content as string,
+      timestamp: typeof message.timestamp === "number" ? message.timestamp : Date.now(),
+    }));
+
+  if (restored.length > 0) session.conversation_history = restored;
+  return session;
 }
 
 /**
@@ -107,6 +141,30 @@ function buildPriceTiers(sym: string, code: string): PriceTierDef[] {
     { id: "price|t4", title: `${sym}300+`, description: "Luxury & high-end", agentQuery: `Show me premium products over ${sym}300` },
     noLimit,
   ];
+}
+
+function buildGlobalFollowupButtons(
+  customerMessage: string,
+  productCount: number,
+  agentTrace: string[],
+): Array<{ id: string; title: string }> {
+  if (productCount < 2 || /\b(cheapest|lowest|most\s+expensive|first|second|third|checkout|buy)\b/i.test(customerMessage)) {
+    return [];
+  }
+  if (agentTrace.includes("web_search")) {
+    return [
+      { id: "global_more", title: "More like this" },
+      { id: "global_refine", title: "Refine search" },
+    ];
+  }
+  if (productCount >= 3) {
+    return [
+      { id: "global_more", title: "More options" },
+      { id: "global_compare", title: "Compare picks" },
+      { id: "global_refine", title: "Refine search" },
+    ];
+  }
+  return [{ id: "global_refine", title: "Refine search" }];
 }
 
 async function getShopCurrency(shopDomain: string): Promise<{ code: string; sym: string }> {
@@ -299,13 +357,18 @@ export async function action({ request }: ActionFunctionArgs) {
     // Global Concierge — a store-agnostic shopping assistant (Merchant.isGlobalConcierge).
     // Entirely separate from the per-store flow below: no local cart/checkout, no
     // Shopify customer lookup, no store-specific buttons (add_cart|, filter_price,
-    // etc. don't apply — there's no "this store"). Every button this mode sends is
-    // a cta_url (opens externally, never taps back into this webhook), so any
-    // buttonReplyPayload/listReply reaching here for a concierge merchant would be
-    // unexpected — handled as plain text only, same as any other message.
+    // etc. don't apply — there's no "this store"). Product CTAs open externally;
+    // the post-results quick replies below intentionally come back through this
+    // webhook to continue the shopping funnel.
     if (merchant.isGlobalConcierge) {
-      if (!textBody) return new Response("OK", { status: 200 });
-      const validatedText = textBody.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim().slice(0, 500); // eslint-disable-line no-control-regex
+      const globalQuickReplies: Record<string, string> = {
+        global_more: "Show me more options similar to the products you just showed me",
+        global_compare: "Compare the products you just showed me by price, rating, and best use case",
+        global_refine: "Help me refine the search based on my preferences",
+      };
+      const globalInput = textBody ?? globalQuickReplies[buttonReplyPayload ?? ""];
+      if (!globalInput) return new Response("OK", { status: 200 });
+      const validatedText = globalInput.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim().slice(0, 500); // eslint-disable-line no-control-regex
       if (!validatedText) return new Response("OK", { status: 200 });
       if (JAILBREAK_RE.some((re) => re.test(validatedText))) {
         await sendTextMessage(phoneNumberId, accessToken, from,
@@ -315,15 +378,15 @@ export async function action({ request }: ActionFunctionArgs) {
         return new Response("OK", { status: 200 });
       }
 
-      const session = await getSession(shopDomain, sessionId);
-      const isFirstMessage = session.conversation_history.length === 0;
+      const session = await restoreGlobalSession(shopDomain, sessionId);
       const GREETING_RE = /^(hi|hello|hey|hola|namaste|नमस्ते|yo|sup|hiya|ola)\b/i;
-      if (GREETING_RE.test(validatedText) && isFirstMessage) {
+      if (GREETING_RE.test(validatedText)) {
         const memory = await fetchWhatsAppMemory(shopDomain, from);
         const greetingText = memory.recent_products?.length
           ? `Hey! 👋 Last time you were looking at ${memory.recent_products[0]} — want to pick that back up, or find something new?`
           : "Hey! 👋 I can help you find and buy products from any Shopify store. What are you looking for?";
         await sendTextMessage(phoneNumberId, accessToken, from, greetingText).catch(() => null);
+        await appendMessage(shopDomain, sessionId, { role: "user", content: validatedText, timestamp: Date.now() });
         await appendMessage(shopDomain, sessionId, { role: "assistant", content: greetingText, timestamp: Date.now() });
         return new Response("OK", { status: 200 });
       }
@@ -341,23 +404,89 @@ export async function action({ request }: ActionFunctionArgs) {
         .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[removed]")
         .replace(/(\+\d{1,3}[\s-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/g, "[removed]");
 
+      // Global Concierge sends each result as its own seller-owned CTA card.
+      // Keep the preceding text to a single handoff sentence; the agent's
+      // normal product-by-product text would repeat every title, price, and
+      // seller immediately above the same information in the cards.
+      const resultCount = Math.min(result.products?.length ?? 0, 3);
+      const resultNoun = resultCount === 1 ? "option" : "options";
+      const includedResearch = result.agent_trace?.includes("web_search");
+      const carouselEligible = !!process.env.WA_MEDIA_CAROUSEL_TEMPLATE_NAME &&
+        (result.products?.length ?? 0) >= 2 &&
+        result.products?.slice(0, 10).every((product) => !!product.image_url);
+      const sentReply = result.products?.length
+        ? includedResearch
+          ? /(?:not sure how to help|could(?:n't| not) find|having trouble right now|please try again)/i.test(filteredReply)
+            ? `I used recent web research to guide the search. The cards below are real Shopify listings with the seller and price shown.`
+            : filteredReply
+          : `I found ${resultCount} ${resultNoun}. Tap a card below to view and buy directly from that seller.`
+        : filteredReply;
+
       if (result.products?.length) {
-        await sendTextMessage(phoneNumberId, accessToken, from, filteredReply).catch(() => null);
-        for (const p of result.products.slice(0, 3)) {
-          await sendCrossStoreOffer(
-            phoneNumberId, accessToken, from,
-            { title: p.title, price: p.price, currency: p.currency, sellerName: p.seller_name, rating: p.rating, ratingCount: p.rating_count, imageUrl: p.image_url },
-            p.checkout_url,
-          ).catch((e: unknown) => console.error("[wa-webhook] sendCrossStoreOffer failed:", e));
+        let sentCarousel = false;
+        if (carouselEligible) {
+          if (includedResearch) await sendTextMessage(phoneNumberId, accessToken, from, filteredReply).catch(() => null);
+          try {
+            await sendGlobalCatalogCarouselTemplate(
+              phoneNumberId,
+              accessToken,
+              from,
+              result.products.slice(0, 10).map((p) => ({
+                title: p.title,
+                price: p.price,
+                currency: p.currency,
+                sellerName: p.seller_name,
+                rating: p.rating,
+                ratingCount: p.rating_count,
+                imageUrl: p.image_url!,
+                checkoutUrl: p.checkout_url,
+              })),
+            );
+            sentCarousel = true;
+          } catch (e: unknown) {
+            console.error("[wa-webhook] media-card carousel failed, falling back to CTA cards:", (e as Error).message);
+          }
+        }
+        if (!sentCarousel) {
+          await sendTextMessage(phoneNumberId, accessToken, from, sentReply).catch(() => null);
+          for (const p of result.products.slice(0, 3)) {
+            await sendCrossStoreOffer(
+              phoneNumberId, accessToken, from,
+              { title: p.title, price: p.price, currency: p.currency, sellerName: p.seller_name, rating: p.rating, ratingCount: p.rating_count, imageUrl: p.image_url },
+              p.checkout_url,
+            ).catch((e: unknown) => console.error("[wa-webhook] sendCrossStoreOffer failed:", e));
+          }
+        }
+        const followupButtons = buildGlobalFollowupButtons(validatedText, result.products.length, result.agent_trace ?? []);
+        if (followupButtons.length > 0) {
+          await sendReplyButtons(
+            phoneNumberId,
+            accessToken,
+            from,
+            "Want to keep exploring?",
+            followupButtons,
+          ).catch((e: unknown) => console.error("[wa-webhook] concierge follow-up buttons failed:", e));
         }
       } else {
         await sendTextMessage(phoneNumberId, accessToken, from, filteredReply).catch(() => null);
       }
 
-      await appendMessage(shopDomain, sessionId, { role: "assistant", content: filteredReply, timestamp: Date.now() });
+      await appendMessage(shopDomain, sessionId, { role: "assistant", content: sentReply, timestamp: Date.now() });
       const updatedSession = await getSession(shopDomain, sessionId);
+      if (result.products?.length) {
+        updatedSession.last_global_results = result.products.slice(0, 3).map((p) => ({
+          title: p.title,
+          sellerName: p.seller_name,
+          price: p.price,
+          currency: p.currency,
+          ...(p.rating != null ? { rating: p.rating } : {}),
+          ...(p.image_url ? { imageUrl: p.image_url } : {}),
+          checkoutUrl: p.checkout_url,
+        }));
+      }
+      if (result.last_search_query) updatedSession.last_global_query = result.last_search_query;
       await setSession(shopDomain, sessionId, updatedSession);
-      void prisma.conversation.upsert({
+      await prisma.conversation.upsert({
         where: { shopDomain_sessionId: { shopDomain, sessionId } },
         update: {
           messages: updatedSession.conversation_history as unknown as import("@prisma/client").Prisma.InputJsonValue,

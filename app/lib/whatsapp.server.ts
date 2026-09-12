@@ -172,10 +172,9 @@ export async function sendCheckoutMessage(
  * Shopify seller (not this bot's own store), so the copy and button are
  * deliberately different from sendCheckoutMessage's "Added to your cart!":
  * nothing has been added anywhere, and the URL hands off to that seller's
- * own checkout, not ours. WhatsApp's cta_url message type supports exactly
- * one button per message, so cross-store results are sent as sequential
- * single-product cards rather than one carousel (Meta's carousel action only
- * supports quick_reply buttons, not a URL type — see sendCarousel below).
+ * own checkout, not ours. The default in-session fallback is one CTA message
+ * per product; an approved media-card carousel is available separately for
+ * deployments that configure WA_MEDIA_CAROUSEL_TEMPLATE_NAME.
  */
 export async function sendCrossStoreOffer(
   phoneNumberId: string,
@@ -213,6 +212,86 @@ export async function sendCrossStoreOffer(
     const err = await res.text();
     throw new Error(`Meta sendCrossStoreOffer failed: ${res.status} ${err}`);
   }
+}
+
+/**
+ * Send a Meta-approved media-card carousel for Global Catalog results.
+ *
+ * The approved template should contain:
+ * - BODY: one text variable for the result count
+ * - CAROUSEL: IMAGE header, one BODY text variable, and one dynamic URL button
+ *   per card; the URL base should be https://<app-domain>/go/{{1}}
+ *
+ * A redirect token is used because Global Catalog checkout URLs belong to
+ * different seller domains, while a template URL button has one approved base.
+ */
+export async function sendGlobalCatalogCarouselTemplate(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  products: Array<{ title: string; price: string; currency: string; sellerName: string; rating?: number; ratingCount?: number; imageUrl: string; checkoutUrl: string }>,
+): Promise<void> {
+  const templateName = process.env.WA_MEDIA_CAROUSEL_TEMPLATE_NAME;
+  const templateLanguage = process.env.WA_MEDIA_CAROUSEL_TEMPLATE_LANGUAGE ?? "en_US";
+  if (!templateName) throw new Error("WA_MEDIA_CAROUSEL_TEMPLATE_NAME is not configured");
+
+  const cards = await Promise.all(products.slice(0, 10).map(async (product, index) => {
+    const token = await createGlobalCheckoutRedirectToken(product.checkoutUrl);
+    const rating = product.rating
+      ? `\n⭐ ${product.rating.toFixed(1)}${product.ratingCount ? ` (${product.ratingCount.toLocaleString()} reviews)` : ""}`
+      : "";
+    const body = `${product.title}\n${product.price} ${product.currency} — from ${product.sellerName}${rating}`.slice(0, 160);
+
+    return {
+      card_index: index,
+      components: [
+        { type: "header", parameters: [{ type: "image", image: { link: product.imageUrl } }] },
+        { type: "body", parameters: [{ type: "text", text: body }] },
+        { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: token }] },
+      ],
+    };
+  }));
+
+  const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: templateLanguage },
+        components: [
+          { type: "body", parameters: [{ type: "text", text: `Found ${cards.length} matching options` }] },
+          { type: "carousel", cards },
+        ],
+      },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Meta sendGlobalCatalogCarouselTemplate failed: ${res.status} ${err}`);
+  }
+}
+
+async function createGlobalCheckoutRedirectToken(checkoutUrl: string): Promise<string> {
+  let parsed: URL;
+  try {
+    parsed = new URL(checkoutUrl);
+  } catch {
+    throw new Error("Global Catalog checkout URL is malformed");
+  }
+  if (parsed.protocol !== "https:") throw new Error("Global Catalog checkout URL must use HTTPS");
+
+  const token = crypto.randomBytes(18).toString("base64url");
+  const { redis } = await import("~/redis.server");
+  await redis.set(`wa:global:checkout:${token}`, parsed.toString(), "EX", 7 * 24 * 60 * 60);
+  return token;
 }
 
 export async function sendVariantList(

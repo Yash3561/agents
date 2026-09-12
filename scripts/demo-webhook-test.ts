@@ -6,6 +6,7 @@
  * since we don't have real WhatsApp credentials yet). Everything else is real.
  *
  * Usage: npx tsx scripts/demo-webhook-test.ts "do you have electric guitars?"
+ * Button tap: npx tsx scripts/demo-webhook-test.ts "button:global_more"
  */
 import crypto from "crypto";
 import { config } from "dotenv";
@@ -53,13 +54,21 @@ async function main() {
   });
 
   const messageText = process.argv[2] ?? "do you have electric guitars?";
+  const buttonId = messageText.startsWith("button:") ? messageText.slice("button:".length) : undefined;
   const messageId = `wamid.demo-${Date.now()}`;
   const metaPayload = {
     entry: [{
       changes: [{
         value: {
           metadata: { phone_number_id: TEST_PHONE_NUMBER_ID },
-          messages: [{ from: TEST_CUSTOMER_PHONE, id: messageId, text: { body: messageText } }],
+          messages: [buttonId
+            ? {
+                from: TEST_CUSTOMER_PHONE,
+                id: messageId,
+                type: "interactive",
+                interactive: { type: "button_reply", button_reply: { id: buttonId, title: buttonId } },
+              }
+            : { from: TEST_CUSTOMER_PHONE, id: messageId, text: { body: messageText } }],
           contacts: [{ profile: {} }],
         },
       }],
@@ -75,7 +84,7 @@ async function main() {
     body: rawBody,
   });
 
-  console.log(`\n📩 Simulated inbound WhatsApp message: "${messageText}"\n`);
+  console.log(`\n📩 Simulated inbound WhatsApp ${buttonId ? "button tap" : "message"}: "${buttonId ?? messageText}"\n`);
   const response = await action({ request, params: {}, context: {} } as never);
   console.log(`Webhook response: ${response.status} ${await response.text()}\n`);
 

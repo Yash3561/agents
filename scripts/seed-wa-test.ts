@@ -43,6 +43,7 @@ const merchant = await prisma.merchant.upsert({
   create: {
     shopDomain,
     plan: "surge",
+    isGlobalConcierge: true,
     onboardedAt: new Date(),
     onboardingStep: 4,
     waPhoneNumberId: phoneNumberId,
@@ -52,12 +53,13 @@ const merchant = await prisma.merchant.upsert({
   },
   update: {
     plan: "surge",
+    isGlobalConcierge: true,
     waPhoneNumberId: phoneNumberId,
     waAccessToken: encrypted,
     waPhone: phoneDisplay,
     waConnectedAt: new Date(),
   },
-  select: { shopDomain: true, waPhone: true, waPhoneNumberId: true, plan: true },
+  select: { shopDomain: true, waPhone: true, waPhoneNumberId: true, plan: true, isGlobalConcierge: true },
 });
 
 console.log("✓ WhatsApp test credentials seeded:", merchant);

@@ -14,6 +14,17 @@ const SUMMARIZE_AFTER_TURNS = 5;
 export interface CustomerMemory {
   recent_products?: string[];   // e.g. ["Fabric Resistance Bands (Pink)", "Silk Sleep Mask"] — most recent first, capped
   last_search?: string;
+  recent_searches?: string[];    // recent shopping intents, newest first, capped
+  preferences?: string[];        // explicit likes, dislikes, and constraints only
+  last_results?: Array<{
+    title: string;
+    sellerName: string;
+    price: string;
+    currency: string;
+    rating?: number;
+    imageUrl?: string;
+    checkoutUrl: string;
+  }>;
   summary?: string;                        // 2-sentence compressed history
   abandoned_cart?: { items: unknown[]; total: number; timestamp: string };
   firstName?: string;           // customer's first name from Shopify profile
@@ -63,6 +74,8 @@ export async function fetchCustomerMemory(
         const parsed = JSON.parse(node.value);
         if (node.key === "recent_products") memory.recent_products = parsed;
         else if (node.key === "last_search") memory.last_search = parsed;
+        else if (node.key === "recent_searches") memory.recent_searches = parsed;
+        else if (node.key === "preferences") memory.preferences = parsed;
         else if (node.key === "summary") memory.summary = parsed;
         else if (node.key === "abandoned_cart") memory.abandoned_cart = parsed;
       } catch {
@@ -263,6 +276,8 @@ async function writeMemory(
 
   add("recent_products", memory.recent_products);
   add("last_search", memory.last_search);
+  add("recent_searches", memory.recent_searches);
+  add("preferences", memory.preferences);
   add("summary", memory.summary);
   add("abandoned_cart", memory.abandoned_cart);
 
@@ -368,6 +383,19 @@ export async function updateWhatsAppMemory(
     }
     if (merged.recent_products) {
       merged.recent_products = merged.recent_products.slice(0, 5);
+    }
+    if (updates.recent_searches) {
+      merged.recent_searches = [
+        ...new Set([...updates.recent_searches, ...(existing.recent_searches ?? [])]),
+      ].slice(0, 5);
+    }
+    if (updates.preferences) {
+      merged.preferences = [
+        ...new Set([...updates.preferences, ...(existing.preferences ?? [])]),
+      ].slice(0, 8);
+    }
+    if (updates.last_results) {
+      merged.last_results = updates.last_results.slice(0, 3);
     }
     await redis.setex(`wamem:${shopDomain}:${phone}`, WA_MEM_TTL, JSON.stringify(merged));
   } catch {

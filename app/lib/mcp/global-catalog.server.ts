@@ -97,5 +97,13 @@ export async function searchGlobalCatalog(
     });
   }
 
-  return mapped;
+  // A semantic catalog can return the same listing more than once when the
+  // query contains several overlapping concepts. Keep the first ranked copy
+  // so WhatsApp does not render duplicate cards for one seller/checkout.
+  const seenCheckouts = new Set<string>();
+  return mapped.filter((product) => {
+    if (seenCheckouts.has(product.checkout_url)) return false;
+    seenCheckouts.add(product.checkout_url);
+    return true;
+  });
 }

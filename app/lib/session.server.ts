@@ -19,6 +19,17 @@ export interface DiscountNegotiationState {
   level: number;            // how many offers made so far (0 = none yet)
 }
 
+/** Minimal context for follow-up questions in the store-agnostic concierge. */
+export interface GlobalProductContext {
+  title: string;
+  sellerName: string;
+  price: string;
+  currency: string;
+  rating?: number;
+  imageUrl?: string;
+  checkoutUrl: string;
+}
+
 export interface ConversationSession {
   conversation_history: Message[];
   cart_id?: string;
@@ -28,6 +39,9 @@ export interface ConversationSession {
   discount_negotiation: DiscountNegotiationState;
   /** one-shot cap — set true after the first in-session cart-assist suggestion (free-shipping nudge or passive assist) */
   cart_assist_shown?: boolean;
+  /** Last Global Catalog cards, so "the second one" and "cheapest" have a referent. */
+  last_global_results?: GlobalProductContext[];
+  last_global_query?: string;
 }
 
 const DEFAULT_SESSION = (): ConversationSession => ({
@@ -92,4 +106,3 @@ export async function appendMessage(
   session.conversation_history.push(message);
   await setSession(shopDomain, sessionId, session);
 }
-
