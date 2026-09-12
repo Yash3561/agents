@@ -1,0 +1,30 @@
+# Local-only infra for running NeonPing on your desktop.
+# Replaces Neon Postgres for demo purposes.
+# Start:  docker compose -f docker-compose.dev.yml up -d
+# Stop:   docker compose -f docker-compose.dev.yml down
+# Wipe:   docker compose -f docker-compose.dev.yml down -v
+#
+# NOTE on Redis: a native redis-server already runs on this machine at
+# 127.0.0.1:6379 (macOS routes "localhost" there ahead of any Docker port
+# mapping to the same port), so there is no redis service here — the app's
+# REDIS_URL=redis://localhost:6379 already reaches it directly. Verified
+# working: `redis-cli -h 127.0.0.1 -p 6379 keys '*'` shows real session/
+# memory keys from actual agent runs. If that native instance is ever
+# stopped, either restart it (`redis-server`) or add a mapped-port Docker
+# service back here (e.g. "6380:6379") and update REDIS_URL to match.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: neonping
+      POSTGRES_PASSWORD: neonping
+      POSTGRES_DB: neonping
+    ports:
+      - "5433:5432"
+    volumes:
+      - neonping_pg_data:/var/lib/postgresql/data
+
+volumes:
+  neonping_pg_data:

@@ -39,6 +39,12 @@ model Merchant {
   // Opt-in gate: high-stakes AI replies (discount codes, refunds, order cancellation)
   // are held in the Inbox for merchant approval instead of sent immediately. Default off.
   requireApprovalForOffers Boolean   @default(false)
+  // When true, this WhatsApp number is a store-agnostic shopping concierge —
+  // search_other_stores' Global Catalog (every Shopify merchant) is the primary
+  // source, not a this-store-only fallback. See global-concierge.server.ts.
+  // shopDomain is still required/unique but need not be a real .myshopify.com
+  // store for this mode — it's just a partition key for sessions/memory/billing.
+  isGlobalConcierge   Boolean        @default(false)
   trialUsedAt         DateTime?
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt

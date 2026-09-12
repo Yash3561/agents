@@ -167,6 +167,54 @@ export async function sendCheckoutMessage(
   }
 }
 
+/**
+ * Global Concierge product card — a real listing from a real, independent
+ * Shopify seller (not this bot's own store), so the copy and button are
+ * deliberately different from sendCheckoutMessage's "Added to your cart!":
+ * nothing has been added anywhere, and the URL hands off to that seller's
+ * own checkout, not ours. WhatsApp's cta_url message type supports exactly
+ * one button per message, so cross-store results are sent as sequential
+ * single-product cards rather than one carousel (Meta's carousel action only
+ * supports quick_reply buttons, not a URL type — see sendCarousel below).
+ */
+export async function sendCrossStoreOffer(
+  phoneNumberId: string,
+  accessToken: string,
+  to: string,
+  product: { title: string; price: string; currency: string; sellerName: string; rating?: number; ratingCount?: number; imageUrl?: string },
+  checkoutUrl: string,
+): Promise<void> {
+  const ratingLine = product.rating
+    ? `\n⭐ ${product.rating.toFixed(1)}${product.ratingCount ? ` (${product.ratingCount.toLocaleString()} reviews)` : ""}`
+    : "";
+  const body = `${product.title}\n${product.price} ${product.currency} — from ${product.sellerName}${ratingLine}`;
+  const res = await fetch(`${META_BASE}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "cta_url",
+        ...(product.imageUrl ? { header: { type: "image", image: { link: product.imageUrl } } } : {}),
+        body: { text: body },
+        action: {
+          name: "cta_url",
+          parameters: { display_text: "View & Buy →", url: checkoutUrl },
+        },
+      },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Meta sendCrossStoreOffer failed: ${res.status} ${err}`);
+  }
+}
+
 export async function sendVariantList(
   phoneNumberId: string,
   accessToken: string,

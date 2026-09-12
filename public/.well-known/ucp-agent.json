@@ -1,10 +1,12 @@
 {
-  "ucp": "2026-04-08",
-  "name": "NeonPing Agent",
-  "capabilities": [
-    "dev.ucp.shopping.catalog",
-    "dev.ucp.shopping.cart",
-    "dev.ucp.shopping.checkout",
-    "dev.ucp.shopping.order"
-  ]
+  "ucp": {
+    "version": "2026-08-25",
+    "capabilities": {
+      "dev.ucp.shopping.catalog.search": [{ "version": "2026-08-25" }],
+      "dev.ucp.shopping.cart": [{ "version": "2026-08-25" }],
+      "dev.ucp.shopping.checkout": [{ "version": "2026-08-25" }],
+      "dev.ucp.shopping.order": [{ "version": "2026-08-25" }]
+    }
+  },
+  "name": "NeonPing Agent"
 }

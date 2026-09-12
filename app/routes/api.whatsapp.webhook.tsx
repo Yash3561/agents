@@ -17,9 +17,11 @@ import {
   sendVariantList,
   sendCheckoutMessage,
   sendListMessage,
+  sendCrossStoreOffer,
 } from "~/lib/whatsapp.server";
 import { getSession, setSession, appendMessage, deleteSession } from "~/lib/session.server";
 import { runWhatsAppAgent } from "~/lib/agents/whatsapp.server";
+import { runGlobalConciergeAgent } from "~/lib/agents/global-concierge.server";
 import { formatCarousel } from "~/lib/agents/whatsapp-formatter.server";
 import { lookupCustomerByPhone, fetchProductRatings, adminGraphql } from "~/lib/mcp/admin.server";
 import { createCart, updateCart } from "~/lib/mcp/cart.server";
@@ -202,7 +204,15 @@ export async function action({ request }: ActionFunctionArgs) {
       interactive?.type === "list_reply"
         ? (interactive.list_reply as Record<string, string> | undefined)
         : undefined;
-    if (!textBody && !buttonReplyPayload && !listReply) return new Response("OK", { status: 200 });
+    // Unsupported inbound type (image, audio, video, document, sticker, location,
+    // contacts, unrecognized interactive subtype, etc.) — msg.type carries what it
+    // actually was. This used to return 200 with NO reply at all, so a customer
+    // sending a photo ("does this come in this color?") saw only silence and
+    // reasonably assumed the bot was broken. A real WhatsApp shopping customer
+    // sending a photo is common, not an edge case — always acknowledge it, even
+    // without vision support, rather than going dark.
+    const hasHandleableInput = !!(textBody || buttonReplyPayload || listReply);
+    const unsupportedType = hasHandleableInput ? undefined : (msg.type as string | undefined) ?? "message";
 
     const metadata = value.metadata as Record<string, string> | undefined;
     const phoneNumberId = metadata?.phone_number_id;
@@ -252,6 +262,18 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response("OK", { status: 200 });
     }
 
+    // Unsupported inbound type (image, audio, video, etc.) — acknowledge rather
+    // than go silent. Handled before the per-phone rate limit / billing usage
+    // gates below since no real agent turn happens here — nothing to meter.
+    if (unsupportedType) {
+      const canText = unsupportedType === "image" || unsupportedType === "video"
+        ? "I can't view images or videos yet, but tell me what you're looking for and I'll help you find it!"
+        : "I can only reply to text messages and menu taps right now — what can I help you find?";
+      await sendTextMessage(phoneNumberId, accessToken, from, canText).catch(() => null);
+      logGuardrail("unsupported_message_type", unsupportedType, from, shopDomain);
+      return new Response("OK", { status: 200 });
+    }
+
     // Per-phone rate limit — 20 msgs/hour prevents one user burning merchant's quota
     const phoneRlKey = `wa:rl:${shopDomain}:${from}`;
     const phoneCount = await redis.incr(phoneRlKey);
@@ -271,6 +293,92 @@ export async function action({ request }: ActionFunctionArgs) {
         "This store's messaging limit has been reached for the month. Please contact the store directly."
       ).catch(() => null);
       logGuardrail("usage_limit_hit", "merchant_quota", from, shopDomain);
+      return new Response("OK", { status: 200 });
+    }
+
+    // Global Concierge — a store-agnostic shopping assistant (Merchant.isGlobalConcierge).
+    // Entirely separate from the per-store flow below: no local cart/checkout, no
+    // Shopify customer lookup, no store-specific buttons (add_cart|, filter_price,
+    // etc. don't apply — there's no "this store"). Every button this mode sends is
+    // a cta_url (opens externally, never taps back into this webhook), so any
+    // buttonReplyPayload/listReply reaching here for a concierge merchant would be
+    // unexpected — handled as plain text only, same as any other message.
+    if (merchant.isGlobalConcierge) {
+      if (!textBody) return new Response("OK", { status: 200 });
+      const validatedText = textBody.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim().slice(0, 500); // eslint-disable-line no-control-regex
+      if (!validatedText) return new Response("OK", { status: 200 });
+      if (JAILBREAK_RE.some((re) => re.test(validatedText))) {
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          "I can only help you find and buy products from Shopify stores. What are you looking for?"
+        ).catch(() => null);
+        logGuardrail("guardrail_triggered", "jailbreak", from, shopDomain);
+        return new Response("OK", { status: 200 });
+      }
+
+      const session = await getSession(shopDomain, sessionId);
+      const isFirstMessage = session.conversation_history.length === 0;
+      const GREETING_RE = /^(hi|hello|hey|hola|namaste|नमस्ते|yo|sup|hiya|ola)\b/i;
+      if (GREETING_RE.test(validatedText) && isFirstMessage) {
+        const memory = await fetchWhatsAppMemory(shopDomain, from);
+        const greetingText = memory.recent_products?.length
+          ? `Hey! 👋 Last time you were looking at ${memory.recent_products[0]} — want to pick that back up, or find something new?`
+          : "Hey! 👋 I can help you find and buy products from any Shopify store. What are you looking for?";
+        await sendTextMessage(phoneNumberId, accessToken, from, greetingText).catch(() => null);
+        await appendMessage(shopDomain, sessionId, { role: "assistant", content: greetingText, timestamp: Date.now() });
+        return new Response("OK", { status: 200 });
+      }
+
+      await appendMessage(shopDomain, sessionId, { role: "user", content: validatedText, timestamp: Date.now() });
+      const result = await runGlobalConciergeAgent({
+        shopDomain, sessionId, customerPhone: from, agentMessage: validatedText, session,
+      });
+      const replyText = result.text?.trim() || "I'm not sure how to help with that. Could you rephrase?";
+      const filteredReply = (
+        UNSAFE_OUTPUT_RE.some((re) => re.test(replyText))
+          ? "I'm not able to help with that. What can I find for you today?"
+          : replyText
+      )
+        .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[removed]")
+        .replace(/(\+\d{1,3}[\s-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/g, "[removed]");
+
+      if (result.products?.length) {
+        await sendTextMessage(phoneNumberId, accessToken, from, filteredReply).catch(() => null);
+        for (const p of result.products.slice(0, 3)) {
+          await sendCrossStoreOffer(
+            phoneNumberId, accessToken, from,
+            { title: p.title, price: p.price, currency: p.currency, sellerName: p.seller_name, rating: p.rating, ratingCount: p.rating_count, imageUrl: p.image_url },
+            p.checkout_url,
+          ).catch((e: unknown) => console.error("[wa-webhook] sendCrossStoreOffer failed:", e));
+        }
+      } else {
+        await sendTextMessage(phoneNumberId, accessToken, from, filteredReply).catch(() => null);
+      }
+
+      await appendMessage(shopDomain, sessionId, { role: "assistant", content: filteredReply, timestamp: Date.now() });
+      const updatedSession = await getSession(shopDomain, sessionId);
+      await setSession(shopDomain, sessionId, updatedSession);
+      void prisma.conversation.upsert({
+        where: { shopDomain_sessionId: { shopDomain, sessionId } },
+        update: {
+          messages: updatedSession.conversation_history as unknown as import("@prisma/client").Prisma.InputJsonValue,
+          messageCount: updatedSession.conversation_history.length,
+          channel: "whatsapp",
+          lastMessageAt: new Date(),
+          ...(result.agent_trace?.length ? { agentTrace: result.agent_trace } : {}),
+          resolved: false,
+          resolvedAt: null,
+        },
+        create: {
+          shopDomain,
+          sessionId,
+          messages: updatedSession.conversation_history as unknown as import("@prisma/client").Prisma.InputJsonValue,
+          messageCount: updatedSession.conversation_history.length,
+          channel: "whatsapp",
+          firstUserMessage: validatedText.slice(0, 255),
+          ...(result.agent_trace?.length ? { agentTrace: result.agent_trace } : {}),
+        },
+      }).catch((err) => console.error("[wa-webhook] concierge conversation persist failed:", err));
+
       return new Response("OK", { status: 200 });
     }
 

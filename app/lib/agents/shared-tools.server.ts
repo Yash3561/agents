@@ -23,6 +23,8 @@ import type { CatalogProduct } from "~/lib/mcp/catalog.server";
 import { getCart } from "~/lib/mcp/cart.server";
 import { searchPoliciesAndFaqs } from "~/lib/mcp/policy.server";
 import { getOrder } from "~/lib/mcp/order.server";
+import { webSearch } from "~/lib/exa.server";
+import { searchGlobalCatalog } from "~/lib/mcp/global-catalog.server";
 
 /** Mutated by the shared tools' execute() calls; read by the caller after the LLM run completes. */
 export interface SharedToolsState {
@@ -171,6 +173,44 @@ export function createSharedTools(opts: {
     },
   });
 
+  // Exa neural search — lets the agent answer shopping-adjacent questions the
+  // store's own catalog can't: buying advice, comparisons, "is this brand good",
+  // sizing/fit guides, what's trending. Scoped to shopping research, not general
+  // knowledge — the system prompt's hard_restrictions still govern topic refusal.
+  const web_search = tool({
+    description:
+      "Search the live web for shopping research the store catalog can't answer: product comparisons, brand/product reviews, buying guides, sizing advice, or what's trending. Do NOT use this for questions about this store's own inventory, prices, or orders — use search_catalog/get_product/get_order for those.",
+    inputSchema: z.object({
+      query: z.string(),
+    }),
+    execute: async (input) => {
+      start("web_search");
+      return webSearch(input.query);
+    },
+  });
+
+  // Shopify's Global Catalog — every Shopify merchant, not just this store.
+  // Only for when search_catalog (this store) genuinely found nothing —
+  // never a first resort, and never presented as something this store sells.
+  // Results are other merchants' own listings with their own checkout link;
+  // there's no way to add them to this store's cart.
+  const search_other_stores = tool({
+    description:
+      "Search across ALL Shopify stores (not just this one) for a product this store's search_catalog genuinely didn't have. Only call this AFTER search_catalog returns empty or nothing relevant — never before, and never for a product this store already carries. Results are other merchants' own listings with their own checkout link, not this store's.",
+    inputSchema: z.object({
+      query: z.string(),
+    }),
+    execute: async (input) => {
+      start("search_other_stores");
+      try {
+        const results = await searchGlobalCatalog(input.query);
+        return { results, total: results.length };
+      } catch {
+        return { results: [], total: 0, error: "Cross-store search is temporarily unavailable." };
+      }
+    },
+  });
+
   return {
     tools: {
       search_catalog,
@@ -181,6 +221,8 @@ export function createSharedTools(opts: {
       get_order,
       set_intent,
       escalate_human,
+      web_search,
+      search_other_stores,
     },
     state,
   };

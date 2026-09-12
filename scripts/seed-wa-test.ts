@@ -34,15 +34,30 @@ if (!phoneNumberId || !rawToken || !phoneDisplay || !shopDomain) {
 
 const encrypted = encryptToken(rawToken);
 
-const merchant = await prisma.merchant.update({
+// upsert (not update) so this works standalone for a demo — doesn't require a
+// prior real Shopify OAuth install to have created the Merchant row first.
+// plan: "surge" (10k msgs/mo) so the free plan's 10/mo cap can't interrupt a
+// live demo or rehearsal.
+const merchant = await prisma.merchant.upsert({
   where: { shopDomain },
-  data: {
+  create: {
+    shopDomain,
+    plan: "surge",
+    onboardedAt: new Date(),
+    onboardingStep: 4,
     waPhoneNumberId: phoneNumberId,
     waAccessToken: encrypted,
     waPhone: phoneDisplay,
     waConnectedAt: new Date(),
   },
-  select: { shopDomain: true, waPhone: true, waPhoneNumberId: true },
+  update: {
+    plan: "surge",
+    waPhoneNumberId: phoneNumberId,
+    waAccessToken: encrypted,
+    waPhone: phoneDisplay,
+    waConnectedAt: new Date(),
+  },
+  select: { shopDomain: true, waPhone: true, waPhoneNumberId: true, plan: true },
 });
 
 console.log("✓ WhatsApp test credentials seeded:", merchant);
