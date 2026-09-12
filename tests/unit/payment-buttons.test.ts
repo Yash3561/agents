@@ -14,6 +14,7 @@ vi.mock("~/lib/whatsapp.server", () => ({
   verifyWebhookSignature: vi.fn(), decryptToken: vi.fn(), sendTextMessage: vi.fn(),
   sendReplyButtons: vi.fn(), sendCarousel: vi.fn(), sendVariantList: vi.fn(),
   sendCheckoutMessage: vi.fn(), sendListMessage: vi.fn(),
+  sendCrossStoreOffer: vi.fn(), sendGlobalCatalogCarouselTemplate: vi.fn(),
 }));
 vi.mock("~/lib/session.server", () => ({ getSession: vi.fn(), setSession: vi.fn(), appendMessage: vi.fn(), deleteSession: vi.fn() }));
 vi.mock("~/lib/agents/whatsapp.server", () => ({ runWhatsAppAgent: vi.fn() }));
@@ -23,7 +24,7 @@ vi.mock("~/lib/mcp/cart.server", () => ({ createCart: vi.fn(), updateCart: vi.fn
 vi.mock("~/lib/agents/memory.server", () => ({ fetchWhatsAppMemory: vi.fn(), updateWhatsAppMemory: vi.fn() }));
 vi.mock("~/redis.server", () => ({ redis: {} }));
 
-import { buildPaymentButtons } from "~/routes/api.whatsapp.webhook";
+import { buildPaymentButtons, chooseGlobalProductsForDisplay } from "~/routes/api.whatsapp.webhook";
 
 describe("buildPaymentButtons", () => {
   it("omits Cash on Delivery when the merchant hasn't enabled it", () => {
@@ -34,5 +35,24 @@ describe("buildPaymentButtons", () => {
   it("includes Cash on Delivery when the merchant has explicitly enabled it", () => {
     const buttons = buildPaymentButtons(true);
     expect(buttons.map((b) => b.id)).toEqual(["pay_prepaid", "pay_cod", "post_checkout_shop"]);
+  });
+});
+
+describe("chooseGlobalProductsForDisplay", () => {
+  const products = Array.from({ length: 5 }, (_, index) => ({
+    title: `Product ${index + 1}`,
+    price: `${index + 1}.00`,
+    currency: "USD",
+    url: "https://example.com/product",
+    checkout_url: `https://example.com/cart/${index + 1}`,
+    seller_name: "Seller",
+    seller_domain: "example.com",
+  }));
+
+  it("adapts the number of cards to the customer's request", () => {
+    expect(chooseGlobalProductsForDisplay("Which one is cheapest?", products)).toHaveLength(1);
+    expect(chooseGlobalProductsForDisplay("Show me two options", products)).toHaveLength(2);
+    expect(chooseGlobalProductsForDisplay("Show me more options", products)).toHaveLength(5);
+    expect(chooseGlobalProductsForDisplay("Find wireless headphones", products)).toHaveLength(3);
   });
 });

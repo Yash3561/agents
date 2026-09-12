@@ -224,7 +224,7 @@ export async function runGlobalConciergeAgent(opts: {
   // a dead-end text answer.
   const productTitles = (products ?? []).map((p) => `${p.title} (${p.seller_name})`);
   if (lastSearchQuery || productTitles.length > 0 || explicitPreferences.length > 0) {
-    void updateWhatsAppMemory(shopDomain, customerPhone, {
+    await updateWhatsAppMemory(shopDomain, customerPhone, {
       ...(lastSearchQuery ? { last_search: lastSearchQuery } : {}),
       ...(lastSearchQuery ? { recent_searches: [lastSearchQuery] } : {}),
       ...(explicitPreferences.length > 0 ? { preferences: explicitPreferences } : {}),

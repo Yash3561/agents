@@ -395,7 +395,7 @@ export async function updateWhatsAppMemory(
       ].slice(0, 8);
     }
     if (updates.last_results) {
-      merged.last_results = updates.last_results.slice(0, 3);
+      merged.last_results = updates.last_results.slice(0, 5);
     }
     await redis.setex(`wamem:${shopDomain}:${phone}`, WA_MEM_TTL, JSON.stringify(merged));
   } catch {

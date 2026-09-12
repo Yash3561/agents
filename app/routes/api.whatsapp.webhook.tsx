@@ -167,6 +167,28 @@ function buildGlobalFollowupButtons(
   return [{ id: "global_refine", title: "Refine search" }];
 }
 
+export function chooseGlobalProductsForDisplay(
+  customerMessage: string,
+  products: NonNullable<Awaited<ReturnType<typeof runGlobalConciergeAgent>>["products"]>,
+): typeof products {
+  const normalized = customerMessage.toLowerCase();
+  const numberWords: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+  };
+  const explicitCount = normalized.match(/\b(?:show|find|give|send|recommend|top)(?:\s+me)?\s+(one|two|three|four|five|\d{1,2})\b/);
+  if (explicitCount) {
+    const parsed = numberWords[explicitCount[1]] ?? Number.parseInt(explicitCount[1], 10);
+    if (Number.isFinite(parsed)) return products.slice(0, Math.max(1, Math.min(parsed, 5)));
+  }
+  if (/\b(?:which|what(?:'s| is) the)\b.*\b(?:cheapest|lowest|best|top|favorite)\b|\b(?:cheapest|lowest|best)\s+one\b/.test(normalized)) {
+    return products.slice(0, 1);
+  }
+  if (/\b(?:more|all|every|variety|options?)\b/.test(normalized) && /\b(?:show|give|find|see|like)\b/.test(normalized)) {
+    return products.slice(0, 5);
+  }
+  return products.slice(0, 3);
+}
+
 async function getShopCurrency(shopDomain: string): Promise<{ code: string; sym: string }> {
   const { redis } = await import("~/redis.server");
   const cached = await redis.get(`wa:currency:${shopDomain}`).catch(() => null);
@@ -332,16 +354,24 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response("OK", { status: 200 });
     }
 
-    // Per-phone rate limit — 20 msgs/hour prevents one user burning merchant's quota
-    const phoneRlKey = `wa:rl:${shopDomain}:${from}`;
-    const phoneCount = await redis.incr(phoneRlKey);
-    if (phoneCount === 1) await redis.expire(phoneRlKey, 3600);
-    if (phoneCount > 20) {
-      await sendTextMessage(phoneNumberId, accessToken, from,
-        "You've sent too many messages. Please try again in an hour."
-      ).catch(() => null);
-      logGuardrail("rate_limit_hit", "per_phone", from, shopDomain);
-      return new Response("OK", { status: 200 });
+    // Per-phone rate limit — 20 msgs/hour prevents one user burning merchant's
+    // quota. A local/demo Global Concierge run can opt out while testing a
+    // long conversation; production always keeps the guardrail enabled.
+    const demoRateLimitDisabled =
+      merchant.isGlobalConcierge &&
+      process.env.WA_DISABLE_RATE_LIMIT === "true" &&
+      process.env.NODE_ENV !== "production";
+    if (!demoRateLimitDisabled) {
+      const phoneRlKey = `wa:rl:${shopDomain}:${from}`;
+      const phoneCount = await redis.incr(phoneRlKey);
+      if (phoneCount === 1) await redis.expire(phoneRlKey, 3600);
+      if (phoneCount > 20) {
+        await sendTextMessage(phoneNumberId, accessToken, from,
+          "You've sent too many messages. Please try again in an hour."
+        ).catch(() => null);
+        logGuardrail("rate_limit_hit", "per_phone", from, shopDomain);
+        return new Response("OK", { status: 200 });
+      }
     }
 
     // Per-merchant billing gate — same plan limits as web widget
@@ -408,13 +438,14 @@ export async function action({ request }: ActionFunctionArgs) {
       // Keep the preceding text to a single handoff sentence; the agent's
       // normal product-by-product text would repeat every title, price, and
       // seller immediately above the same information in the cards.
-      const resultCount = Math.min(result.products?.length ?? 0, 3);
+      const productsToDisplay = chooseGlobalProductsForDisplay(validatedText, result.products ?? []);
+      const resultCount = productsToDisplay.length;
       const resultNoun = resultCount === 1 ? "option" : "options";
       const includedResearch = result.agent_trace?.includes("web_search");
       const carouselEligible = !!process.env.WA_MEDIA_CAROUSEL_TEMPLATE_NAME &&
-        (result.products?.length ?? 0) >= 2 &&
-        result.products?.slice(0, 10).every((product) => !!product.image_url);
-      const sentReply = result.products?.length
+        productsToDisplay.length >= 2 &&
+        productsToDisplay.every((product) => !!product.image_url);
+      const sentReply = productsToDisplay.length
         ? includedResearch
           ? /(?:not sure how to help|could(?:n't| not) find|having trouble right now|please try again)/i.test(filteredReply)
             ? `I used recent web research to guide the search. The cards below are real Shopify listings with the seller and price shown.`
@@ -422,16 +453,16 @@ export async function action({ request }: ActionFunctionArgs) {
           : `I found ${resultCount} ${resultNoun}. Tap a card below to view and buy directly from that seller.`
         : filteredReply;
 
-      if (result.products?.length) {
+      if (productsToDisplay.length) {
         let sentCarousel = false;
         if (carouselEligible) {
-          if (includedResearch) await sendTextMessage(phoneNumberId, accessToken, from, filteredReply).catch(() => null);
+          if (includedResearch) await sendTextMessage(phoneNumberId, accessToken, from, sentReply).catch(() => null);
           try {
             await sendGlobalCatalogCarouselTemplate(
               phoneNumberId,
               accessToken,
               from,
-              result.products.slice(0, 10).map((p) => ({
+              productsToDisplay.map((p) => ({
                 title: p.title,
                 price: p.price,
                 currency: p.currency,
@@ -449,7 +480,7 @@ export async function action({ request }: ActionFunctionArgs) {
         }
         if (!sentCarousel) {
           await sendTextMessage(phoneNumberId, accessToken, from, sentReply).catch(() => null);
-          for (const p of result.products.slice(0, 3)) {
+          for (const p of productsToDisplay) {
             await sendCrossStoreOffer(
               phoneNumberId, accessToken, from,
               { title: p.title, price: p.price, currency: p.currency, sellerName: p.seller_name, rating: p.rating, ratingCount: p.rating_count, imageUrl: p.image_url },
@@ -457,7 +488,7 @@ export async function action({ request }: ActionFunctionArgs) {
             ).catch((e: unknown) => console.error("[wa-webhook] sendCrossStoreOffer failed:", e));
           }
         }
-        const followupButtons = buildGlobalFollowupButtons(validatedText, result.products.length, result.agent_trace ?? []);
+        const followupButtons = buildGlobalFollowupButtons(validatedText, productsToDisplay.length, result.agent_trace ?? []);
         if (followupButtons.length > 0) {
           await sendReplyButtons(
             phoneNumberId,
@@ -473,8 +504,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
       await appendMessage(shopDomain, sessionId, { role: "assistant", content: sentReply, timestamp: Date.now() });
       const updatedSession = await getSession(shopDomain, sessionId);
-      if (result.products?.length) {
-        updatedSession.last_global_results = result.products.slice(0, 3).map((p) => ({
+      if (productsToDisplay.length) {
+        updatedSession.last_global_results = productsToDisplay.slice(0, 5).map((p) => ({
           title: p.title,
           sellerName: p.seller_name,
           price: p.price,
@@ -486,6 +517,21 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       if (result.last_search_query) updatedSession.last_global_query = result.last_search_query;
       await setSession(shopDomain, sessionId, updatedSession);
+      if (productsToDisplay.length) {
+        // Keep only visible cards as the next-turn referent so "the second
+        // one" never points at a hidden candidate returned by the model.
+        await updateWhatsAppMemory(shopDomain, from, {
+          last_results: productsToDisplay.map((p) => ({
+            title: p.title,
+            sellerName: p.seller_name,
+            price: p.price,
+            currency: p.currency,
+            ...(p.rating != null ? { rating: p.rating } : {}),
+            ...(p.image_url ? { imageUrl: p.image_url } : {}),
+            checkoutUrl: p.checkout_url,
+          })),
+        });
+      }
       await prisma.conversation.upsert({
         where: { shopDomain_sessionId: { shopDomain, sessionId } },
         update: {
